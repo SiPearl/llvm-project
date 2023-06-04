@@ -1,0 +1,45 @@
+default:
+  tags:
+    - shared
+variables:
+  # Used by the release job template:
+  DESCRIPTION_FILE: /dev/null
+  ARTIFACTS_DIR: ./deploy
+include:
+  # SiPearl-specific release job template:
+  - project: 'rhea/tools/gitlab_pipelines_templates'
+    ref: master
+    file:
+      - 'hidden_release_job.yml'
+
+stages:
+  - build
+  - test
+
+.build:
+  stage: build
+  only:
+    refs:
+      - branches
+  script:
+    - echo "Compiling the code..."
+    - /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake -S llvm -B build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE="$TYPE" -DLLVM_ENABLE_PROJECTS="$PROJECT" -DLLVM_BUILD_TOOLS="$TOOLS" -DCMAKE_INSTALL_PREFIX=./install -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="$ARCH" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
+    - make -j 10 -C build
+    - echo "Compile complete."
+
+x86-build:
+  extends: .build
+  variables:
+    ARCH: X86
+    CXX: /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/g++
+    CC: /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/gcc
+    PROJECT: clang
+    TOOLS: 0
+    TYPE: Release
+  only:
+    refs:
+      - branches
+  artifacts:
+    paths:
+      - build
+
