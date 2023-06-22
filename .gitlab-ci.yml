@@ -1,6 +1,4 @@
 default:
-  tags:
-    - shared
 variables:
   # Used by the release job template:
   DESCRIPTION_FILE: /dev/null
@@ -23,17 +21,22 @@ stages:
       - branches
   script:
     - echo "Compiling the code..."
-    - /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake -S llvm -B build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE="$TYPE" -DLLVM_ENABLE_PROJECTS="$PROJECT" -DLLVM_BUILD_TOOLS="$TOOLS" -DCMAKE_INSTALL_PREFIX=./install -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="$ARCH" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
+    - /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake -S llvm -B build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE="$TYPE" -DLLVM_ENABLE_PROJECTS="$PROJECT" -DLLVM_BUILD_TOOLS="$TOOLS" -DCMAKE_INSTALL_PREFIX=./install  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="$ARCH" -DLLVM_DEFAULT_TARGET_TRIPLE="$TARGET_TRIPLE" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCMAKE_C_COMPILER_LAUNCHER="$CCACHE" -DCMAKE_CXX_COMPILER_LAUNCHER="$CCACHE"
     - make -j 10 -C build
+    - make install -j 10 -C build 
     - echo "Compile complete."
 
-x86-build:
+x86-target-aarch64:
   extends: .build
+  tags:
+    - shared
   variables:
-    ARCH: X86
+    ARCH: AArch64
+    CC:  /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/gcc
+    CCACHE: /home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache
     CXX: /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/g++
-    CC: /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/gcc
     PROJECT: clang
+    TARGET_TRIPLE: aarch64-unknown-linux-gnu
     TOOLS: 0
     TYPE: Release
   only:
@@ -42,4 +45,31 @@ x86-build:
   artifacts:
     paths:
       - build
+      - install
 
+llvm-unit:
+  stage: test
+  tags:
+    - shared
+  script:
+    - echo "Running unit tests..."
+    - make check-llvm-unit -j 10 -C build
+    - echo "Unit test complete."
+
+llvm-regression:
+  stage: test
+  tags:
+    - shared
+  script:
+    - echo "Running regression tests..."
+    - make check-llvm -j 10 -C build
+    - echo "Regression tests complete."
+
+llvm-clang:
+  stage: test
+  tags:
+    - shared
+  script:
+    - echo "Running clang tests..."
+    - make  check-all -j 10 -C build
+    - echo "Clang tests complete."
