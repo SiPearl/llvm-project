@@ -5307,6 +5307,12 @@ manually enable vectorization or interleaving.
     ...
   }
 
+The safety checks for vectorization can be disabled with
+``vectorize(assume_safety)`` (which implicitly indicates ``vectorize(enable)``).
+Be aware that the generated code can be wrong and behave differently than the
+same loop without this hint because memory dependencies might not be respected.
+Only use this option if you know what you are doing.
+
 The vector width is specified by
 ``vectorize_width(_value_[, fixed|scalable])``, where _value_ is a positive
 integer and the type of vectorization can be specified with an optional
