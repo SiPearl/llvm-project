@@ -1,75 +1,75 @@
-default:
-variables:
-  # Used by the release job template:
-  DESCRIPTION_FILE: /dev/null
-  ARTIFACTS_DIR: ./deploy
 include:
-  # SiPearl-specific release job template:
-  - project: 'rhea/tools/gitlab_pipelines_templates'
-    ref: master
-    file:
-      - 'hidden_release_job.yml'
+  - local: '.ci/sipearl-ci-templates.yml'
 
-stages:
-  - build
-  - test
+# Reuseable rules for branch-specific pipelines:
 
-.build:
-  stage: build
-  only:
-    refs:
-      - branches
-  script:
-    - echo "Compiling the code..."
-    - /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake -S llvm -B build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE="$TYPE" -DLLVM_ENABLE_PROJECTS="$PROJECT" -DLLVM_BUILD_TOOLS="$TOOLS" -DCMAKE_INSTALL_PREFIX=./install  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="$ARCH" -DLLVM_DEFAULT_TARGET_TRIPLE="$TARGET_TRIPLE" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCMAKE_C_COMPILER_LAUNCHER="$CCACHE" -DCMAKE_CXX_COMPILER_LAUNCHER="$CCACHE"
-    - make -j 10 -C build
-    - make install -j 10 -C build 
-    - echo "Compile complete."
+# -----[ Jobs ]----- #
 
-x86-target-aarch64:
-  extends: .build
-  tags:
-    - shared
+check-formating:
+  extends: ['.check-formating']
+  allow_failure: true
+  rules:
+    - !reference [.no-wip, rules]
+
+build-llvm+clang-x86_64:
+  extends: ['.build-llvm', '.common-x86_64']
   variables:
-    ARCH: AArch64
-    CC:  /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/gcc
-    CCACHE: /home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache
-    CXX: /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/g++
-    PROJECT: clang
-    TARGET_TRIPLE: aarch64-unknown-linux-gnu
-    TOOLS: 0
-    TYPE: Release
-  only:
-    refs:
-      - branches
-  artifacts:
-    paths:
-      - build
-      - install
+    LLVM_PROJECTS: "clang"
+    LIT_TEST_DIRS: "test test/Unit"
+  rules:
+    - !reference [.no-fortran, rules]
+    - !reference [.no-wip, rules]
+    - when: always
 
-llvm-unit:
-  stage: test
-  tags:
-    - shared
-  script:
-    - echo "Running unit tests..."
-    - make check-llvm-unit -j 10 -C build
-    - echo "Unit test complete."
+# Because aarch64 unit-tests can be executed on x86 and we currently have way more x86 capacity,
+# the aarch64 build is only done if requested or needed for the llvm-test-suite.
 
-llvm-regression:
-  stage: test
-  tags:
-    - shared
-  script:
-    - echo "Running regression tests..."
-    - make check-llvm -j 10 -C build
-    - echo "Regression tests complete."
+build-llvm+clang-aarch64:
+  extends: ['.build-llvm', '.common-aarch64']
+  variables:
+    LLVM_PROJECTS: "clang"
+    LIT_TEST_DIRS: "test test/Unit"
+  rules:
+    - !reference [.no-fortran, rules]
+    - !reference [.no-wip, rules]
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
-llvm-clang:
-  stage: test
-  tags:
-    - shared
-  script:
-    - echo "Running clang tests..."
-    - make  check-all -j 10 -C build
-    - echo "Clang tests complete."
+# Build flang and it's tests only on the branches where people work on the fortran-frontend:
+
+build-llvm+flang-x86_64:
+  extends: ['.build-llvm', '.common-x86_64']
+  variables:
+    LLVM_PROJECTS: "clang;mlir;flang"
+    LIT_TEST_DIRS: "tools/mlir/test tools/mlir/test/Unit tools/flang/test tools/flang/test/Unit"
+  rules:
+    - !reference [.only-fortran, rules]
+    - !reference [.no-wip, rules]
+    - when: always
+
+# The external test-suite is only executed for merge-requests or when triggered via the web-UI.
+# The SIPEARL_TEST_TARGET variable can be used to only run it on aarch64 or only on x86_64.
+# TODO: On AArch64, run it using the ARM Instruction Emulator so that SVE can be enabled.
+# TODO: The llvm-test-suite also contains some fortran, so maybe add a fortran+clang build?
+
+llvm-test-suite-x86_64:
+  extends: ['.llvm-test-suite', '.common-x86_64']
+  needs: ['build-llvm+clang-x86_64']
+  rules:
+    - !reference [.no-fortran, rules]
+    - !reference [.no-wip, rules]
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "x86_64")
+  variables:
+    SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-x86_64'
+
+llvm-test-suite-aarch64:
+  extends: ['.llvm-test-suite', '.common-aarch64']
+  needs: ['build-llvm+clang-aarch64']
+  rules:
+    - !reference [.no-fortran, rules]
+    - !reference [.no-wip, rules]
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
+  variables:
+    SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-aarch64'
