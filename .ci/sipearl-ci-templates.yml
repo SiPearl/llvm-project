@@ -139,6 +139,7 @@ variables:
   script:
     - !reference [.slurm-ci-needs, script]
       # The sipearl-ci branch is needed here because of the SiPearl-CI.cmake file not available on the default branch.
+    - ${SLURM_SCRIPT_CMD} git clone -b sipearl-ci --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab01.int.sipearl.com/software/compilers/benchmarks/llvm-test-suite.git
     - |
       ${SLURM_SCRIPT_CMD} sh -c "if [ $(uname -p) == 'x86_64' ]; then source /toolsroot/lnx/scripts/SPLmanagetools.sh -set 'hpc_gcc-12.1.0-full+isl+binutils' ; fi ;
                                  ${CMAKE} -S ./llvm-test-suite -B ./llvm-test-suite-build -G 'Unix Makefiles' -C ./llvm-test-suite/cmake/caches/SiPearl-CI.cmake &&
