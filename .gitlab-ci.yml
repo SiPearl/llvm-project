@@ -30,6 +30,8 @@ build-llvm+clang-aarch64:
     LLVM_PROJECTS: "clang"
     LIT_TEST_DIRS: "test test/Unit"
   rules:
+  # Remove this when ampere come back to life
+    - when: never
     - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -67,6 +69,8 @@ llvm-test-suite-aarch64:
   extends: ['.llvm-test-suite', '.common-aarch64']
   needs: ['build-llvm+clang-aarch64']
   rules:
+  # Remove this when ampere come back to life
+    - when: never
     - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
