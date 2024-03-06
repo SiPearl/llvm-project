@@ -170,6 +170,14 @@ option specifies "``-``", then the output will also be sent to standard output.
   Enable extra scheduler statistics. This view collects and analyzes instruction
   issue events. This view is disabled by default.
 
+.. option:: -scheduling-info
+
+  Enable scheduling info view. It allows to compare scheduling info with
+  architecture documents and fix it with right LLVM Opcode Name.
+  It reports: uOps, Latency, Bypass Latency, Throughput, SideEffects,
+  LLVM OpcodeName, Resources and instruction plus comment from assembly
+  source file.
+
 .. option:: -retire-stats
 
   Enable extra retire control unit statistics. This view is disabled by default.
