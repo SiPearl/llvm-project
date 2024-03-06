@@ -98,8 +98,9 @@ variables:
   extends: ['.slurm-ci']
   script:
     - echo "---- BUILD LLVM ----"
+    # [JV] Replace MinSizeRel with Release mode as it is the one used on llvm Buildbot. One test in MLIR fails with MinSizeRel https://github.com/llvm/llvm-project/issues/73562
     - ${SLURM_SCRIPT_CMD} ${CMAKE} -S ./llvm -B ./build -G "Unix Makefiles"
-        -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX=/ -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17
         -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On
         -DCMAKE_C_COMPILER="${CC}" -DCMAKE_C_FLAGS="${CFLAGS}" -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE}" 
