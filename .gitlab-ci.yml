@@ -17,7 +17,6 @@ build-llvm+clang-x86_64:
     LLVM_PROJECTS: "clang"
     LIT_TEST_DIRS: "test test/Unit"
   rules:
-    - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - when: always
 
@@ -32,10 +31,9 @@ build-llvm+clang-aarch64:
   rules:
   # Remove this when ampere come back to life
     - when: never
-    - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
+    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
 # Build flang and it's tests only on the branches where people work on the fortran-frontend:
 
@@ -45,7 +43,6 @@ build-llvm+flang-x86_64:
     LLVM_PROJECTS: "clang;mlir;flang"
     LIT_TEST_DIRS: "tools/mlir/test tools/mlir/test/Unit tools/flang/test tools/flang/test/Unit"
   rules:
-    - !reference [.only-fortran, rules]
     - !reference [.no-wip, rules]
     - when: always
 
@@ -58,10 +55,9 @@ llvm-test-suite-x86_64:
   extends: ['.llvm-test-suite', '.common-x86_64']
   needs: ['build-llvm+clang-x86_64']
   rules:
-    - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "x86_64")
+    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "x86_64")
   variables:
     SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-x86_64'
 
@@ -71,9 +67,9 @@ llvm-test-suite-aarch64:
   rules:
   # Remove this when ampere come back to life
     - when: never
-    - !reference [.no-fortran, rules]
     - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web" && ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
+    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
+
   variables:
     SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-aarch64'
