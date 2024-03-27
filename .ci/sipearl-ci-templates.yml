@@ -3,37 +3,17 @@ include:
   - project: 'rhea/tools/gitlab_pipelines_templates'
     ref:     master
     file:    ['slurm-ci.yml']
-stages: ['build', 'test', 'e2e-test']
+stages: ['build', 'test', 'deploy', 'e2e-test']
 default:
   tags: ['oracle8']
 variables:
-  SLURM_CHDIR_ROOT:   /scratch/sipearl
   SLURM_CPU:          16
   SLURM_MEMORY:       50000 # MB
   SLURM_DURATION:     0-2:00:00
   SLURM_ARTIFACT_DIR: ./artifacts
   SLURM_INLOCAL:      "true"
-
-# -----[ Rules ]----- #
-
-.no-fortran:
-  rules:
-    - if: $CI_COMMIT_BRANCH =~ /^jgi-.*$/  || $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^jgi-.*$/ ||
-          $CI_COMMIT_BRANCH =~ /^flang.*$/ || $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^flang.*$/
-      when: never
-.only-fortran:
-  rules:
-    - if: $CI_COMMIT_BRANCH !~ /^jgi-.*$/  && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME !~ /^jgi-.*$/ &&
-          $CI_COMMIT_BRANCH !~ /^flang.*$/ && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME !~ /^flang.*$/
-      when: never
-.no-wip:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^.*-wip$/
-      when: never
-.only-wip:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH !~ /^.*-wip$/
-      when: never
+  DEFAULT_SLURM_ALLOC_TIMEOUT: ""
+  GIT_DEPTH:          30000
 
 # -----[ Templates ]----- #
 
@@ -59,66 +39,56 @@ variables:
   variables:
     CMAKE:         /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake
     CCACHE:        /home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache
-    CC:            /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/gcc
-    CXX:           /toolsroot/lnx/hpc/gcc-12.1.0-full+isl+binutils/bin/g++
-    LLVM_TOOLS:    /workspace02/sipearl/tools/x86/be2-01/internal/llvm/bin
-    TARGET_TRIPLE: x86_64-pc-linux-gnu
+    LLVM_TOOLS:    /workspace/sipearl/tools/x86_64/centos7.9-64/internal/opt/sipearl/clang/18.0.0/bin
 
 # A set of tools suited for ampere04 (Note that ampere03 and ampere04 run different OSes).
 .common-aarch64:
   variables:
     CMAKE:           /workspace02/sipearl/tools/aarch64/ampere04/usr/local/bin/cmake
     CCACHE:          /workspace02/sipearl/tools/aarch64/ampere04/usr/local/bin/ccache
-    CC:              gcc
-    CXX:             g++
     LLVM_TOOLS:      '' # Optional anyways, not needed.
-    TARGET_TRIPLE:   aarch64-linux-gnu
+    SLURM_CHDIR_ROOT:   /scratch/sipearl
     SLURM_PARTITION: sw1queue_aarch64_DC1
     SLURM_NODELIST:  ampere04
     PATH:            /usr/bin:$PATH
 
-# A template for building LLVM and running the LLVM lit tests. This is currently a single
-# stage because of missing tokens/permissions for the SLURM CI to be able to download
-# artifacts. TODO: Test use of JOB_CI_TOKEN here? I would even recommend keeping this as
-# a single job long-term because it causes less overhead.
 .build-llvm:
   stage: build
   variables:
     GIT_STRATEGY:  none
-    CFLAGS:        '-Os -pipe'
-    CXXFLAGS:      '-Os -pipe'
-    LLVM_PROJECTS: "clang" # NOTE: Middleend-/Backend-only branches do not even need clang, but the E2E tests do.
-    LLVM_TARGETS:  all
-    TARGET_TRIPLE: ''
-    LIT_TEST_DIRS: "test/" # A whitespace-seperated list of subdirectories to run LIT tests from.
+    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
+    TARGET_TRIPLE: x86_64-pc-linux-gnu
     CMAKE:         /bin/false # Has to be overwritten...
     CCACHE:        /bin/false
-    CC:            /bin/false
-    CXX:           /bin/false
   extends: ['.slurm-ci']
   script:
     - echo "---- BUILD LLVM ----"
     # [JV] Replace MinSizeRel with Release mode as it is the one used on llvm Buildbot. One test in MLIR fails with MinSizeRel https://github.com/llvm/llvm-project/issues/73562
-    - ${SLURM_SCRIPT_CMD} ${CMAKE} -S ./llvm -B ./build -G "Unix Makefiles"
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_INSTALL_PREFIX=/ -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17
-        -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On
-        -DCMAKE_C_COMPILER="${CC}" -DCMAKE_C_FLAGS="${CFLAGS}" -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE}" 
-        -DCMAKE_CXX_COMPILER="${CXX}" -DCMAKE_CXX_FLAGS="${CXXFLAGS}" -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE}"
-        -DLLVM_ENABLE_PROJECTS="${LLVM_PROJECTS}"
-        -DLLVM_TARGETS_TO_BUILD="${LLVM_TARGETS}"
-        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
-    - ${SLURM_SCRIPT_CMD} mkdir -p ./artifacts
-    - ${SLURM_SCRIPT_CMD} cp ./build/CMakeCache.txt ./artifacts/llvm-CMakeCache.txt
-    - ${SLURM_SCRIPT_CMD} make -C ./build -j ${SLURM_CPU}
-    - ${SLURM_SCRIPT_CMD} sh -c 'make -C ./build -j ${SLURM_CPU} DESTDIR=$(realpath ./artifacts/install) install install-clang'
-    - ${SLURM_SCRIPT_CMD} sh -c 'python3 -m pip install --user ./llvm/utils/lit || true'
-    - echo "---- TEST LLVM ----"
-    - |
-      for test_dir in ${LIT_TEST_DIRS} ; do
-        report_name="lit-report.${test_dir//\//_}.xml"
-        ${SLURM_SCRIPT_CMD} ./build/bin/llvm-lit -j ${SLURM_CPU} -s --xunit-xml-output ./artifacts/${report_name} ./build/${test_dir}
-      done
+    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang.sh
+  after_script:
+    - !reference [.slurm-ci-artifacts, after_script]
+    - !reference [.slurm-ci, after_script]
+  artifacts:
+    expire_in: 3 days
+    when: always
+    paths:
+      - ./artifacts/
+    reports:
+      junit: ./artifacts/lit-report.*.xml
+
+.build-llvm-aarch64:
+  stage: build
+  variables:
+    GIT_STRATEGY:  none
+    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
+    TARGET_TRIPLE: 'aarch64-linux-gnu'
+    CMAKE:         /bin/false # Has to be overwritten...
+    CCACHE:        /bin/false
+  extends: ['.slurm-ci']
+  script:
+    - echo "---- BUILD LLVM ----"
+    # [JV] Replace MinSizeRel with Release mode as it is the one used on llvm Buildbot. One test in MLIR fails with MinSizeRel https://github.com/llvm/llvm-project/issues/73562
+    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang-aarch64.sh
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
@@ -135,16 +105,10 @@ variables:
   variables:
     GIT_STRATEGY:  none
   extends: ['.slurm-ci']
-  allow_failure: true
   script:
     - !reference [.slurm-ci-needs, script]
-      # Get upstream_rebase_02_11_2024 branch because of the SiPearl-CI.cmake file not available on the default branch.
-    - ${SLURM_SCRIPT_CMD} git clone -b upstream_rebase_02_11_2024 --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab01.int.sipearl.com/software/compilers/benchmarks/llvm-test-suite.git
-    - |
-      ${SLURM_SCRIPT_CMD} sh -c "if [ $(uname -p) == 'x86_64' ]; then source /toolsroot/lnx/scripts/SPLmanagetools.sh -set 'hpc_gcc-12.1.0-full+isl+binutils' ; fi ;
-                                 ${CMAKE} -S ./llvm-test-suite -B ./llvm-test-suite-build -G 'Unix Makefiles' -C ./llvm-test-suite/cmake/caches/SiPearl-CI.cmake &&
-                                 make -C ./llvm-test-suite-build/ -j ${SLURM_CPU} &&
-                                 lit -j ${SLURM_CPU} -s --xunit-xml-output ./artifacts/test-suite-report.xml ./llvm-test-suite-build"
+    - echo "---- TEST LLVM ----"
+    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/test-clang.sh
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
@@ -153,3 +117,23 @@ variables:
     reports:
       junit: ['./artifacts/test-suite-report.xml']
 
+# A template to deploy LLVM
+.deploy-llvm:
+  stage: deploy
+  variables:
+    GIT_STRATEGY:  none
+    ARTIFACTS:	   "./artifacts"
+    SYSROOT: ""
+  extends: ['.slurm-ci']
+  script:
+    - !reference [.slurm-ci-needs, script]
+    - echo "---- Deploying LLVM ----"
+    - ${SLURM_SCRIPT_CMD}  .ci/deploy-clang.sh
+  after_script:
+    - !reference [.slurm-ci-artifacts, after_script]
+    - !reference [.slurm-ci, after_script]
+  artifacts:
+    expire_in: 3 days
+    when: always
+    paths:
+      - ${ARTIFACTS}

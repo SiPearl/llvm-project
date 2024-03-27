@@ -9,67 +9,102 @@ check-formating:
   extends: ['.check-formating']
   allow_failure: true
   rules:
-    - !reference [.no-wip, rules]
-
-build-llvm+clang-x86_64:
-  extends: ['.build-llvm', '.common-x86_64']
-  variables:
-    LLVM_PROJECTS: "clang"
-    LIT_TEST_DIRS: "test test/Unit"
-  rules:
-    - !reference [.no-wip, rules]
     - when: always
 
-# Because aarch64 unit-tests can be executed on x86 and we currently have way more x86 capacity,
-# the aarch64 build is only done if requested or needed for the llvm-test-suite.
+build-x86_64-llvm-aarch64:
+  extends: ['.build-llvm', '.common-x86_64']
+  variables:
+    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
+    LIT_TEST_DIRS: "test test/Unit"
+    TARGET_TRIPLE: 'aarch64-linux-gnu'
+    SYSROOT: "/workspace/sipearl/tools/sysroots/debian-11.0.0-arm64"
+  rules:
+    - when: always
 
-build-llvm+clang-aarch64:
+deploy-x86_64-llvm-aarch64:
+  extends:     ['.deploy-llvm', '.common-x86_64']
+  needs:       ['build-x86_64-llvm-aarch64']
+  variables:
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-aarch64'
+      TARGET_TRIPLE: 'aarch64-linux-gnu'
+      SYSROOT: "/workspace/sipearl/tools/sysroots/debian-11.0.0-arm64"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
+      when: always
+    - when: manual
+
+build-x86_64-llvm-x86_64:
+  extends: ['.build-llvm', '.common-x86_64']
+  variables:
+    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
+    LIT_TEST_DIRS: "test test/Unit"
+    TARGET_TRIPLE: x86_64-pc-linux-gnu
+    SYSROOT: "native"
+  rules:
+    - when: always
+
+llvm-x86_64-test-suite-x86_64:
+  extends: ['.llvm-test-suite', '.common-x86_64']
+  needs: ['build-x86_64-llvm-x86_64']
+  rules:
+    - when: always
+
+  variables:
+    SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64'
+    TARGET_TRIPLE: x86_64-pc-linux-gnu
+    SYSROOT: "native"
+
+deploy-x86_64-llvm-x86_64:
+  extends:     ['.deploy-llvm', '.common-x86_64']
+  needs:       ['llvm-x86_64-test-suite-x86_64']
+  variables:
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64'
+      TARGET_TRIPLE: x86_64-pc-linux-gnu
+      SYSROOT: "native"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
+      when: always
+    - when: manual
+
+build-aarch64-llvm-aarch64:
   extends: ['.build-llvm', '.common-aarch64']
   variables:
-    LLVM_PROJECTS: "clang"
+    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
+    TARGET_TRIPLE: 'aarch64-linux-gnu'
+    SYSROOT: 'native'
     LIT_TEST_DIRS: "test test/Unit"
   rules:
   # Remove this when ampere come back to life
     - when: never
-    - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
-# Build flang and it's tests only on the branches where people work on the fortran-frontend:
-
-build-llvm+flang-x86_64:
-  extends: ['.build-llvm', '.common-x86_64']
-  variables:
-    LLVM_PROJECTS: "clang;mlir;flang"
-    LIT_TEST_DIRS: "tools/mlir/test tools/mlir/test/Unit tools/flang/test tools/flang/test/Unit"
-  rules:
-    - !reference [.no-wip, rules]
-    - when: always
-
-# The external test-suite is only executed for merge-requests or when triggered via the web-UI.
-# The SIPEARL_TEST_TARGET variable can be used to only run it on aarch64 or only on x86_64.
-# TODO: On AArch64, run it using the ARM Instruction Emulator so that SVE can be enabled.
-# TODO: The llvm-test-suite also contains some fortran, so maybe add a fortran+clang build?
-
-llvm-test-suite-x86_64:
-  extends: ['.llvm-test-suite', '.common-x86_64']
-  needs: ['build-llvm+clang-x86_64']
-  rules:
-    - !reference [.no-wip, rules]
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "x86_64")
-  variables:
-    SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-x86_64'
-
-llvm-test-suite-aarch64:
+llvm-aarch64-test-suite-aarch64:
   extends: ['.llvm-test-suite', '.common-aarch64']
-  needs: ['build-llvm+clang-aarch64']
+  needs: ['build-aarch64-llvm-aarch64']
   rules:
   # Remove this when ampere come back to life
     - when: never
-    - !reference [.no-wip, rules]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
   variables:
-    SLURM_DEPENDENCIES_JOB: 'build-llvm+clang-aarch64'
+    SLURM_DEPENDENCIES_JOB: 'build-aarch64-llvm-aarch64'
+    TARGET_TRIPLE: 'aarch64-linux-gnu'
+    SYSROOT: 'native'
+
+deploy-aarch64-llvm-aarch64:
+  extends:     ['.deploy-llvm', '.common-aarch64']
+  needs:       ['llvm-aarch64-test-suite-aarch64']
+  variables:
+      SLURM_DEPENDENCIES_JOB: 'llvm-aarch64-test-suite-aarch64'
+      TARGET_TRIPLE: 'aarch64-linux-gnu'
+      SYSROOT: "native"
+  rules:
+    - when: never
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
+      when: always
+    - when: manual
+
