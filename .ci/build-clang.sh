@@ -29,11 +29,16 @@ CXX=$(which g++)
 
 sysroot_option=""
 linker=ld
-if [ ! -z "${sysroot}" -a "${sysroot}" != "native" ]; then
+if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     if [ ! -d "${sysroot}" ]; then
 	echo "ERROR: sysroot directory: ${sysroot} does not exist"
 	exit -1
     fi
+
+    if [ "${TARGET_TRIPLE}" = "aarch64-linux-gnu" ]; then
+	TARGETS_TO_BUILD="AArch64"
+    fi
+
     sysroot_option="-DDEFAULT_SYSROOT=${sysroot}"
     linker_name=${TARGET_TRIPLE}-ld
 fi
@@ -68,6 +73,38 @@ pushd ${build_directory}
   make -j ${jobs}
   make install install-clang
 popd
+
+if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+    build_decimal=${BUILD_DIR:-"build_decimal_${TARGET_TRIPLE}"}
+    build_decimal=$(createDir ${current_directory}/${build_decimal})
+
+    pushd ${build_decimal}
+      ${CMAKE} -S ../flang/lib/Decimal \
+	  -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release \
+	  -DCMAKE_INSTALL_PREFIX=${install_dir}  \
+	  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
+	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
+	  -DLLVM_ENABLE_ASSERTIONS=ON
+
+      make -j ${jobs}
+      make install
+    popd
+
+    build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}"}
+    build_runtime=$(createDir ${current_directory}/${build_runtime})
+
+    pushd ${build_runtime}
+      ${CMAKE} -S ../flang/runtime \
+	  -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release \
+	  -DCMAKE_INSTALL_PREFIX=${install_dir}  \
+	  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
+	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
+	  -DLLVM_ENABLE_ASSERTIONS=ON
+
+      make -j ${jobs}
+      make install
+    popd
+fi
 
 # Install of lit
 python3 -m pip install --user ./llvm/utils/lit
