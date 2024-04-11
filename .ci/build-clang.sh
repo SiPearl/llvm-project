@@ -75,34 +75,30 @@ pushd ${build_directory}
 popd
 
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
-    build_decimal=${BUILD_DIR:-"build_decimal_${TARGET_TRIPLE}"}
-    build_decimal=$(createDir ${current_directory}/${build_decimal})
-
-    pushd ${build_decimal}
-      ${CMAKE} -S ../flang/lib/Decimal \
-	  -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release \
-	  -DCMAKE_INSTALL_PREFIX=${install_dir}  \
-	  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
-	  -DLLVM_ENABLE_ASSERTIONS=ON
-
-      make -j ${jobs}
-      make install
-    popd
-
     build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}"}
     build_runtime=$(createDir ${current_directory}/${build_runtime})
 
     pushd ${build_runtime}
-      ${CMAKE} -S ../flang/runtime \
-	  -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release \
-	  -DCMAKE_INSTALL_PREFIX=${install_dir}  \
-	  -DCMAKE_CXX_STANDARD=17 -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
-	  -DLLVM_ENABLE_ASSERTIONS=ON
+      ${CMAKE} -S ../llvm -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
+        -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
+	-DCMAKE_C_COMPILER="${install_dir}/bin/clang" \
+	-DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
+        -DLLVM_ENABLE_PROJECTS="clang;mlir;flang" \
+        -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
+        -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
+        -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
+        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
 
-      make -j ${jobs}
-      make install
+      pushd tools/flang/lib/Decimal
+        make -j ${jobs}
+        make install
+      popd
+      pushd tools/flang/runtime
+        make -j ${jobs}
+        make install
+      popd
     popd
 fi
 

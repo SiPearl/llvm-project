@@ -6,7 +6,7 @@
 #
 #===------------------------------------------------------------------------===#
 
-add_flang_library(FortranDecimal
+add_flang_library(FortranDecimal STATIC
   binary-to-decimal.cpp
   decimal-to-binary.cpp
 )
