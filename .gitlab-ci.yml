@@ -14,7 +14,6 @@ check-formating:
 build-x86_64-llvm-aarch64:
   extends: ['.build-llvm', '.common-x86_64']
   variables:
-    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
     LIT_TEST_DIRS: "test test/Unit"
     TARGET_TRIPLE: 'aarch64-linux-gnu'
     SYSROOT: "/workspace/sipearl/tools/sysroots/debian-11.0.0-arm64"
@@ -36,7 +35,6 @@ deploy-x86_64-llvm-aarch64:
 build-x86_64-llvm-x86_64:
   extends: ['.build-llvm', '.common-x86_64']
   variables:
-    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
     LIT_TEST_DIRS: "test test/Unit"
     TARGET_TRIPLE: x86_64-pc-linux-gnu
     SYSROOT: "native"
@@ -69,7 +67,6 @@ deploy-x86_64-llvm-x86_64:
 build-aarch64-llvm-aarch64:
   extends: ['.build-llvm', '.common-aarch64']
   variables:
-    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
     TARGET_TRIPLE: 'aarch64-linux-gnu'
     SYSROOT: 'native'
     LIT_TEST_DIRS: "test test/Unit"

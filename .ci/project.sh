@@ -20,8 +20,6 @@ SW_VERSION=$(get_version "llvmorg-" "${sysroot}")
 SW_INSTALL_SUFFIX=${SW_INSTALL_SUFFIX:-"${SW_NAME,,}/${SW_VERSION}"}
 echo "Version: ${SW_VERSION}"
 
-LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;openmp;clang-tools-extra"}
-
 CMAKE=${CMAKE:-/toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake}
 CCACHE=${CCACHE:-/home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache}
 

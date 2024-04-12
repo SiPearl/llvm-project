@@ -56,6 +56,9 @@ if [ ! -f ${BINUTILS_INCDIR}/plugin-api.h ]; then
     exit -1
 fi
 
+LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
+LLVM_RUNTIMES=${LLVM_RUNTIMES:-"compiler-rt;openmp"}
+
 pushd ${build_directory}
   ${CMAKE} -S ../llvm -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -64,6 +67,8 @@ pushd ${build_directory}
         -DCMAKE_C_COMPILER="${CC}" -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE}" \
         -DCMAKE_CXX_COMPILER="${CXX}" -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE}" \
         -DLLVM_ENABLE_PROJECTS="${LLVM_PROJECTS}" \
+        -DLLVM_ENABLE_RUNTIMES="${LLVM_RUNTIMES}" \
+        -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
         -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
@@ -79,17 +84,17 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     build_runtime=$(createDir ${current_directory}/${build_runtime})
 
     pushd ${build_runtime}
-      ${CMAKE} -S ../llvm -G "Unix Makefiles" \
+      ${CMAKE} --trace-expand -S ../llvm -G "Unix Makefiles" \
           -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
-        -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
-	-DCMAKE_C_COMPILER="${install_dir}/bin/clang" \
-	-DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
-        -DLLVM_ENABLE_PROJECTS="clang;mlir;flang" \
-        -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-        -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-        -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
-        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
+          -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
+          -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
+	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" \
+	  -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
+          -DLLVM_ENABLE_PROJECTS="clang;mlir;flang" \
+          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
+          -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
+          -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
+          -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> logs.txt
 
       pushd tools/flang/lib/Decimal
         make -j ${jobs}

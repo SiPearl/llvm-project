@@ -56,7 +56,6 @@ variables:
   stage: build
   variables:
     GIT_STRATEGY:  none
-    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
     TARGET_TRIPLE: x86_64-pc-linux-gnu
     CMAKE:         /bin/false # Has to be overwritten...
     CCACHE:        /bin/false
@@ -80,7 +79,6 @@ variables:
   stage: build
   variables:
     GIT_STRATEGY:  none
-    LLVM_PROJECTS: "clang;mlir;flang;openmp;clang-tools-extra"
     TARGET_TRIPLE: 'aarch64-linux-gnu'
     CMAKE:         /bin/false # Has to be overwritten...
     CCACHE:        /bin/false
