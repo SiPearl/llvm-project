@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 
-# Define sysroot before project.sh to set SW_VERSION
-sysroot=${SYSROOT:-native}
+# TODO: Have a module file for cmake and specify the version in a revfile?
+# This needs to be done *before* set -eux because the script contains unbound
+# variables.
+source /toolsroot/lnx/scripts/SPLmanagetools.sh -set "cad_cmake-3.21.4-linux-x86_64"
+
 . $(dirname "$0")/project.sh
 
 set -eux
 
-TARGET_TRIPLE=${TARGET_TRIPLE:-'x86_64-pc-linux-gnu'}
-
 build_directory=${BUILD_DIR:-"llvm-test-suite-build-${TARGET_TRIPLE}"}
 build_directory=$(createDir ${current_directory}/${build_directory})
-
-CMAKE=${CMAKE:-/toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake}
 
 echo "Test LLVM in ${build_directory}"
 
@@ -30,7 +29,7 @@ if [ "${TARGET_TRIPLE}" = "aarch64-linux-gnu" ]; then
     mcpu_flags="-DOPTFLAGS=-mcpu=neoverse-v1"
 fi
 
-${CMAKE} -S ${current_dir}/llvm-test-suite -B ${build_directory} -G 'Unix Makefiles' -DLLVM_INSTALL_DIR=${install_dir} ${mcpu_flags} -C ${current_dir}/llvm-test-suite/cmake/caches/SiPearl-CI.cmake
+cmake -S ${current_dir}/llvm-test-suite -B ${build_directory} -G 'Unix Makefiles' -DLLVM_INSTALL_DIR=${install_dir} ${mcpu_flags} -C ${current_dir}/llvm-test-suite/cmake/caches/SiPearl-CI.cmake
 make -C ${build_directory} -j ${jobs} 
 python3 -m pip install --user ./llvm/utils/lit
 lit -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/test-suite-report.xml ${build_directory}

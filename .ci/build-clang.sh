@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
-# Define sysroot before project.sh to set SW_VERSION
-sysroot=${SYSROOT:-native}
+# TODO: Have a module file for cmake and specify the version in a revfile?
+# This needs to be done *before* set -eux because the script contains unbound
+# variables.
+source /toolsroot/lnx/scripts/SPLmanagetools.sh -set "cad_cmake-3.21.4-linux-x86_64"
+
 . $(dirname "$0")/project.sh
 
 set -eux
@@ -10,9 +13,6 @@ set -eux
 artifacts_dir=$(createDir ${artifacts_dir})
 install_prefix=$(createDir ${install_prefix})
 install_dir=$(createDir ${install_dir})
-
-TARGETS_TO_BUILD=${TARGETS_TO_BUILD:-'all'}
-TARGET_TRIPLE=${TARGET_TRIPLE:-'x86_64-pc-linux-gnu'}
 
 build_directory=${BUILD_DIR:-"build_llvm_${TARGET_TRIPLE}"}
 build_directory=$(createDir ${current_directory}/${build_directory})
@@ -27,7 +27,9 @@ module_load gbu-${TARGET_TRIPLE}
 CC=$(which gcc)
 CXX=$(which g++)
 
+sysroot=${SYSROOT:?}
 sysroot_option=""
+omp_option=""
 linker=ld
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     if [ ! -d "${sysroot}" ]; then
@@ -35,11 +37,10 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 	exit -1
     fi
 
-    if [ "${TARGET_TRIPLE}" = "aarch64-linux-gnu" ]; then
-	TARGETS_TO_BUILD="AArch64"
-    fi
-
     sysroot_option="-DDEFAULT_SYSROOT=${sysroot}"
+    omp_option=" -DLIBOMP_LDFLAGS=-Wl,-rpath-link=${sysroot}/lib/${TARGET_TRIPLE}"
+    omp_option+=" -DLIBOMP_OMPD_SUPPORT=OFF"
+    omp_option+=" -DLIBOMP_HAVE_SHM_OPEN_WITH_LRT=TRUE"
     linker_name=${TARGET_TRIPLE}-ld
 fi
 
@@ -57,10 +58,10 @@ if [ ! -f ${BINUTILS_INCDIR}/plugin-api.h ]; then
 fi
 
 LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
-LLVM_RUNTIMES=${LLVM_RUNTIMES:-"compiler-rt;openmp"}
+LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
 
 pushd ${build_directory}
-  ${CMAKE} -S ../llvm -G "Unix Makefiles" \
+  cmake -S ../llvm -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
         -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
@@ -71,7 +72,7 @@ pushd ${build_directory}
         -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-        -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
+        -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
@@ -84,7 +85,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     build_runtime=$(createDir ${current_directory}/${build_runtime})
 
     pushd ${build_runtime}
-      ${CMAKE} --trace-expand -S ../llvm -G "Unix Makefiles" \
+      cmake -S ../llvm -G "Unix Makefiles" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
           -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
@@ -94,7 +95,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
           -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
           -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
           -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
-          -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> logs.txt
+          -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
 
       pushd tools/flang/lib/Decimal
         make -j ${jobs}

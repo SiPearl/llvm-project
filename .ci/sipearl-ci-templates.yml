@@ -5,7 +5,7 @@ include:
     file:    ['slurm-ci.yml']
 stages: ['build', 'test', 'deploy', 'e2e-test']
 default:
-  tags: ['oracle8']
+  tags: ['sw']
 variables:
   SLURM_CPU:          16
   SLURM_MEMORY:       50000 # MB
@@ -24,10 +24,23 @@ variables:
 .check-formating:
   stage: build
   extends: ['.common-x86_64']
-  tags: ['oracle8', 'local']
+  tags: ['sw']
   script:
-    - export NEW_COMMIT="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-$(git rev-parse HEAD)}"
-    - export BASE_COMMIT="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-${CI_COMMIT_BEFORE_SHA:-$(git rev-parse HEAD~1)}}"
+    - export
+    - |
+      set -eux
+      if [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-""}" ]; then
+         export NEW_COMMIT=${CI_COMMIT_SHA}
+      else
+         export NEW_COMMIT="$(git rev-parse HEAD)"
+      fi
+    - |
+      set -eux
+      if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-""}" ]; then
+         export BASE_COMMIT=${CI_MERGE_REQUEST_DIFF_BASE_SHA}
+      else
+         export BASE_COMMIT="${CI_COMMIT_BEFORE_SHA:-$(git rev-parse HEAD~1)}"
+      fi
     - '[ -n "${NEW_COMMIT}" ] && [ -n "${BASE_COMMIT}" ] && ${LLVM_TOOLS}/git-clang-format --diff ${BASE_COMMIT} ${NEW_COMMIT} > ./clang-format.diff'
   artifacts:
     paths: ['./clang-format.diff']
@@ -56,37 +69,12 @@ variables:
   stage: build
   variables:
     GIT_STRATEGY:  none
-    TARGET_TRIPLE: x86_64-pc-linux-gnu
     CMAKE:         /bin/false # Has to be overwritten...
     CCACHE:        /bin/false
   extends: ['.slurm-ci']
   script:
     - echo "---- BUILD LLVM ----"
-    # [JV] Replace MinSizeRel with Release mode as it is the one used on llvm Buildbot. One test in MLIR fails with MinSizeRel https://github.com/llvm/llvm-project/issues/73562
-    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang.sh
-  after_script:
-    - !reference [.slurm-ci-artifacts, after_script]
-    - !reference [.slurm-ci, after_script]
-  artifacts:
-    expire_in: 3 days
-    when: always
-    paths:
-      - ./artifacts/
-    reports:
-      junit: ./artifacts/lit-report.*.xml
-
-.build-llvm-aarch64:
-  stage: build
-  variables:
-    GIT_STRATEGY:  none
-    TARGET_TRIPLE: 'aarch64-linux-gnu'
-    CMAKE:         /bin/false # Has to be overwritten...
-    CCACHE:        /bin/false
-  extends: ['.slurm-ci']
-  script:
-    - echo "---- BUILD LLVM ----"
-    # [JV] Replace MinSizeRel with Release mode as it is the one used on llvm Buildbot. One test in MLIR fails with MinSizeRel https://github.com/llvm/llvm-project/issues/73562
-    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang-aarch64.sh
+    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang.sh ${TARGET}
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
@@ -106,7 +94,7 @@ variables:
   script:
     - !reference [.slurm-ci-needs, script]
     - echo "---- TEST LLVM ----"
-    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/test-clang.sh
+    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/test-clang.sh ${TARGET}
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
@@ -121,12 +109,11 @@ variables:
   variables:
     GIT_STRATEGY:  none
     ARTIFACTS:	   "./artifacts"
-    SYSROOT: ""
   extends: ['.slurm-ci']
   script:
     - !reference [.slurm-ci-needs, script]
     - echo "---- Deploying LLVM ----"
-    - ${SLURM_SCRIPT_CMD}  .ci/deploy-clang.sh
+    - ${SLURM_SCRIPT_CMD}  .ci/deploy-clang.sh ${TARGET}
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]

@@ -4,18 +4,16 @@ set -eux
 
 . $(dirname "$0")/checkout_aci.sh
 
-. ${ACI}/module.sh
-. ${ACI}/version.sh
-. ${ACI}/fileutils.sh
-. ${ACI}/deploy.sh
-. ${ACI}/checkout.sh
+. ${ACI}/sipearl_aci.env
+
+. $(dirname "$0")/options.sh
 
 SW_NAME=LLVM
 SW_LONG_NAME="LLVM Compiler Infrastructure"
 SW_CATEGORY="compilers"
 SW_DESCRIPTION="LLVM, providing clang, clang++ and flang-new from LLVM Compiler Infrastructure"
 
-sysroot=${sysroot:-""}
+sysroot=${SYSROOT:-native}
 SW_VERSION=$(get_version "llvmorg-" "${sysroot}")
 SW_INSTALL_SUFFIX=${SW_INSTALL_SUFFIX:-"${SW_NAME,,}/${SW_VERSION}"}
 echo "Version: ${SW_VERSION}"

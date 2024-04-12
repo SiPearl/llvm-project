@@ -2,8 +2,6 @@
 
 set -eux
 
-# Define sysroot before project.sh to set SW_VERSION
-sysroot=${SYSROOT:-""}
 . $(dirname "$0")/project.sh
 
 echo "Deploying LLVM"
