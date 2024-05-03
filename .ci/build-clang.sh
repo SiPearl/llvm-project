@@ -61,9 +61,9 @@ LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
 LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
 
 pushd ${build_directory}
-  cmake -S ../llvm -G "Unix Makefiles" \
+  cmake --trace-expand -S ../llvm -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
+        -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
         -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
         -DCMAKE_C_COMPILER="${CC}" -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE}" \
         -DCMAKE_CXX_COMPILER="${CXX}" -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE}" \
@@ -73,11 +73,11 @@ pushd ${build_directory}
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
         -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} \
-        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
+        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
   make -j ${jobs}
-  make install install-clang
+  make DESTDIR=${install_dir} install install-clang
 popd
 
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
@@ -87,10 +87,10 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     pushd ${build_runtime}
       cmake -S ../llvm -G "Unix Makefiles" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX=${install_dir} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
+          -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
           -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
-	  -DCMAKE_C_COMPILER="${install_dir}/bin/clang" \
-	  -DCMAKE_CXX_COMPILER="${install_dir}/bin/clang++" \
+	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
+	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
           -DLLVM_ENABLE_PROJECTS="clang;mlir;flang" \
           -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
           -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
@@ -99,11 +99,11 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 
       pushd tools/flang/lib/Decimal
         make -j ${jobs}
-        make install
+        make DESTDIR=${install_dir} install
       popd
       pushd tools/flang/runtime
         make -j ${jobs}
-        make install
+        make DESTDIR=${install_dir} install
       popd
     popd
 fi
@@ -119,7 +119,7 @@ for test_dir in ${LIT_TEST_DIRS} ; do
     ${build_directory}/bin/llvm-lit -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/${report_name} ${build_directory}/${test_dir}
 done
 
-generate_modulefile "${install_prefix}/${package_prefix}/modulefiles/${SW_NAME,,}/${SW_VERSION}" \
+generate_modulefile "${install_prefix}/modulefiles/${SW_NAME,,}/${SW_VERSION}" \
     "${SW_NAME}" "${SW_LONG_NAME}" "${SW_VERSION}" "${SW_CATEGORY}" \
     "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}"
 

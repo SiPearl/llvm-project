@@ -29,7 +29,7 @@ if [ "${TARGET_TRIPLE}" = "aarch64-linux-gnu" ]; then
     mcpu_flags="-DOPTFLAGS=-mcpu=neoverse-v1"
 fi
 
-cmake -S ${current_dir}/llvm-test-suite -B ${build_directory} -G 'Unix Makefiles' -DLLVM_INSTALL_DIR=${install_dir} ${mcpu_flags} -C ${current_dir}/llvm-test-suite/cmake/caches/SiPearl-CI.cmake
+cmake -S ${current_dir}/llvm-test-suite -B ${build_directory} -G 'Unix Makefiles' -DLLVM_INSTALL_DIR=${install_dir}${package_prefix} ${mcpu_flags} -C ${current_dir}/llvm-test-suite/cmake/caches/SiPearl-CI.cmake
 make -C ${build_directory} -j ${jobs} 
 python3 -m pip install --user ./llvm/utils/lit
 lit -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/test-suite-report.xml ${build_directory}

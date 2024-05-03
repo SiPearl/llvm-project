@@ -7,4 +7,4 @@ set -eux
 echo "Deploying LLVM"
 echo "Install path: ${install_dir}"
 
-deploy "${install_prefix}/${package_prefix}" "${SW_INSTALL_SUFFIX}"
+deploy "${install_prefix}" "${SW_INSTALL_SUFFIX}"
