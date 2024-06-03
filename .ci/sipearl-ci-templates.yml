@@ -41,7 +41,7 @@ variables:
       else
          export BASE_COMMIT="${CI_COMMIT_BEFORE_SHA:-$(git rev-parse HEAD~1)}"
       fi
-    - '[ -n "${NEW_COMMIT}" ] && [ -n "${BASE_COMMIT}" ] && ${LLVM_TOOLS}/git-clang-format --diff ${BASE_COMMIT} ${NEW_COMMIT} > ./clang-format.diff'
+    - .ci/check_formating.sh "${BASE_COMMIT}" "${NEW_COMMIT}"  "${LLVM_TOOLS}/git-clang-format"
   artifacts:
     paths: ['./clang-format.diff']
     expire_in: 2 days
