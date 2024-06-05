@@ -3,6 +3,7 @@
 set -eu
 
 . $(dirname "$0")/checkout_aci.sh
+. ${ACI}/error.sh
 
 . ${ACI}/gitlab.sh
 

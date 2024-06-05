@@ -13,7 +13,7 @@ if [ -n "${1:-""}" ]; then
 		export SYSROOT=/workspace/sipearl/tools/sysroots/debian-11.0.0-arm64
 		export TARGETS_TO_BUILD=AArch64
 	    fi
-	    export TARGET_TRIPLE=aarch64-linux-gnu
+	    export TARGET_TRIPLE=aarch64-unknown-linux-gnu
 	    ;;
 	x86_64)
 	    if [ "${host}" = "x86_64" ]; then
@@ -36,7 +36,7 @@ else
     export TARGETS_TO_BUILD=all
     case ${host} in
 	aarch64)
-	    export TARGET_TRIPLE=aarch64-linux-gnu
+	    export TARGET_TRIPLE=aarch64-unknown-linux-gnu
 	    ;;
 	x86_64)
 	    export TARGET_TRIPLE=x86_64-pc-linux-gnu

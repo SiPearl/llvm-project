@@ -24,7 +24,7 @@ CCACHE=${CCACHE:-/home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/b
 current_directory=$(pwd)
 artifacts=${ARTIFACTS:-"./artifacts"}
 install_prefix=${INSTALL_PREFIX:-"install_llvm"}
-jobs=${JOBS:-20}
+jobs=${JOBS:-40}
 
 artifacts_dir=${current_directory}/${artifacts}
 install_prefix=${artifacts_dir}/${install_prefix}

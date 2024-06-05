@@ -119,8 +119,14 @@ for test_dir in ${LIT_TEST_DIRS} ; do
     ${build_directory}/bin/llvm-lit -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/${report_name} ${build_directory}/${test_dir}
 done
 
+plugin_file="${script_dir}/module_plugin.sh"
+rm -f ${plugin_file}
+
+echo "#!/usr/bin/env bash" > ${plugin_file}
+echo "sw_plugin_prepend_path[LD_LIBRARY_PATH]='\$package_prefix/lib:\$package_prefix/lib/${TARGET_TRIPLE}'" > ${plugin_file}
+
 generate_modulefile "${install_prefix}/modulefiles/${SW_NAME,,}/${SW_VERSION}" \
     "${SW_NAME}" "${SW_LONG_NAME}" "${SW_VERSION}" "${SW_CATEGORY}" \
-    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}"
+    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}" "${plugin_file}"
 
 echo "Size of artifacts: $(du -h -d 0 ./artifacts)"
