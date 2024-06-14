@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopSimplifyCFG.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
@@ -22,9 +23,17 @@
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/InitializePasses.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -36,6 +45,8 @@ using namespace llvm;
 
 static cl::opt<bool> EnableTermFolding("enable-loop-simplifycfg-term-folding",
                                        cl::init(true));
+static cl::opt<bool> EnableInnerCondFolding(
+    "enable-loop-simplifycfg-inner-cond-into-latch-folding", cl::init(true));
 
 STATISTIC(NumTerminatorsFolded,
           "Number of terminators folded to unconditional branches");
@@ -43,6 +54,8 @@ STATISTIC(NumLoopBlocksDeleted,
           "Number of loop blocks deleted");
 STATISTIC(NumLoopExitsDeleted,
           "Number of loop exiting edges deleted");
+STATISTIC(NumInnerCondsFoldedIntoLatchCond,
+          "Number of inner conditions folded into latch condition");
 
 /// If \p BB is a switch or a conditional branch, but only one of its successors
 /// can be reached from this block in runtime, return this successor. Otherwise,
@@ -691,6 +704,193 @@ static bool mergeBlocksIntoPredecessors(Loop &L, DominatorTree &DT,
   return Changed;
 }
 
+// Simplify loops with IR representing the following C like loop:
+//   bool done = ...;
+//   while (...) {
+//     if (!done) {
+//       ...
+//       done = f(...);
+//     }
+//   }
+// into:
+//   bool done = ...;
+//   while (... && !done) {
+//     if (!done) {
+//       ...
+//       done = f(...);
+//     }
+//   }
+//
+// If done is initialized with a constant, the conditional branch in the
+// loop (to the if-body) is simplified as well. The jump-threading pass
+// is also capable of this and might do some more folding after instcombine
+// and so on simplified the loop even more.
+static bool combineInnerIfIntoLoopCondition(Loop &L, DominatorTree &DT,
+                                            LoopInfo &LI, ScalarEvolution &SE) {
+  // Check if the loop has a basic-block structure that this
+  // simplification can treat: A header and a single latch that is
+  // also the exiting block.
+  BasicBlock *Header = L.getHeader();
+  BasicBlock *Latch = L.getLoopLatch();
+  if (!Latch || Header == Latch || L.getExitingBlock() != Latch ||
+      !L.getLoopPredecessor())
+    return false;
+
+  // If the latch is the latch of more than one loop, this transformation
+  // does not work. LLVM loop canonicalization will undo this situation
+  // because this means the loop's exit can't be dedicated, and we could
+  // trigger it here, but the resulting CFG would very likely still be
+  // unsuitable.
+  for (BasicBlock *BB : successors(Latch))
+    if (BB != L.getExitBlock() && LI.getLoopFor(BB) != &L)
+      return false;
+
+  BranchInst *HeaderBr = dyn_cast<BranchInst>(Header->getTerminator());
+  BranchInst *LatchBr = dyn_cast<BranchInst>(Latch->getTerminator());
+  if (!HeaderBr || !HeaderBr->isConditional() || !LatchBr ||
+      !LatchBr->isConditional() ||
+      find(HeaderBr->successors(), Latch) == HeaderBr->successors().end())
+    return false;
+
+  auto *LatchCond = dyn_cast<Instruction>(LatchBr->getCondition());
+  if (!LatchCond || !DT.dominates(Latch, LatchCond->getParent()))
+    return false;
+
+  bool EnterBodyIfTrue = HeaderBr->getSuccessor(0) != Latch;
+  bool ContinueIfTrue = LatchBr->getSuccessor(0) == Header;
+  BasicBlock *Body = HeaderBr->getSuccessor(EnterBodyIfTrue ? 0 : 1);
+
+  // Return true if the given basic block can be executed less
+  // frequently without changing program semantics (i.e. any
+  // instruction has side-effects). If a loop live-out value
+  // changes depending on the number of iterations (and not
+  // just on the execution of the body block), this simplifcation
+  // is impossible!
+  auto IsAllowedLiveOut = [&](PHINode *Phi) -> bool {
+    if (Phi->getParent() != Latch)
+      return false;
+
+    // Only allow live-out values where, in case the Body block is not
+    // executed, the (unchanged) value itself is passed. If the value
+    // incoming from the header is a PHI that is not defined in the
+    // header, it cannot be a feedthrough and therefore not be allowed
+    // to be live-out.
+    auto *FeedthroughValue =
+        dyn_cast<PHINode>(Phi->getIncomingValueForBlock(Header));
+    if (!FeedthroughValue || FeedthroughValue->getParent() != Header ||
+        FeedthroughValue->getIncomingValueForBlock(Latch) != Phi)
+      return false;
+
+    return true;
+  };
+  auto CanSkipExecutions = [&](BasicBlock *BB) -> bool {
+    for (Instruction &I : *BB) {
+      if (I.isTerminator())
+        continue;
+
+      if (I.isVolatile() || I.mayHaveSideEffects() || I.mayReadOrWriteMemory())
+        return false;
+
+      bool HasLiveOuts = any_of(I.users(), [&](User *U) {
+        auto *UI = dyn_cast<Instruction>(U);
+        return UI && !L.contains(UI);
+      });
+      if (HasLiveOuts &&
+          !(isa<PHINode>(&I) && IsAllowedLiveOut(cast<PHINode>(&I))))
+        return false;
+    }
+
+    return true;
+  };
+  if (Body == Latch || !CanSkipExecutions(Header) || !CanSkipExecutions(Latch))
+    return false;
+
+  // Now it's time to check the condition of the HeaderBr branch: It needs
+  // to be a PHI where the backedge value is a PHI itself, and that PHI
+  // in the latch only changes value depending on the body block.
+  bool Phi1Inverted = false;
+  auto *Phi1 = dyn_cast<PHINode>(HeaderBr->getCondition());
+  if (!Phi1) {
+    // clang/LLVM can generate code where the condition is a compare-with-zero
+    // (to get from a i32/i64/... to i1). Because this is so common, we treat
+    // this case here.
+    auto *Not = dyn_cast<ICmpInst>(HeaderBr->getCondition());
+    if (!Not || !Not->isEquality() || !isa<ConstantInt>(Not->getOperand(1)) ||
+        !cast<ConstantInt>(Not->getOperand(1))->isZero())
+      return false;
+
+    Phi1 = dyn_cast<PHINode>(Not->getOperand(0));
+    if (!Phi1)
+      return false;
+
+    // If there was this compare-with-zero, flip what we think about entering
+    // into the conditionally executed body.
+    EnterBodyIfTrue = !EnterBodyIfTrue;
+    Phi1Inverted = true;
+  }
+
+  if (Phi1->getParent() != Header || Phi1->getBasicBlockIndex(Latch) == -1)
+    return false;
+
+  // Check that the latch PHI feeds-though the first PHI in case the Body block
+  // was not executed:
+  auto *Phi2 = dyn_cast<PHINode>(Phi1->getIncomingValueForBlock(Latch));
+  if (!Phi2 || Phi2->getNumIncomingValues() != 2 ||
+      !(Phi2->getIncomingValueForBlock(Header) == Phi1 ||
+        Phi2->getIncomingValueForBlock(Header) ==
+            ConstantInt::get(Phi1->getType(), !EnterBodyIfTrue)))
+    return false;
+
+  // This is over-protective again.
+  auto *V = dyn_cast<Instruction>(
+      Phi2->getIncomingValue(Phi2->getIncomingBlock(0) == Header ? 1 : 0));
+  if (!V || !DT.dominates(Body, V->getParent()))
+    return false;
+
+  LLVM_DEBUG(dbgs() << "Simplifying loop body (in "
+                    << Header->getParent()->getName() << "): " << L);
+
+  // Checks passed, let's simplify: Modify the loop latch condition so that
+  // it only loop's back if the body would still be entered. If the PHI that
+  // decides if the body is executed has a constant value for the first
+  // iteration, the inner branch is simplified (the jump-threading pass is
+  // capable of doing this as well and handles more complex scenarios).
+  auto *C = dyn_cast<ConstantInt>(
+      Phi1->getIncomingValueForBlock(L.getLoopPredecessor()));
+  if (C && C->isZero() != EnterBodyIfTrue)
+    HeaderBr->setCondition(
+        ConstantInt::getBool(C->getContext(), C->isOne() ^ Phi1Inverted));
+
+  IRBuilder<> Builder(LatchBr);
+  Value *Phi2AsI1 =
+      Phi2->getType()->isIntegerTy(1)
+          ? Phi2
+          : Builder.CreateICmpNE(Phi2, ConstantInt::get(Phi2->getType(), 0),
+                                 Phi2->getName() + ".as.i1");
+
+  if (ContinueIfTrue)
+    LatchBr->setCondition(Builder.CreateAnd(
+        LatchCond, EnterBodyIfTrue ? Phi2AsI1
+                                   : Builder.CreateNot(
+                                         Phi2AsI1, Phi2->getName() + ".not")));
+  else
+    LatchBr->setCondition(Builder.CreateOr(
+        LatchCond, EnterBodyIfTrue
+                       ? Builder.CreateNot(Phi2AsI1, Phi2->getName() + ".not")
+                       : Phi2AsI1));
+
+  assert(!verifyFunction(*Header->getParent()));
+  NumInnerCondsFoldedIntoLatchCond += 1;
+
+  // Because the exit condition changed, we must "forget" the current state. A
+  // dominator-tree (and therefore MSSA) update is not necessary because this
+  // transformation only modifies the loop condition and let's other passes
+  // like simplifycfg do the rest.
+  SE.forgetBlockAndLoopDispositions();
+  SE.forgetLoop(&L);
+  return true;
+}
+
 static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI,
                             ScalarEvolution &SE, MemorySSAUpdater *MSSAU,
                             bool &IsLoopDeleted) {
@@ -707,6 +907,12 @@ static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI,
 
   if (Changed)
     SE.forgetTopmostLoop(&L);
+
+  if (IsLoopDeleted)
+    return true;
+
+  if (EnableInnerCondFolding)
+    Changed |= combineInnerIfIntoLoopCondition(L, DT, LI, SE);
 
   return Changed;
 }
