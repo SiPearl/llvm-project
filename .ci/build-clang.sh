@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# TODO: Have a module file for cmake and specify the version in a revfile?
-# This needs to be done *before* set -eux because the script contains unbound
-# variables.
-source /toolsroot/lnx/scripts/SPLmanagetools.sh -set "cad_cmake-3.21.4-linux-x86_64"
-
 . $(dirname "$0")/project.sh
 
 set -eux
@@ -20,17 +15,12 @@ build_directory=$(createDir ${current_directory}/${build_directory})
 echo "Build LLVM in ${build_directory}"
 echo "Install path: ${install_prefix}"
 
-# module dependencies
-module_load gcc-x86
-module_load gbu-${TARGET_TRIPLE}
-
-CC=$(which gcc)
-CXX=$(which g++)
-
 sysroot=${SYSROOT:?}
 sysroot_option=""
 omp_option=""
+libpfm=""
 linker=ld
+gbu_module=""
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     if [ ! -d "${sysroot}" ]; then
 	echo "ERROR: sysroot directory: ${sysroot} does not exist"
@@ -42,7 +32,21 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     omp_option+=" -DLIBOMP_OMPD_SUPPORT=OFF"
     omp_option+=" -DLIBOMP_HAVE_SHM_OPEN_WITH_LRT=TRUE"
     linker_name=${TARGET_TRIPLE}-ld
+    gbu_module="gbu-${TARGET_TRIPLE}"
+else
+    libpfm=" -DLLVM_ENABLE_LIBPFM=TRUE"
 fi
+
+# Generate meta module toolchain based on module dependencies
+make_toolroot "./toolroot" "papi-x86-native ${gbu_module} cmake-x86" ".ci/revfiles"
+# Meta package is in ./toolroot/modulefiles and its name is toolchain/${SW_VERSION}
+set +x
+module use ./toolroot/modulefiles
+module load toolchain/${SW_VERSION}
+set -x
+
+CC=$(which gcc)
+CXX=$(which g++)
 
 GBU_PREFIX=$(dirname $(which ${linker}))
 if [ -z "${GBU_PREFIX}" ]; then
@@ -59,10 +63,11 @@ fi
 
 LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
 LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
+BUILD_TYPE=${BUILD_TYPE:-"Release"}
 
 pushd ${build_directory}
   cmake --trace-expand -S ../llvm -G "Unix Makefiles" \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
         -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
         -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
         -DCMAKE_C_COMPILER="${CC}" \
@@ -72,7 +77,7 @@ pushd ${build_directory}
         -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-        -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} \
+        -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} ${libpfm} \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
@@ -86,7 +91,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 
     pushd ${build_runtime}
       cmake -S ../llvm -G "Unix Makefiles" \
-          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
           -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
           -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
 	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
@@ -127,6 +132,6 @@ echo "sw_plugin_prepend_path[LD_LIBRARY_PATH]='\$package_prefix/lib:\$package_pr
 
 generate_modulefile "${install_prefix}/modulefiles/${SW_NAME,,}/${SW_VERSION}" \
     "${SW_NAME}" "${SW_LONG_NAME}" "${SW_VERSION}" "${SW_CATEGORY}" \
-    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}" "${plugin_file}" "${gen_mod_file}"
+    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "papi-x86-native ${gbu_module}" "${plugin_file}" "${gen_mod_file}"
 
 echo "Size of artifacts: $(du -h -d 0 ./artifacts)"

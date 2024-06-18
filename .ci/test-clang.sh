@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# TODO: Have a module file for cmake and specify the version in a revfile?
-# This needs to be done *before* set -eux because the script contains unbound
-# variables.
-source /toolsroot/lnx/scripts/SPLmanagetools.sh -set "cad_cmake-3.21.4-linux-x86_64"
-
 . $(dirname "$0")/project.sh
 
 set -eux
@@ -15,8 +10,10 @@ build_directory=$(createDir ${current_directory}/${build_directory})
 echo "Test LLVM in ${build_directory}"
 
 # module dependencies
-module_load gcc-x86
-module_load gbu-${TARGET_TRIPLE}
+module_load papi-x86-native
+if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+    module_load gbu-${TARGET_TRIPLE}
+fi
 
 current_dir=$(pwd)
 
@@ -25,7 +22,7 @@ checkout llvm-test-suite https://gitlab01.int.sipearl.com/software/compilers/ben
 # Test on X86 host for aarch64 or x86
 # If host is equal to target, do not set OPTFLAGS. It will be defined to native by default
 mcpu_flags=""
-if [ "${TARGET_TRIPLE}" = "aarch64-linux-gnu" ]; then
+if [ "${TARGET_TRIPLE}" = "aarch64-unknown-linux-gnu" ]; then
     mcpu_flags="-DOPTFLAGS=-mcpu=neoverse-v1"
 fi
 
