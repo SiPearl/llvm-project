@@ -8,6 +8,13 @@ set -eux
 
 . $(dirname "$0")/options.sh
 
+# Currently supported ACI API version to check here
+export CURRENT_ACI_VERSION="0.1.1"
+
+# Verify if check_version is available in sipearl_aci.env
+# Only check_version will remain here when projects support version > 0.1.1
+check_version ${ACI_VERSION} ${CURRENT_ACI_VERSION}
+
 SW_NAME=LLVM
 SW_LONG_NAME="LLVM Compiler Infrastructure"
 SW_CATEGORY="compilers"
