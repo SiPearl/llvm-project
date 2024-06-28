@@ -24,6 +24,7 @@
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
+#include "llvm/Support/InstructionCost.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 #include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
 #include <algorithm>
@@ -75,6 +76,14 @@ static cl::opt<unsigned>
 static cl::opt<unsigned> DMBLookaheadThreshold(
     "dmb-lookahead-threshold", cl::init(10), cl::Hidden,
     cl::desc("The number of instructions to search for a redundant dmb"));
+
+/* This cost must be high because we want to avoid SVE in-loop
+   reductions that need to be expanded, but for out-of-loop mul reductions,
+   this is very usefull! TODO: This value needs tuning. */
+static cl::opt<unsigned> ExpandedScalableReductionCost(
+    "sve-expanded-reduction-cost", cl::init(250), cl::Hidden,
+    cl::desc(
+        "The cost of mul/fmul reductions in SVE (which need to be expanded)"));
 
 namespace {
 class TailFoldingOption {
@@ -5074,6 +5083,16 @@ bool AArch64TTIImpl::isLegalToVectorizeReduction(
   case RecurKind::FMulAdd:
   case RecurKind::AnyOf:
     return true;
+  case RecurKind::Mul:
+  case RecurKind::FMul:
+    // Scalable reductions can now be expanded, but the expansion is simpler
+    // when the VScale is fixed, so only do it in that case.
+    return !RdxDesc.isOrdered() && RdxDesc.getLoopExitInstr()
+                                       ->getFunction()
+                                       ->getAttributes()
+                                       .getFnAttrs()
+                                       .getFixedVScale()
+                                       .has_value();
   default:
     return false;
   }
@@ -5126,6 +5145,9 @@ InstructionCost AArch64TTIImpl::getArithmeticReductionCostSVE(
   case ISD::XOR:
   case ISD::FADD:
     return LegalizationCost + 2;
+  case ISD::MUL:
+  case ISD::FMUL:
+    return LegalizationCost + InstructionCost(ExpandedScalableReductionCost);
   default:
     return InstructionCost::getInvalid();
   }
@@ -5151,6 +5173,9 @@ AArch64TTIImpl::getArithmeticReductionCost(unsigned Opcode, VectorType *ValTy,
       // end up vectorizing for more computationally intensive loops.
       return BaseCost + FixedVTy->getNumElements();
     }
+
+    if (Opcode == Instruction::FMul)
+      return InstructionCost(ExpandedScalableReductionCost);
 
     if (Opcode != Instruction::FAdd)
       return InstructionCost::getInvalid();

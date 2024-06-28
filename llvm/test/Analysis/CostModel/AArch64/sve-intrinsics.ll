@@ -152,8 +152,8 @@ define void @reductions(<vscale x 4 x i32> %v0, <vscale x 4 x i64> %v1, <vscale 
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 2 for: %add_nxv4i32 = call i32 @llvm.vector.reduce.add.nxv4i32(<vscale x 4 x i32> %v0)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 3 for: %add_nxv4i64 = call i64 @llvm.vector.reduce.add.nxv4i64(<vscale x 4 x i64> %v1)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv1i32 = call i32 @llvm.vector.reduce.mul.nxv1i32(<vscale x 1 x i32> undef)
-; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
-; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
+; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 250 for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
+; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 251 for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %and_nxv1i32 = call i32 @llvm.vector.reduce.and.nxv1i32(<vscale x 1 x i32> undef)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 2 for: %and_nxv4i32 = call i32 @llvm.vector.reduce.and.nxv4i32(<vscale x 4 x i32> %v0)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 3 for: %and_nxv4i64 = call i64 @llvm.vector.reduce.and.nxv4i64(<vscale x 4 x i64> %v1)
@@ -191,8 +191,8 @@ define void @reductions(<vscale x 4 x i32> %v0, <vscale x 4 x i64> %v1, <vscale 
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 2 for: %add_nxv4i32 = call i32 @llvm.vector.reduce.add.nxv4i32(<vscale x 4 x i32> %v0)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 3 for: %add_nxv4i64 = call i64 @llvm.vector.reduce.add.nxv4i64(<vscale x 4 x i64> %v1)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv1i32 = call i32 @llvm.vector.reduce.mul.nxv1i32(<vscale x 1 x i32> undef)
-; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
-; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
+; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 250 for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
+; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 251 for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %and_nxv1i32 = call i32 @llvm.vector.reduce.and.nxv1i32(<vscale x 1 x i32> undef)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 2 for: %and_nxv4i32 = call i32 @llvm.vector.reduce.and.nxv4i32(<vscale x 4 x i32> %v0)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 3 for: %and_nxv4i64 = call i64 @llvm.vector.reduce.and.nxv4i64(<vscale x 4 x i64> %v1)
@@ -230,8 +230,8 @@ define void @reductions(<vscale x 4 x i32> %v0, <vscale x 4 x i64> %v1, <vscale 
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 2 for: %add_nxv4i32 = call i32 @llvm.vector.reduce.add.nxv4i32(<vscale x 4 x i32> %v0)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 3 for: %add_nxv4i64 = call i64 @llvm.vector.reduce.add.nxv4i64(<vscale x 4 x i64> %v1)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv1i32 = call i32 @llvm.vector.reduce.mul.nxv1i32(<vscale x 1 x i32> undef)
-; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
-; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
+; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 250 for: %mul_nxv4i32 = call i32 @llvm.vector.reduce.mul.nxv4i32(<vscale x 4 x i32> %v0)
+; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 251 for: %mul_nxv4i64 = call i64 @llvm.vector.reduce.mul.nxv4i64(<vscale x 4 x i64> %v1)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %and_nxv1i32 = call i32 @llvm.vector.reduce.and.nxv1i32(<vscale x 1 x i32> undef)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 2 for: %and_nxv4i32 = call i32 @llvm.vector.reduce.and.nxv4i32(<vscale x 4 x i32> %v0)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 3 for: %and_nxv4i64 = call i64 @llvm.vector.reduce.and.nxv4i64(<vscale x 4 x i64> %v1)
@@ -309,22 +309,22 @@ define void @strict_fp_reductions(<vscale x 4 x float> %v0, <vscale x 4 x double
 ; CHECK-VSCALE-1-LABEL: 'strict_fp_reductions'
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of RThru:4 CodeSize:4 Lat:12 SizeLat:4 for: %fadd_nxv4f32 = call float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of RThru:4 CodeSize:4 Lat:12 SizeLat:4 for: %fadd_nxv4f64 = call double @llvm.vector.reduce.fadd.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
-; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
-; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
+; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
+; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
 ; CHECK-VSCALE-1-NEXT:  Cost Model: Found costs of RThru:0 CodeSize:1 Lat:1 SizeLat:1 for: ret void
 ;
 ; CHECK-VSCALE-2-LABEL: 'strict_fp_reductions'
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of RThru:8 CodeSize:8 Lat:24 SizeLat:8 for: %fadd_nxv4f32 = call float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of RThru:8 CodeSize:8 Lat:24 SizeLat:8 for: %fadd_nxv4f64 = call double @llvm.vector.reduce.fadd.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
-; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
-; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
+; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
+; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
 ; CHECK-VSCALE-2-NEXT:  Cost Model: Found costs of RThru:0 CodeSize:1 Lat:1 SizeLat:1 for: ret void
 ;
 ; TYPE_BASED_ONLY-LABEL: 'strict_fp_reductions'
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of RThru:4 CodeSize:4 Lat:12 SizeLat:4 for: %fadd_nxv4f32 = call float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of RThru:4 CodeSize:4 Lat:12 SizeLat:4 for: %fadd_nxv4f64 = call double @llvm.vector.reduce.fadd.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
-; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
-; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of Invalid for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
+; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f32 = call float @llvm.vector.reduce.fmul.nxv4f32(float 0.000000e+00, <vscale x 4 x float> %v0)
+; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of 250 for: %fmul_nxv4f64 = call double @llvm.vector.reduce.fmul.nxv4f64(double 0.000000e+00, <vscale x 4 x double> %v1)
 ; TYPE_BASED_ONLY-NEXT:  Cost Model: Found costs of RThru:0 CodeSize:1 Lat:1 SizeLat:1 for: ret void
 ;
   %fadd_nxv4f32 = call float @llvm.vector.reduce.fadd.nxv4f32(float 0.0, <vscale x 4 x float> %v0)

@@ -401,7 +401,18 @@ public:
       bool &AllowPromotionWithoutCommonHeader) const override;
 
   bool shouldExpandReduction(const IntrinsicInst *II) const override {
-    return false;
+    switch (II->getIntrinsicID()) {
+    case Intrinsic::vector_reduce_mul:
+      return II->getOperand(0)->getType()->isScalableTy();
+    case Intrinsic::vector_reduce_fmul:
+      return II->getOperand(1)->getType()->isScalableTy();
+    default:
+      return false;
+    }
+  }
+
+  unsigned getGISelRematGlobalCost() const override {
+    return 2;
   }
 
   unsigned getGISelRematGlobalCost() const override { return 2; }

@@ -1186,6 +1186,14 @@ std::optional<unsigned> AttributeSet::getVScaleRangeMax() const {
   return SetNode ? SetNode->getVScaleRangeMax() : std::nullopt;
 }
 
+std::optional<unsigned> AttributeSet::getFixedVScale() const {
+  unsigned Min = getVScaleRangeMin();
+  std::optional<unsigned> Max = getVScaleRangeMax();
+  if (Min != 0 && Max.has_value() && Max.value() == Min)
+    return Min;
+  return std::nullopt;
+}
+
 UWTableKind AttributeSet::getUWTableKind() const {
   return SetNode ? SetNode->getUWTableKind() : UWTableKind::None;
 }

@@ -452,6 +452,7 @@ public:
   getAllocSizeArgs() const;
   LLVM_ABI unsigned getVScaleRangeMin() const;
   LLVM_ABI std::optional<unsigned> getVScaleRangeMax() const;
+  LLVM_ABI std::optional<unsigned> getFixedVScale() const;
   LLVM_ABI UWTableKind getUWTableKind() const;
   LLVM_ABI AllocFnKind getAllocKind() const;
   LLVM_ABI MemoryEffects getMemoryEffects() const;

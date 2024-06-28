@@ -1122,10 +1122,24 @@ Value *llvm::createMinMaxOp(IRBuilderBase &Builder, RecurKind RK, Value *Left,
   return Select;
 }
 
+static unsigned getFixedVF(Function *F, Type *Ty) {
+  if (auto *Fixed = dyn_cast<FixedVectorType>(Ty))
+    return Fixed->getNumElements();
+
+  auto *ScalableTy = cast<ScalableVectorType>(Ty);
+  std::optional<unsigned> VScale =
+      F->getAttributes().getFnAttrs().getFixedVScale();
+  assert(VScale.has_value() &&
+         "Expected fixed-length vector or compile-time known VScale");
+
+  return ScalableTy->getMinNumElements() * VScale.value();
+}
+
 // Helper to generate an ordered reduction.
 Value *llvm::getOrderedReduction(IRBuilderBase &Builder, Value *Acc, Value *Src,
                                  unsigned Op, RecurKind RdxKind) {
-  unsigned VF = cast<FixedVectorType>(Src->getType())->getNumElements();
+  unsigned VF =
+      getFixedVF(Builder.GetInsertBlock()->getParent(), Src->getType());
 
   // Extract and apply reduction ops in ascending order:
   // e.g. ((((Acc + Scl[0]) + Scl[1]) + Scl[2]) + ) ... + Scl[VF-1]

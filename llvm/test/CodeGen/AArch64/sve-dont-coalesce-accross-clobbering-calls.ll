@@ -8,12 +8,11 @@ define void @bar(ptr %src, ptr %dst, float %exp) #0 {
 ; CHECK-LABEL: bar:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    str d10, [sp, #-48]! // 8-byte Folded Spill
-; CHECK-NEXT:    ptrue p0.s
 ; CHECK-NEXT:    stp d9, d8, [sp, #16] // 16-byte Folded Spill
 ; CHECK-NEXT:    fmov s8, s0
+; CHECK-NEXT:    ldr z0, [x0]
 ; CHECK-NEXT:    stp x30, x19, [sp, #32] // 16-byte Folded Spill
 ; CHECK-NEXT:    mov x19, x1
-; CHECK-NEXT:    ld1w { z0.s }, p0/z, [x0]
 ; CHECK-NEXT:    mov z1.s, z0.s[1]
 ; CHECK-NEXT:    // kill: def $s0 killed $s0 killed $z0
 ; CHECK-NEXT:    fmov s9, s1
@@ -25,13 +24,13 @@ define void @bar(ptr %src, ptr %dst, float %exp) #0 {
 ; CHECK-NEXT:    bl foo
 ; CHECK-NEXT:    mov w8, #1 // =0x1
 ; CHECK-NEXT:    index z1.s, #0, #1
-; CHECK-NEXT:    ptrue p1.s
+; CHECK-NEXT:    ptrue p0.s
 ; CHECK-NEXT:    mov z2.s, w8
 ; CHECK-NEXT:    ldp d9, d8, [sp, #16] // 16-byte Folded Reload
-; CHECK-NEXT:    cmpeq p0.s, p1/z, z1.s, z2.s
+; CHECK-NEXT:    cmpeq p0.s, p0/z, z1.s, z2.s
 ; CHECK-NEXT:    fmov s1, s10
 ; CHECK-NEXT:    mov z1.s, p0/m, s0
-; CHECK-NEXT:    st1w { z1.s }, p1, [x19]
+; CHECK-NEXT:    str z1, [x19]
 ; CHECK-NEXT:    ldp x30, x19, [sp, #32] // 16-byte Folded Reload
 ; CHECK-NEXT:    ldr d10, [sp], #48 // 8-byte Folded Reload
 ; CHECK-NEXT:    ret
@@ -52,23 +51,22 @@ define void @use_of_sve_reg_after_call(ptr %src, ptr %dst, float %exp) #0 {
 ; CHECK-NEXT:    str x29, [sp, #-32]! // 8-byte Folded Spill
 ; CHECK-NEXT:    stp x30, x19, [sp, #16] // 16-byte Folded Spill
 ; CHECK-NEXT:    addvl sp, sp, #-1
-; CHECK-NEXT:    ptrue p0.s
 ; CHECK-NEXT:    fmov s1, s0
+; CHECK-NEXT:    ldr z0, [x0]
 ; CHECK-NEXT:    mov x19, x1
-; CHECK-NEXT:    ld1w { z0.s }, p0/z, [x0]
 ; CHECK-NEXT:    str z0, [sp] // 16-byte Folded Spill
 ; CHECK-NEXT:    // kill: def $s0 killed $s0 killed $z0
 ; CHECK-NEXT:    bl foo
 ; CHECK-NEXT:    mov w8, #1 // =0x1
 ; CHECK-NEXT:    index z1.s, #0, #1
-; CHECK-NEXT:    ptrue p1.s
+; CHECK-NEXT:    ptrue p0.s
 ; CHECK-NEXT:    mov z2.s, w8
 ; CHECK-NEXT:    // kill: def $s0 killed $s0 def $z0
-; CHECK-NEXT:    cmpeq p0.s, p1/z, z1.s, z2.s
+; CHECK-NEXT:    cmpeq p0.s, p0/z, z1.s, z2.s
 ; CHECK-NEXT:    ldr z1, [sp] // 16-byte Folded Reload
 ; CHECK-NEXT:    mov z1.s, z1.s[1]
 ; CHECK-NEXT:    mov z0.s, p0/m, s1
-; CHECK-NEXT:    st1w { z0.s }, p1, [x19]
+; CHECK-NEXT:    str z0, [x19]
 ; CHECK-NEXT:    addvl sp, sp, #1
 ; CHECK-NEXT:    ldp x30, x19, [sp, #16] // 16-byte Folded Reload
 ; CHECK-NEXT:    ldr x29, [sp], #32 // 8-byte Folded Reload
