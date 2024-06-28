@@ -23,6 +23,7 @@
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
@@ -45,8 +46,16 @@ using namespace llvm;
 
 static cl::opt<bool> EnableTermFolding("enable-loop-simplifycfg-term-folding",
                                        cl::init(true));
-static cl::opt<bool> EnableInnerCondFolding(
-    "enable-loop-simplifycfg-inner-cond-into-latch-folding", cl::init(true));
+
+static cl::opt<bool>
+    EnableInnerCondFolding("enable-inner-cond-into-latch-folding",
+                           cl::init(true));
+
+// This opt can also be enabled as using a pass argument,
+// this flag is mostly for testing.
+static cl::opt<bool>
+    EnableToSingleExitTransformFlag("enable-loop-to-single-exit",
+                                    cl::init(false));
 
 STATISTIC(NumTerminatorsFolded,
           "Number of terminators folded to unconditional branches");
@@ -56,6 +65,9 @@ STATISTIC(NumLoopExitsDeleted,
           "Number of loop exiting edges deleted");
 STATISTIC(NumInnerCondsFoldedIntoLatchCond,
           "Number of inner conditions folded into latch condition");
+STATISTIC(NumToSingleExitTransforms,
+          "Number of loops that had multiple exits but where transformed into "
+          "a single-exit loop");
 
 /// If \p BB is a switch or a conditional branch, but only one of its successors
 /// can be reached from this block in runtime, return this successor. Otherwise,
@@ -891,9 +903,343 @@ static bool combineInnerIfIntoLoopCondition(Loop &L, DominatorTree &DT,
   return true;
 }
 
+// The transformation below creates cases where a new Phi node is
+// created with constant incoming values on all branches, where these
+// constants directly correspond to the edge that was taken leading
+// to the Phi. This helper function folds these cases away by replacing
+// the Phi by the branch condition.
+// InstCombine also does this, but having it here simplifies pass
+// ordering. Otherwise, we would need to re-run InstCombine before
+// vectorization after transfromLoopToSingleExit().
+static bool optimizeConstantI1PhiBasedOnBranch(PHINode *Phi, Loop &L,
+                                               DominatorTree &DT, LoopInfo &LI,
+                                               ScalarEvolution &SE) {
+  assert(Phi->getType()->isIntegerTy(1));
+  if (Phi->getNumIncomingValues() != 2)
+    return false;
+
+  ConstantInt *Inc0Val = dyn_cast<ConstantInt>(Phi->getIncomingValue(0));
+  ConstantInt *Inc1Val = dyn_cast<ConstantInt>(Phi->getIncomingValue(1));
+  if (!Inc0Val || !Inc1Val ||
+      !((Inc0Val->isZero() && Inc1Val->isOne()) ||
+        (Inc0Val->isOne() && Inc1Val->isZero())))
+    return false;
+
+  auto *Inc0BB = Phi->getIncomingBlock(0);
+  auto *Inc1BB = Phi->getIncomingBlock(1);
+  auto *CDom = DT.findNearestCommonDominator(Inc0BB, Inc1BB);
+  BranchInst *Br = dyn_cast<BranchInst>(CDom->getTerminator());
+  if (!Br || !Br->isConditional() ||
+      !(Br->getSuccessor(0) == Phi->getParent() ||
+        Br->getSuccessor(1) == Phi->getParent()))
+    return false;
+
+  // Now that the incoming basic blocks and constant PHI values have been
+  // identified, we must ensure that there is no in-between branching that can
+  // also lead to the incoming block. This can be done by checking if the branch
+  // edge dominates those blocks. In case there are more branches between the
+  // nearest common dominator and the two inc. BBs, successors could "cross
+  // over", meaning the condition needs to be flipped.
+  bool NeedsFlip;
+  if (Br->getSuccessor(0) == Phi->getParent() &&
+      (DT.dominates({CDom, Br->getSuccessor(1)}, Inc0BB) ||
+       DT.dominates({CDom, Br->getSuccessor(1)}, Inc1BB))) {
+    NeedsFlip = Inc0Val->isZero() != (Br->getSuccessor(0) == Inc0BB);
+  } else if (Br->getSuccessor(1) == Phi->getParent() &&
+             (DT.dominates({CDom, Br->getSuccessor(0)}, Inc0BB) ||
+              DT.dominates({CDom, Br->getSuccessor(0)}, Inc1BB))) {
+    NeedsFlip = Inc1Val->isZero() != (Br->getSuccessor(1) == Inc0BB);
+  } else {
+    return false;
+  }
+
+  IRBuilder<> Builder(Phi->getParent(), Phi->getParent()->getFirstNonPHIIt());
+  Value *V =
+      NeedsFlip ? Builder.CreateNot(Br->getCondition()) : Br->getCondition();
+  Phi->replaceAllUsesWith(V);
+  Phi->eraseFromParent();
+  return true;
+}
+
+// This transformation is needed to enable outer-loop vectorization if the
+// inner loop has multiple exits and for most loops that can be vectorized
+// if they have a data-dependent exit condition.
+// The transformation is similar to this pseudo-C example:
+//
+//   do {
+//     <stuff 1>
+//     if (<early-exit-condition>)
+//       break;
+//     <stuff 2>
+//   } while (<old-condition>);
+//
+// gets transformed into:
+//
+//   bool done = false;
+//   do {
+//     <stuff 1>
+//     if (<early-exit-condition>) {
+//       done = true;
+//       goto latch;
+//     }
+//     <stuff 2>
+//   latch:
+//   } while (!done & <old-condition>)
+//
+// If possible, the instructions used to calculate the original
+// latch condition are sunken into the new latch. Otherwise,
+// the original latch condition is treated like any other early exit.
+// Typically, the instructions sunken are the IV increment and the
+// comparison against N for a loop with N iterations.
+bool llvm::transformLoopToSingleExit(Loop &L, DominatorTree &DT, LoopInfo &LI,
+                                     ScalarEvolution &SE,
+                                     MemorySSAUpdater *MSSAU) {
+  SmallVector<BasicBlock *> ExitingBlocks;
+  L.getExitingBlocks(ExitingBlocks);
+  BasicBlock *Header = L.getHeader(), *Latch = L.getLoopLatch(),
+             *ExitBlock = L.getUniqueExitBlock();
+
+  // All exiting blocks have to have the same exit block, or this
+  // transformation does not work. The latch should be one of the exiting
+  // blocks, but will not be removed by this transformation.
+  if (ExitingBlocks.size() == 1 || !ExitBlock || !Latch ||
+      !L.getLoopPredecessor() || !DT.dominates(Header, Latch) ||
+      !L.isLCSSAForm(DT) || !is_contained(ExitingBlocks, Latch) ||
+      !L.isInnermost())
+    return false;
+
+  ExitingBlocks.erase(find(ExitingBlocks, Latch));
+  for (BasicBlock *EarlyExit : ExitingBlocks) {
+    // Possible to handle in the future, but would require way more new PHIs,
+    // and also uncommon.
+    if (!DT.dominates(Header, EarlyExit) || !DT.dominates(EarlyExit, Latch))
+      return false;
+
+    // The only terminators treated for conditional exits.
+    if (auto *BI = dyn_cast<BranchInst>(EarlyExit->getTerminator());
+        !BI || !BI->isConditional())
+      return false;
+  }
+
+  auto *BI = dyn_cast<BranchInst>(Latch->getTerminator());
+  if (!BI)
+    return false;
+
+  // Checks are done. The latch is splitted and the CFG is changed:
+  // Split the old latch (NewLatch is the successor of Latch and the new
+  // actual loop latch) so that early exits have a block to jump to.
+  BasicBlock *NewLatch = SplitBlock(Latch, BI, &DT, &LI, MSSAU);
+  SmallVector<CFGUpdate> Updates;
+  for (BasicBlock *EarlyExit : ExitingBlocks) {
+    auto *BI = cast<BranchInst>(EarlyExit->getTerminator());
+    assert(is_contained(successors(EarlyExit), ExitBlock));
+    BI->replaceSuccessorWith(ExitBlock, NewLatch);
+    LLVM_DEBUG(dbgs() << "LSCFG: Eliminated early exit " << EarlyExit->getName()
+                      << " in loop " << L.getName() << "\n");
+
+    Updates.push_back({DominatorTree::Delete, EarlyExit, ExitBlock});
+    Updates.push_back({DominatorTree::Insert, EarlyExit, NewLatch});
+  }
+  DT.applyUpdates(Updates);
+  if (MSSAU)
+    MSSAU->applyUpdates(Updates, DT);
+
+  // Collect a set of instructions that can be moved down into the new true
+  // latch, in order to avoid creating PHI nodes for them in the new latch.
+  // Those instruction should have no side-effects or live-out use, as they
+  // will be executed even if the original loop would have done a early exit.
+  SmallSetVector<Instruction *, 8> Sinkables;
+  SmallSetVector<Instruction *, 8> Worklist;
+  auto *CI = dyn_cast<Instruction>(BI->getCondition());
+  // It's unlikely but possible for the latch condition to be invariant.
+  if (CI && CI->getParent() == Latch)
+    Worklist.insert(CI);
+  for (unsigned Idx = 0; Idx < Worklist.size(); Idx++) {
+    Instruction *I = Worklist[Idx];
+
+    // Currently, this algo. is restricted to instrs in Latch.
+    if (isa<PHINode>(I) || I->getParent() != Latch)
+      continue;
+
+    // Don't try to be too smart about memory-accessing instrs. for now.
+    // Don't sink instructions that cannot be speculatively executed (e.g.
+    // integer divisions), or debug instrinsics.
+    if (I->mayReadOrWriteMemory() || !isSafeToSpeculativelyExecute(I) ||
+        I->isDebugOrPseudoInst())
+      continue;
+
+    // Instrs. with a live-out use cannot be sunken.
+    if (any_of(I->users(), [&](User *U) {
+          auto *UI = dyn_cast<Instruction>(U);
+          return UI && !L.contains(UI);
+        }))
+      continue;
+
+    Sinkables.insert(I);
+    for (Value *Op : I->operands())
+      if (Instruction *I = dyn_cast<Instruction>(Op))
+        Worklist.insert(I);
+  }
+
+  // All sink candidates with non-dominating operands could be sunken by
+  // creating a new PHI (similar to live-out uses). A use that have a
+  // live-out use or a use that could not be sunken is insinkable.
+  if (!Sinkables.empty() && all_of(Sinkables, [&](Instruction *I) {
+        return all_of(I->operands(),
+                      [&](Value *Op) {
+                        auto *OpI = dyn_cast<Instruction>(Op);
+                        return !OpI || Sinkables.contains(OpI) ||
+                               DT.dominates(OpI, NewLatch);
+                      }) &&
+               all_of(I->users(), [&](User *U) {
+                 auto *UI = dyn_cast<Instruction>(U);
+                 return UI &&
+                        (UI == BI || (isa<PHINode>(UI) && L.contains(UI)) ||
+                         Sinkables.contains(UI));
+               });
+      })) {
+
+    // This means we can sink, but when doing so, we must make sure to place
+    // the operands of a instruction before the instruction itself.
+    // Basically we need a topological sorting, but I was not able to find
+    // a helper for topologically sorting instructions. This works and is
+    // simple.
+    Worklist.clear();
+    Worklist.insert(CI);
+    Instruction *InsertPos = NewLatch->getTerminator();
+    while (!Worklist.empty()) {
+      Instruction *I = Worklist.pop_back_val();
+      if (!Sinkables.contains(I))
+        continue;
+
+      // If a user of this instruction was not yet sunken into the
+      // latch, put the user into the work list and try again later.
+      bool CanSink = true;
+      for (User *U : I->users()) {
+        auto *UI = dyn_cast<Instruction>(U);
+        if (UI && UI->getParent() != NewLatch && !isa<PHINode>(UI)) {
+          Worklist.insert(UI);
+          CanSink = false;
+          break;
+        }
+      }
+      if (!CanSink)
+        continue;
+
+      LLVM_DEBUG(dbgs() << " > Sink into (new) latch: " << *I << "\n");
+      I->removeFromParent();
+      I->insertBefore(InsertPos);
+      InsertPos = I;
+      for (Value *Op : I->operands())
+        if (auto *OpI = dyn_cast<Instruction>(Op);
+            OpI && Sinkables.contains(OpI) && OpI->getParent() != NewLatch)
+          Worklist.insert(OpI);
+    }
+  } else {
+    Sinkables.clear();
+  }
+
+  IRBuilder<> Builder(NewLatch, NewLatch->begin());
+  bool ExitIfTrue = BI->getSuccessor(0) == ExitBlock;
+  PHINode *ExitPhi = Builder.CreatePHI(
+      BI->getCondition()->getType(), ExitingBlocks.size() + 1, "earlyexitcond");
+
+  // If we branched from an early exit into the new latch, we the loop is
+  // always exited.
+  for (BasicBlock *EarlyExit : ExitingBlocks)
+    ExitPhi->addIncoming(Builder.getInt1(ExitIfTrue), EarlyExit);
+
+  // If the (old) latch exit condition has been sunken into the new latch, we
+  // can combine it with the created phi indicating if there was a early exit.
+  // Otherwise, the exit phi get's the exit condition as incoming value from the
+  // old latch.
+  if (auto *CI = dyn_cast<Instruction>(BI->getCondition());
+      CI && Sinkables.contains(CI)) {
+    ExitPhi->addIncoming(Builder.getInt1(!ExitIfTrue), Latch);
+    Builder.SetInsertPoint(NewLatch->getTerminator());
+
+    if (ExitIfTrue)
+      BI->setCondition(Builder.CreateOr(ExitPhi, BI->getCondition()));
+    else
+      BI->setCondition(Builder.CreateAnd(ExitPhi, BI->getCondition()));
+
+    Builder.SetInsertPoint(&NewLatch->front());
+  } else {
+    ExitPhi->addIncoming(BI->getCondition(), Latch);
+    BI->setCondition(ExitPhi);
+  }
+
+  // For any header PHI, we need to create a new PHI in the new latch block.
+  // However, because we only loop back if no early exit was taken, the incoming
+  // values for any block but the old latch can be undefined.
+  for (PHINode &Phi : Header->phis()) {
+    // No need to create a PHI in case the value has been sunken.
+    Value *V = Phi.getIncomingValueForBlock(NewLatch);
+    if (auto *I = dyn_cast<Instruction>(V); I && Sinkables.contains(I))
+      continue;
+
+    PHINode *LatchPhi = Builder.CreatePHI(
+        Phi.getType(), ExitingBlocks.size() + 1, Phi.getName() + ".latch");
+    LatchPhi->addIncoming(V, Latch);
+    for (BasicBlock *EarlyExit : ExitingBlocks)
+      LatchPhi->addIncoming(UndefValue::get(Phi.getType()), EarlyExit);
+    Phi.setIncomingValueForBlock(NewLatch, LatchPhi);
+  }
+
+  // For a live-out use (this transform expects LCSSA form), the correct values
+  // for every original early exit has to be forwarded.
+  for (PHINode &Phi : ExitBlock->phis()) {
+    Value *V = Phi.getIncomingValueForBlock(NewLatch);
+    assert(!isa<Instruction>(V) || !Sinkables.contains(cast<Instruction>(V)));
+    PHINode *LatchPhi = nullptr;
+    for (PHINode &P : NewLatch->phis())
+      if (P.getIncomingValueForBlock(Latch) == V &&
+          all_of(ExitingBlocks, [&](auto *EarlyExit) {
+            // This check is needed because a previously created Phi
+            // cannot be "reused" for live-out values more than once!
+            return isa<UndefValue>(P.getIncomingValueForBlock(EarlyExit));
+          }))
+        LatchPhi = &P;
+
+    // In case we already created a PHI node when traversing the headers, reuse
+    // it instead of creating a new one (but update any non-latch incoming
+    // values).
+    if (LatchPhi) {
+      for (BasicBlock *EarlyExit : ExitingBlocks) {
+        LatchPhi->setIncomingValueForBlock(
+            EarlyExit, Phi.getIncomingValueForBlock(EarlyExit));
+        Phi.removeIncomingValue(EarlyExit);
+      }
+      Phi.setIncomingValueForBlock(NewLatch, LatchPhi);
+      continue;
+    }
+
+    LatchPhi = Builder.CreatePHI(Phi.getType(), ExitingBlocks.size() + 1,
+                                 Phi.getName() + ".latch");
+    LatchPhi->addIncoming(Phi.getIncomingValueForBlock(NewLatch), Latch);
+    for (BasicBlock *EarlyExit : ExitingBlocks) {
+      LatchPhi->addIncoming(Phi.getIncomingValueForBlock(EarlyExit), EarlyExit);
+      Phi.removeIncomingValue(EarlyExit);
+    }
+    Phi.setIncomingValueForBlock(NewLatch, LatchPhi);
+  }
+
+  optimizeConstantI1PhiBasedOnBranch(ExitPhi, L, DT, LI, SE);
+
+  if (MSSAU)
+    assert((MSSAU->getMemorySSA()->verifyMemorySSA(), true));
+
+  assert(!verifyFunction(*Header->getParent(), &dbgs()));
+  assert(DT.verify(DominatorTree::VerificationLevel::Basic));
+  SE.forgetLoop(&L);
+  SE.forgetBlockAndLoopDispositions();
+  NumToSingleExitTransforms += 1;
+  return true;
+}
+
 static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI,
                             ScalarEvolution &SE, MemorySSAUpdater *MSSAU,
-                            bool &IsLoopDeleted) {
+                            bool &IsLoopDeleted, bool EnableToSingleExit) {
   bool Changed = false;
 
   // Constant-fold terminators with known constant conditions.
@@ -914,6 +1260,9 @@ static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI,
   if (EnableInnerCondFolding)
     Changed |= combineInnerIfIntoLoopCondition(L, DT, LI, SE);
 
+  if (EnableToSingleExit)
+    Changed |= transformLoopToSingleExit(L, DT, LI, SE, MSSAU);
+
   return Changed;
 }
 
@@ -924,8 +1273,9 @@ PreservedAnalyses LoopSimplifyCFGPass::run(Loop &L, LoopAnalysisManager &AM,
   if (AR.MSSA)
     MSSAU = MemorySSAUpdater(AR.MSSA);
   bool DeleteCurrentLoop = false;
-  if (!simplifyLoopCFG(L, AR.DT, AR.LI, AR.SE, MSSAU ? &*MSSAU : nullptr,
-                       DeleteCurrentLoop))
+  if (!simplifyLoopCFG(
+          L, AR.DT, AR.LI, AR.SE, MSSAU ? &*MSSAU : nullptr, DeleteCurrentLoop,
+          EnableToSingleExitTransform || EnableToSingleExitTransformFlag))
     return PreservedAnalyses::all();
 
   if (DeleteCurrentLoop)

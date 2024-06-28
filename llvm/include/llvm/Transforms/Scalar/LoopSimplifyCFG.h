@@ -23,10 +23,24 @@ namespace llvm {
 
 class LPMUpdater;
 class Loop;
+class MemorySSAUpdater;
+
+/// If L has more than one exiting block, but those all lead to the same
+/// exit block, transform L so that it has a single exiting block
+/// afterwards. DT, LI and SE are mandatory arguments and updated by
+/// the transformation. MSSAU can be provided if it needs to be
+/// updated.
+bool transformLoopToSingleExit(Loop &L, DominatorTree &DT, LoopInfo &LI,
+                               ScalarEvolution &SE, MemorySSAUpdater *MSSAU);
 
 /// Performs basic CFG simplifications to assist other loop passes.
 class LoopSimplifyCFGPass : public PassInfoMixin<LoopSimplifyCFGPass> {
+  bool EnableToSingleExitTransform;
+
 public:
+  LoopSimplifyCFGPass(bool DoToSingleExitTransform = false)
+      : EnableToSingleExitTransform(DoToSingleExitTransform) {}
+
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
 };
