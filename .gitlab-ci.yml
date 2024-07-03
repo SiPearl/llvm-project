@@ -8,6 +8,8 @@ include:
 check-formating:
   extends: ['.check-formating']
   rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - when: always
 
 build-x86_64-llvm-aarch64:
@@ -16,19 +18,9 @@ build-x86_64-llvm-aarch64:
     LIT_TEST_DIRS: "test test/Unit"
     TARGET: aarch64
   rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - when: always
-
-deploy-x86_64-llvm-aarch64:
-  extends:     ['.deploy-llvm', '.common-x86_64']
-  needs:       ['build-x86_64-llvm-aarch64']
-  variables:
-      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-aarch64'
-      TARGET: aarch64
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
-      when: always
-    - allow_failure: true
-      when: manual
 
 build-x86_64-llvm-x86_64:
   extends: ['.build-llvm', '.common-x86_64']
@@ -36,25 +28,30 @@ build-x86_64-llvm-x86_64:
     LIT_TEST_DIRS: "test test/Unit"
     TARGET: x86_64
   rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - when: always
 
 llvm-x86_64-test-suite-x86_64:
   extends: ['.llvm-test-suite', '.common-x86_64']
   needs: ['build-x86_64-llvm-x86_64']
   rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - when: always
 
   variables:
     SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64'
     TARGET: x86_64
 
-deploy-x86_64-llvm-x86_64:
+deploy-llvm:
   extends:     ['.deploy-llvm', '.common-x86_64']
-  needs:       ['llvm-x86_64-test-suite-x86_64']
+  needs:       ['llvm-x86_64-test-suite-x86_64', 'build-x86_64-llvm-aarch64']
   variables:
-      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64'
-      TARGET: x86_64
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64'
   rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
       when: always
     - allow_failure: true
@@ -68,6 +65,8 @@ build-aarch64-llvm-aarch64:
   rules:
   # Remove this when ampere come back to life
     - when: never
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
@@ -77,25 +76,12 @@ llvm-aarch64-test-suite-aarch64:
   rules:
   # Remove this when ampere come back to life
     - when: never
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
 
   variables:
     SLURM_DEPENDENCIES_JOB: 'build-aarch64-llvm-aarch64'
     TARGET: aarch64
-
-deploy-aarch64-llvm-aarch64:
-  extends:     ['.deploy-llvm', '.common-aarch64']
-  needs:       ['llvm-aarch64-test-suite-aarch64']
-  variables:
-      SLURM_DEPENDENCIES_JOB: 'llvm-aarch64-test-suite-aarch64'
-      TARGET: aarch64
-  rules:
-    - when: never
-    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: ($SIPEARL_TEST_TARGET == null || $SIPEARL_TEST_TARGET == "aarch64")
-      when: always
-    - allow_failure: true
-      when: manual
 

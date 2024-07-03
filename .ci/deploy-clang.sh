@@ -7,4 +7,4 @@ set -eux
 echo "Deploying LLVM"
 echo "Install path: ${install_dir}"
 
-deploy "${install_prefix}" "${SW_INSTALL_SUFFIX}"
+deploy_from_generated_modules "${install_prefix}" "${gen_mod_file_pattern}"

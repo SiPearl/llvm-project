@@ -127,6 +127,6 @@ echo "sw_plugin_prepend_path[LD_LIBRARY_PATH]='\$package_prefix/lib:\$package_pr
 
 generate_modulefile "${install_prefix}/modulefiles/${SW_NAME,,}/${SW_VERSION}" \
     "${SW_NAME}" "${SW_LONG_NAME}" "${SW_VERSION}" "${SW_CATEGORY}" \
-    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}" "${plugin_file}"
+    "${SW_DESCRIPTION}" "${SW_INSTALL_SUFFIX}" "gcc-x86 gbu-${TARGET_TRIPLE}" "${plugin_file}" "${gen_mod_file}"
 
 echo "Size of artifacts: $(du -h -d 0 ./artifacts)"

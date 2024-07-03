@@ -36,3 +36,6 @@ jobs=${JOBS:-40}
 artifacts_dir=${current_directory}/${artifacts}
 install_prefix=${artifacts_dir}/${install_prefix}
 install_dir=${install_prefix}/${SW_INSTALL_SUFFIX}
+
+gen_mod_file="${artifacts_dir}/gen_mod_file_${SW_NAME,,}_$(basename ${sysroot}).txt"
+gen_mod_file_pattern="${artifacts_dir}/gen_mod_file*.txt"
