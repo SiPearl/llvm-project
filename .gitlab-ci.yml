@@ -57,6 +57,19 @@ deploy-llvm:
     - allow_failure: true
       when: manual
 
+update-llvm:
+  extends:     ['.update-llvm', '.common-x86_64']
+  needs:       ['deploy-llvm']
+  variables:
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "sipearl" || $CI_COMMIT_BRANCH =~ /^release.*$/)
+      when: always
+    - allow_failure: true
+      when: manual
+
 build-aarch64-llvm-aarch64:
   extends: ['.build-llvm', '.common-aarch64']
   variables:

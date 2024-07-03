@@ -1,0 +1,8 @@
+name=binutils-gdb branch=sipearl:sipearl
+name=gdb branch=sipearl:sipearl
+name=llvm-project branch=sipearl:sipearl
+name=gcc branch=sipearl:sipearl
+name=arm-papi branch=sipearl:sipearl
+name=aarch64 branch=sipearl:sipearl
+name=clang-plugins branch=sipearl:sipearl
+name=ompi branch=sipearl:sipearl

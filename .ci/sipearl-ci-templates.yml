@@ -3,7 +3,7 @@ include:
   - project: 'rhea/tools/gitlab_pipelines_templates'
     ref:     master
     file:    ['slurm-ci.yml']
-stages: ['build', 'test', 'deploy', 'e2e-test']
+stages: ['build', 'test', 'deploy', 'update', 'e2e-test']
 default:
   tags: ['sw']
 variables:
@@ -117,8 +117,18 @@ variables:
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
-  artifacts:
-    expire_in: 3 days
-    when: always
-    paths:
-      - ${ARTIFACTS}
+
+# A template to update LLVM
+.update-llvm:
+  stage: update
+  variables:
+    GIT_STRATEGY:  none
+    ARTIFACTS:	   "./artifacts"
+  extends: ['.slurm-ci']
+  script:
+    - !reference [.slurm-ci-needs, script]
+    - echo "---- Deploying LLVM ----"
+    - ${SLURM_SCRIPT_CMD}  .ci/update-clang.sh ${TARGET}
+  after_script:
+    - !reference [.slurm-ci-artifacts, after_script]
+    - !reference [.slurm-ci, after_script]
