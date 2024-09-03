@@ -8,6 +8,12 @@ set -eux
 
 . $(dirname "$0")/options.sh
 
+# Python 3.10
+export PATH=/workspace/sipearl/lou.knauer/local-x86/bin:${PATH:-""}
+export LD_LIBRARY_PATH=/workspace/sipearl/lou.knauer/local-x86/lib:/workspace/sipearl/lou.knauer/local-x86/lib64:${LD_LIBRARY_PATH:-""}
+
+python3 --version
+
 # Currently supported ACI API version to check here
 export CURRENT_ACI_VERSION="0.1.1"
 
