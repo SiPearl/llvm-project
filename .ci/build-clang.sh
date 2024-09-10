@@ -38,6 +38,8 @@ else
 fi
 
 # Generate meta module toolchain based on module dependencies
+# Warning: This module list and make_toolroot is also in .ci/test-clang.sh
+# TODO: Common make_toolroot. Artifact should be too big if we add toolroot in it...
 make_toolroot "./toolroot" "papi-x86-native ${gbu_module} cmake-x86" ".ci/revfiles"
 # Meta package is in ./toolroot/modulefiles and its name is toolchain/${SW_VERSION}
 set +x

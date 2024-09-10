@@ -7,7 +7,7 @@ set -eu
 
 . ${ACI}/gitlab.sh
 
-if [ -n "$1" ]; then
+if [ -n "${1:-""}" ]; then
     JOB_ID=$1
 fi
 

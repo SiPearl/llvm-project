@@ -9,10 +9,13 @@ build_directory=$(createDir ${current_directory}/${build_directory})
 
 echo "Test LLVM in ${build_directory}"
 
-# module dependencies
-module_load papi-x86-native
+gbu_module=""
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
-    module_load gbu-${TARGET_TRIPLE}
+    if [ ! -d "${sysroot}" ]; then
+	echo "ERROR: sysroot directory: ${sysroot} does not exist"
+	exit -1
+    fi
+    gbu_module="gbu-${TARGET_TRIPLE}"
 fi
 
 current_dir=$(pwd)
