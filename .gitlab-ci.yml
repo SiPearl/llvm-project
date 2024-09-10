@@ -12,10 +12,19 @@ check-formating:
       when: never
     - when: always
 
-build-x86_64-llvm-aarch64:
+build-x86_64-llvm-aarch64-debian11:
   extends: ['.build-llvm', '.common-x86_64']
   variables:
-    TARGET: aarch64
+    TARGET:  aarch64-debian11
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
+      when: never
+    - when: always
+
+build-x86_64-llvm-aarch64-poky4:
+  extends: ['.build-llvm', '.common-x86_64']
+  variables:
+    TARGET:  aarch64-poky4
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
       when: never
@@ -44,9 +53,13 @@ llvm-x86_64-test-suite-x86_64:
 
 deploy-llvm:
   extends:     ['.deploy-llvm', '.common-x86_64']
-  needs:       ['llvm-x86_64-test-suite-x86_64', 'build-x86_64-llvm-aarch64']
+  needs:       [
+    'llvm-x86_64-test-suite-x86_64',
+    'build-x86_64-llvm-aarch64-debian11',
+    'build-x86_64-llvm-aarch64-poky4',
+  ]
   variables:
-      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64'
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64-debian11, build-x86_64-llvm-aarch64-poky4'
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
       when: never
@@ -59,7 +72,7 @@ update-llvm:
   extends:     ['.update-llvm', '.common-x86_64']
   needs:       ['deploy-llvm']
   variables:
-      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64'
+      SLURM_DEPENDENCIES_JOB: 'build-x86_64-llvm-x86_64, build-x86_64-llvm-aarch64-debian11, build-x86_64-llvm-aarch64-poky4'
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
       when: never

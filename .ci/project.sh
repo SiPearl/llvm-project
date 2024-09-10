@@ -25,9 +25,6 @@ SW_VERSION=$(get_version "llvmorg-" "${sysroot}")
 SW_INSTALL_SUFFIX=${SW_INSTALL_SUFFIX:-"${SW_NAME,,}/${SW_VERSION}"}
 echo "Version: ${SW_VERSION}"
 
-CMAKE=${CMAKE:-/toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake}
-CCACHE=${CCACHE:-/home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache}
-
 current_directory=$(pwd)
 artifacts=${ARTIFACTS:-"./artifacts"}
 install_prefix=${INSTALL_PREFIX:-"install_llvm"}

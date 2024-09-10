@@ -9,7 +9,7 @@ artifacts_dir=$(createDir ${artifacts_dir})
 install_prefix=$(createDir ${install_prefix})
 install_dir=$(createDir ${install_dir})
 
-build_directory=${BUILD_DIR:-"build_llvm_${TARGET_TRIPLE}"}
+build_directory=${BUILD_DIR:-"build_llvm_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
 build_directory=$(createDir ${current_directory}/${build_directory})
 
 echo "Build LLVM in ${build_directory}"
@@ -28,11 +28,11 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     fi
 
     sysroot_option="-DDEFAULT_SYSROOT=${sysroot}"
-    omp_option=" -DLIBOMP_LDFLAGS=-Wl,-rpath-link=${sysroot}/lib/${TARGET_TRIPLE}"
+    omp_option+=" -DLIBOMP_LDFLAGS=-Wl,-rpath-link=${sysroot}/lib/${TARGET_TRIPLE}:${sysroot}/usr/lib"
     omp_option+=" -DLIBOMP_OMPD_SUPPORT=OFF"
     omp_option+=" -DLIBOMP_HAVE_SHM_OPEN_WITH_LRT=TRUE"
     linker_name=${TARGET_TRIPLE}-ld
-    gbu_module="gbu-${TARGET_TRIPLE}"
+    gbu_module="gbu-${TARGET_TRIPLE}${SYSROOT_SUFFIX}"
 else
     libpfm=" -DLLVM_ENABLE_LIBPFM=TRUE"
 fi

@@ -4,7 +4,7 @@
 
 set -eux
 
-build_directory=${BUILD_DIR:-"llvm-test-suite-build-${TARGET_TRIPLE}"}
+build_directory=${BUILD_DIR:-"llvm-test-suite-build-${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
 build_directory=$(createDir ${current_directory}/${build_directory})
 
 echo "Test LLVM in ${build_directory}"
@@ -15,7 +15,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 	echo "ERROR: sysroot directory: ${sysroot} does not exist"
 	exit -1
     fi
-    gbu_module="gbu-${TARGET_TRIPLE}"
+    gbu_module="gbu-${TARGET_TRIPLE}${SYSROOT_SUFFIX}"
 fi
 
 # Generate meta module toolchain based on module dependencies

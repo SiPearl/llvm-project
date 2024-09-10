@@ -50,8 +50,6 @@ variables:
 # A set of tools suited for x86 hosts in the DZ, like be2-01 or so.
 .common-x86_64:
   variables:
-    CMAKE:         /toolsroot/lnx/cad/cmake-3.21.4-linux-x86_64/bin/cmake
-    CCACHE:        /home_spl/etienne.renault/shared/opt/x86/ccache-4.8.2-install/bin/ccache
     LLVM_TOOLS:    /workspace/sipearl/tools/x86_64/centos7.9-64/internal/opt/sipearl/clang/18.0.0/bin
 
 # A set of tools suited for ampere04 (Note that ampere03 and ampere04 run different OSes).
