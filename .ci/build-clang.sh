@@ -86,30 +86,38 @@ pushd ${build_directory}
 popd
 
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+    build_decimal=${BUILD_DIR:-"build_decimal_${TARGET_TRIPLE}"}
+    build_decimal=$(createDir ${current_directory}/${build_decimal})
+
+    pushd ${build_decimal}
+      cmake -S ../flang/lib/Decimal -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+          -DCMAKE_INSTALL_PREFIX=${package_prefix} -DCMAKE_CXX_STANDARD=17 \
+          -DLLVM_ENABLE_ASSERTIONS=On \
+	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
+	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
+          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
+          -DBUILD_SHARED_LIBS=ON
+
+      make -j ${jobs} FortranDecimal
+      make DESTDIR=${install_dir} install
+    popd
+
     build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}"}
     build_runtime=$(createDir ${current_directory}/${build_runtime})
 
     pushd ${build_runtime}
-      cmake -S ../llvm -G "Unix Makefiles" \
+      cmake -S ../flang/runtime -G "Unix Makefiles" \
           -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-          -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
-          -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
+          -DCMAKE_INSTALL_PREFIX=${package_prefix} -DCMAKE_CXX_STANDARD=17 \
+          -DLLVM_ENABLE_ASSERTIONS=On \
 	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
 	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
-          -DLLVM_ENABLE_PROJECTS="clang;mlir;flang" \
           -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-          -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-          -DBUILD_SHARED_LIBS=ON ${sysroot_option} \
-          -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}"
+          -DBUILD_SHARED_LIBS=ON
 
-      pushd tools/flang/lib/Decimal
-        make -j ${jobs}
-        make DESTDIR=${install_dir} install
-      popd
-      pushd tools/flang/runtime
-        make -j ${jobs}
-        make DESTDIR=${install_dir} install
-      popd
+      make -j ${jobs} FortranRuntime
+      make DESTDIR=${install_dir} install
     popd
 fi
 
