@@ -15,7 +15,6 @@ check-formating:
 build-x86_64-llvm-aarch64:
   extends: ['.build-llvm', '.common-x86_64']
   variables:
-    LIT_TEST_DIRS: "test test/Unit"
     TARGET: aarch64
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
@@ -25,7 +24,6 @@ build-x86_64-llvm-aarch64:
 build-x86_64-llvm-x86_64:
   extends: ['.build-llvm', '.common-x86_64']
   variables:
-    LIT_TEST_DIRS: "test test/Unit"
     TARGET: x86_64
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH =~ /^aci\/.*$/ || $CI_COMMIT_BRANCH =~ /^wip\/.*$/)
@@ -74,7 +72,6 @@ build-aarch64-llvm-aarch64:
   extends: ['.build-llvm', '.common-aarch64']
   variables:
     TARGET: aarch64
-    LIT_TEST_DIRS: "test test/Unit"
   rules:
   # Remove this when ampere come back to life
     - when: never

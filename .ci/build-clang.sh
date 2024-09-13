@@ -106,6 +106,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 
       make -j ${jobs} FortranDecimal
       make DESTDIR=${install_dir} install
+      cp ${build_decimal}/libFortranDecimal.a ${build_directory}/lib/
     popd
 
     build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}"}
@@ -123,6 +124,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 
       make -j ${jobs} FortranRuntime
       make DESTDIR=${install_dir} install
+      cp ${build_runtime}/libFortranRuntime.a ${build_directory}/lib/
     popd
 fi
 
@@ -131,7 +133,7 @@ python3 --version
 python3 -m pip install --user ./llvm/utils/lit
 
 echo "Test LLVM in ${build_directory}"
-LIT_TEST_DIRS=${LIT_TEST_DIRS:-"test test/Unit"}
+LIT_TEST_DIRS=${LIT_TEST_DIRS:-"test test/Unit tools/flang/test"}
 
 for test_dir in ${LIT_TEST_DIRS} ; do
     report_name="lit-report.${test_dir//\//_}.xml"
