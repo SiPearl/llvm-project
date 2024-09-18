@@ -18,6 +18,16 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     gbu_module="gbu-${TARGET_TRIPLE}"
 fi
 
+# Generate meta module toolchain based on module dependencies
+make_toolroot "./toolroot" "papi-x86-native ${gbu_module} cmake-x86" ".ci/revfiles"
+# Meta package is in ./toolroot/modulefiles and its name is toolchain/${SW_VERSION}
+set +x
+module use ./toolroot/modulefiles
+module load toolchain/${SW_VERSION}
+set -x
+
+module_load python-x86
+
 current_dir=$(pwd)
 
 checkout llvm-test-suite https://gitlab01.int.sipearl.com/software/compilers/benchmarks/llvm-test-suite.git

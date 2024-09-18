@@ -47,6 +47,8 @@ module use ./toolroot/modulefiles
 module load toolchain/${SW_VERSION}
 set -x
 
+module_load python-x86
+
 CC=$(which gcc)
 CXX=$(which g++)
 
@@ -80,6 +82,7 @@ pushd ${build_directory}
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
         -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} ${libpfm} \
+        -DPython3_EXECUTABLE=python3 \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
@@ -124,6 +127,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 fi
 
 # Install of lit
+python3 --version
 python3 -m pip install --user ./llvm/utils/lit
 
 echo "Test LLVM in ${build_directory}"
