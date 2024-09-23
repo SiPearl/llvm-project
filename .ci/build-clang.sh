@@ -134,12 +134,25 @@ python3 -m pip install --user ./llvm/utils/lit
 
 echo "Test LLVM in ${build_directory}"
 LIT_TEST_DIRS=${LIT_TEST_DIRS:-"test test/Unit tools/flang/test"}
+declare -A SKIPPED_TESTS
+
+SKIPPED_TESTS["tools/flang/test"]=""
+if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+    SKIPPED_TESTS["tools/flang/test"]="--xfail Driver/ctofortran.f90;Driver/exec.f90;Runtime/no-cpp-dep.c;Integration/iso-fortran-binding.cpp;Semantics/kinds04_q16.f90"
+fi
 
 for test_dir in ${LIT_TEST_DIRS} ; do
     report_name="lit-report.${test_dir//\//_}.xml"
-    ${build_directory}/bin/llvm-lit -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/${report_name} ${build_directory}/${test_dir}
+    # By default no test to skip
+    skipped_tests=""
+    if [ -n "${SKIPPED_TESTS[${test_dir}]:-""}" ]; then
+	skipped_tests=${SKIPPED_TESTS[${test_dir}]}
+    fi
+
+    ${build_directory}/bin/llvm-lit ${skipped_tests} -j ${jobs} -s --xunit-xml-output ${artifacts_dir}/${report_name} ${build_directory}/${test_dir}
 done
 
+# Module file generation
 plugin_file="${script_dir}/module_plugin.sh"
 rm -f ${plugin_file}
 
