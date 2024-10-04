@@ -65,6 +65,30 @@ if [ ! -f ${BINUTILS_INCDIR}/plugin-api.h ]; then
     exit -1
 fi
 
+RELEASE_BRANCH=""
+CURRENT_BRANCH=$(get_branch)
+
+LLVM_COMPONENTS="dsymutil;llc;llvm-ar;llvm-cxxfilt;\
+llvm-cov;llvm-dwarfdump;llvm-link;llvm-nm;llvm-objdump;\
+llvm-profdata;llvm-ranlib;llvm-readelf;llvm-readobj;llvm-size;llvm-symbolizer;llvm-mca;\
+opt;clang;clang-format;clang-resource-headers;clangDriver;clangBasic;builtins;runtimes;\
+flang-new;flang-libraries;flang-headers;FortranRuntime;FortranDecimal;FortranCommon;\
+openmp-resource-headers;flangFrontend;mlir-libraries;mlir-headers;llvm-libraries;llvm-headers"
+
+llvm_distribution=""
+shared_libs="-DBUILD_SHARED_LIBS=ON"
+release_options=""
+install_target="install"
+release_branch="false"
+if [[ ${CURRENT_BRANCH} =~ release ]]; then
+    RELEASE_BRANCH=${CURRENT_BRANCH}
+    llvm_distribution="-DLLVM_DISTRIBUTION_COMPONENTS=${LLVM_COMPONENTS}"
+    shared_libs=""
+    release_options="-DLLVM_UNREACHABLE_OPTIMIZE=Off -DLLVM_FORCE_VC_REPOSITORY=\"sipearl-internal\" -DLLVM_FORCE_VC_REVISION=$(git rev-parse HEAD)"
+    install_target="install-distribution"
+    release_branch="true"
+fi
+
 LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
 LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
 BUILD_TYPE=${BUILD_TYPE:-"Release"}
@@ -83,17 +107,22 @@ pushd ${build_directory}
         -DCMAKE_C_COMPILER="${CC}" \
         -DCMAKE_CXX_COMPILER="${CXX}" \
         -DLLVM_ENABLE_PROJECTS="${LLVM_PROJECTS}" \
-        -DLLVM_ENABLE_RUNTIMES="${LLVM_RUNTIMES}" \
+        -DLLVM_ENABLE_RUNTIMES="${LLVM_RUNTIMES}" ${llvm_distribution} \
         -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-        -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} ${libpfm} \
-        -DPython3_EXECUTABLE=python3 ${llvm_repo} \
+        ${shared_libs} ${sysroot_option} ${omp_option} ${libpfm} \
+        -DPython3_EXECUTABLE=python3 ${llvm_repo} -DLLVM_STATIC_LINK_CXX_STDLIB=On ${release_options} \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
   make -j ${jobs}
-  make DESTDIR=${install_dir} install install-clang
+  make DESTDIR=${install_dir} ${install_target}
+
+  if [ "${release_branch}" = "true" ]; then
+      # Manual copy of Frotran Modules. No target to add in component list to do that
+      cp ${build_directory}/include/flang/*.mod ${install_dir}/${package_prefix}/include/flang/
+  fi
 popd
 
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
