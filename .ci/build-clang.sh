@@ -4,10 +4,15 @@
 
 set -eux
 
+# Dumping all env vars
+export
+
 # Create directories
 artifacts_dir=$(createDir ${artifacts_dir})
 install_prefix=$(createDir ${install_prefix})
 install_dir=$(createDir ${install_dir})
+
+BUILD_TYPE=${BUILD_TYPE:-"Release"}
 
 build_directory=${BUILD_DIR:-"build_llvm_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
 build_directory=$(createDir ${current_directory}/${build_directory})
@@ -71,9 +76,17 @@ CURRENT_BRANCH=$(get_branch)
 LLVM_COMPONENTS="dsymutil;llc;llvm-ar;llvm-cxxfilt;\
 llvm-cov;llvm-dwarfdump;llvm-link;llvm-nm;llvm-objdump;\
 llvm-profdata;llvm-ranlib;llvm-readelf;llvm-readobj;llvm-size;llvm-symbolizer;llvm-mca;\
-opt;clang;clang-format;clang-resource-headers;clangDriver;clangBasic;builtins;runtimes;\
+opt;clang;clang-format;clang-resource-headers;clangDriver;clangBasic;runtimes;\
 flang-new;flang-libraries;flang-headers;FortranRuntime;FortranDecimal;FortranCommon;\
 openmp-resource-headers;flangFrontend;mlir-libraries;mlir-headers;llvm-libraries;llvm-headers"
+
+LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
+if [ -n "${sysroot}" -a "${sysroot}" = "native" ]; then
+    LLVM_RUNTIMES_LIST=${LLVM_RUNTIMES:-"compiler-rt;openmp"}
+    LLVM_COMPONENTS+=";builtins"
+else
+    LLVM_RUNTIMES_LIST=${LLVM_RUNTIMES:-"openmp"}
+fi
 
 llvm_distribution=""
 shared_libs="-DBUILD_SHARED_LIBS=ON"
@@ -89,10 +102,6 @@ if [[ ${CURRENT_BRANCH} =~ release ]]; then
     release_branch="true"
 fi
 
-LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
-LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
-BUILD_TYPE=${BUILD_TYPE:-"Release"}
-
 llvm_repo=""
 if [ -n "${CI_REPOSITORY_URL:-""}" ]; then
     # Must provide URL with valid token. LLVM check if can use git url.
@@ -107,7 +116,7 @@ pushd ${build_directory}
         -DCMAKE_C_COMPILER="${CC}" \
         -DCMAKE_CXX_COMPILER="${CXX}" \
         -DLLVM_ENABLE_PROJECTS="${LLVM_PROJECTS}" \
-        -DLLVM_ENABLE_RUNTIMES="${LLVM_RUNTIMES}" ${llvm_distribution} \
+        -DLLVM_ENABLE_RUNTIMES="${LLVM_RUNTIMES_LIST}" ${llvm_distribution} \
         -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
@@ -116,6 +125,12 @@ pushd ${build_directory}
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
+
+  if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+      rm -f ${build_directory}/lib/libFortranDecimal.a
+      rm -f ${build_directory}/lib/libFortranRuntime.a
+  fi
+
   make -j ${jobs}
   make DESTDIR=${install_dir} ${install_target}
 
@@ -125,8 +140,47 @@ pushd ${build_directory}
   fi
 popd
 
+build_compiler_rt=${BUILD_DIR:-"build_compiler_rt_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
-    build_decimal=${BUILD_DIR:-"build_decimal_${TARGET_TRIPLE}"}
+    build_compiler_rt=$(createDir ${current_directory}/${build_compiler_rt})
+
+    # Override these variables to get same install path than when building llvm with compiler-rt
+    # LLVM will not found compiler-rt libraries otherwise
+    # Why these variables: defines LLVM_TREE_AVAILABLE in compiler-rt/cmake/base-config-ix.cmake
+    # LLVM_LIBRARY_OUTPUT_INTDIR="${build_directory}/lib"
+    # LLVM_RUNTIME_OUTPUT_INTDIR="${build_directory}/bin"
+    # Package version is taken in LLVMConfigVersion.cmake from previously configured llvm
+    # PACKAGE_VERSION=${package_version}
+
+    package_version=$(grep -E "set\(PACKAGE_VERSION " ${build_directory}/lib/cmake/llvm/LLVMConfigVersion.cmake |sed -e 's/set(PACKAGE_VERSION \"//g' |sed -e 's/\")//g')
+
+    pushd ${build_compiler_rt}
+      cmake --trace-expand -S ../compiler-rt -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+          -DCMAKE_INSTALL_PREFIX=${package_prefix} -DCMAKE_CXX_STANDARD=17 \
+          -DLLVM_ENABLE_ASSERTIONS=On \
+	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
+	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
+	  -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}" \
+	  -DCMAKE_SYSROOT="${sysroot}" \
+          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" ${shared_libs} \
+	  -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
+	  -DCOMPILER_RT_EMULATOR="qemu-aarch64 -L ${sysroot}" \
+	  -DCOMPILER_RT_INCLUDE_TESTS=ON \
+	  -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
+	  -DCOMPILER_RT_TEST_COMPILER="${install_dir}${package_prefix}/bin/clang" \
+	  -DLLVM_CMAKE_DIR="${build_directory}" \
+	  -DLLVM_LIBRARY_OUTPUT_INTDIR="${build_directory}/lib" \
+	  -DLLVM_RUNTIME_OUTPUT_INTDIR="${build_directory}/bin" \
+	  -DPACKAGE_VERSION=${package_version} \
+	  -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
+	  -DCOMPILER_RT_TEST_COMPILER_CFLAGS="-O2" 2> ${artifacts_dir}/compiler-rt-CMakeLogs.txt
+
+      make -j ${jobs}
+      make DESTDIR=${install_dir} install
+    popd
+
+    build_decimal=${BUILD_DIR:-"build_decimal_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
     build_decimal=$(createDir ${current_directory}/${build_decimal})
 
     pushd ${build_decimal}
@@ -136,15 +190,14 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
           -DLLVM_ENABLE_ASSERTIONS=On \
 	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
 	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
-          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-          -DBUILD_SHARED_LIBS=ON
+          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" ${shared_libs}
 
       make -j ${jobs} FortranDecimal
       make DESTDIR=${install_dir} install
       cp ${build_decimal}/libFortranDecimal.a ${build_directory}/lib/
     popd
 
-    build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}"}
+    build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
     build_runtime=$(createDir ${current_directory}/${build_runtime})
 
     pushd ${build_runtime}
@@ -154,8 +207,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
           -DLLVM_ENABLE_ASSERTIONS=On \
 	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
 	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
-          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
-          -DBUILD_SHARED_LIBS=ON
+          -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" ${shared_libs}
 
       make -j ${jobs} FortranRuntime
       make DESTDIR=${install_dir} install
@@ -166,6 +218,22 @@ fi
 # Install of lit
 python3 --version
 python3 -m pip install --user ./llvm/utils/lit
+
+if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
+    if ! command -v qemu-aarch64 ; then
+	set +u
+	TOOLSROOT=/toolsroot source /toolsroot/lnx/scripts/SPLmanagetools.sh -set hpc_qemu-6.2.0_gcc-11.2.0
+	set -u
+    fi
+    if ! command -v qemu-aarch64 ; then
+	echoerr "Failed to find qemu-aarch64"
+    fi
+
+    pushd ${build_compiler_rt}
+      report_name="lit-report.compiler_rt.xml"
+      PATH=${install_dir}${package_prefix}/bin:${PATH} make check-builtins
+    popd
+fi
 
 echo "Test LLVM in ${build_directory}"
 LIT_TEST_DIRS=${LIT_TEST_DIRS:-"test test/Unit tools/flang/test"}
