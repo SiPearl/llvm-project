@@ -69,6 +69,12 @@ LLVM_PROJECTS=${LLVM_PROJECTS:-"clang;mlir;flang;clang-tools-extra"}
 LLVM_RUNTIMES=${LLVM_RUNTIMES:-"openmp"}
 BUILD_TYPE=${BUILD_TYPE:-"Release"}
 
+llvm_repo=""
+if [ -n "${CI_REPOSITORY_URL:-""}" ]; then
+    # Must provide URL with valid token. LLVM check if can use git url.
+    llvm_repo="-DLLVM_FORCE_VC_REPOSITORY=${CI_REPOSITORY_URL} -DLLVM_FORCE_VC_REVISION=$(git rev-parse HEAD)"
+fi
+
 pushd ${build_directory}
   cmake --trace-expand -S ../llvm -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -82,7 +88,7 @@ pushd ${build_directory}
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
         -DBUILD_SHARED_LIBS=ON ${sysroot_option} ${omp_option} ${libpfm} \
-        -DPython3_EXECUTABLE=python3 \
+        -DPython3_EXECUTABLE=python3 ${llvm_repo} \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
