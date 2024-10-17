@@ -109,7 +109,7 @@ if [ -n "${CI_REPOSITORY_URL:-""}" ]; then
 fi
 
 pushd ${build_directory}
-  cmake --trace-expand -S ../llvm -G "Unix Makefiles" \
+  cmake -S ../llvm -G "Unix Makefiles" \
         -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
         -DCMAKE_INSTALL_PREFIX=${package_prefix} -DLLVM_INSTALL_UTILS=On -DCMAKE_CXX_STANDARD=17 \
         -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_DUMP=On -DLLVM_BUILD_TESTS=On \
@@ -122,7 +122,7 @@ pushd ${build_directory}
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
         ${shared_libs} ${sysroot_option} ${omp_option} ${libpfm} \
         -DPython3_EXECUTABLE=python3 ${llvm_repo} -DLLVM_STATIC_LINK_CXX_STDLIB=On ${release_options} \
-        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" 2> ${artifacts_dir}/llvm-CMakeLogs.txt
+        -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" # 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
   cp ./CMakeCache.txt ${artifacts_dir}/llvm-CMakeCache.txt
 
@@ -155,7 +155,13 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     package_version=$(grep -E "set\(PACKAGE_VERSION " ${build_directory}/lib/cmake/llvm/LLVMConfigVersion.cmake |sed -e 's/set(PACKAGE_VERSION \"//g' |sed -e 's/\")//g')
 
     pushd ${build_compiler_rt}
-      cmake --trace-expand -S ../compiler-rt -G "Unix Makefiles" \
+
+      qemu_cmd="qemu-aarch64 -L ${sysroot}"
+      if [[ ${sysroot} =~ poky ]]; then
+	  qemu_cmd="qemu-aarch64 -r 6.2 -L ${sysroot}"
+      fi
+
+      cmake -S ../compiler-rt -G "Unix Makefiles" \
           -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
           -DCMAKE_INSTALL_PREFIX=${package_prefix} -DCMAKE_CXX_STANDARD=17 \
           -DLLVM_ENABLE_ASSERTIONS=On \
@@ -165,7 +171,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 	  -DCMAKE_SYSROOT="${sysroot}" \
           -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" ${shared_libs} \
 	  -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
-	  -DCOMPILER_RT_EMULATOR="qemu-aarch64 -L ${sysroot}" \
+	  -DCOMPILER_RT_EMULATOR="${qemu_cmd}" \
 	  -DCOMPILER_RT_INCLUDE_TESTS=ON \
 	  -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
 	  -DCOMPILER_RT_TEST_COMPILER="${install_dir}${package_prefix}/bin/clang" \
@@ -173,8 +179,8 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 	  -DLLVM_LIBRARY_OUTPUT_INTDIR="${build_directory}/lib" \
 	  -DLLVM_RUNTIME_OUTPUT_INTDIR="${build_directory}/bin" \
 	  -DPACKAGE_VERSION=${package_version} \
-	  -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
-	  -DCOMPILER_RT_TEST_COMPILER_CFLAGS="-O2" 2> ${artifacts_dir}/compiler-rt-CMakeLogs.txt
+	  -DCOMPILER_RT_DEFAULT_TARGET_TRIPLE=${TARGET_TRIPLE} \
+	  -DCOMPILER_RT_TEST_COMPILER_CFLAGS="-O2" # 2> ${artifacts_dir}/compiler-rt-CMakeLogs.txt
 
       make -j ${jobs}
       make DESTDIR=${install_dir} install
