@@ -122,14 +122,37 @@ public:
     return ST->hasSVE();
   }
 
+  enum AArch64RegisterClass {
+    GPR, FPR, PR
+  };
+  unsigned getRegisterClassForType(bool Vector, Type *Ty = nullptr) const;
+
+  const char *getRegisterClassName(unsigned ClassID) const override {
+    switch (ClassID) {
+    case GPR:
+      return "GPR";
+    case FPR:
+      return "FPU/NEON/SVE";
+    case PR:
+      return "Predicates";
+    default:
+      return "?";
+    }
+  }
+
+  unsigned getRegUsageForType(Type *Ty) const;
+
   unsigned getNumberOfRegisters(unsigned ClassID) const override {
-    bool Vector = (ClassID == 1);
-    if (Vector) {
-      if (ST->hasNEON())
-        return 32;
+    switch (ClassID) {
+    case GPR:
+      return 31;
+    case FPR:
+      return ST->hasNEON() ? 32 : 0;
+    case PR:
+      return ST->hasSVE() ? 16 : 0;
+    default:
       return 0;
     }
-    return 31;
   }
 
   InstructionCost
@@ -414,8 +437,6 @@ public:
   unsigned getGISelRematGlobalCost() const override {
     return 2;
   }
-
-  unsigned getGISelRematGlobalCost() const override { return 2; }
 
   unsigned getMinTripCountTailFoldingThreshold() const override {
     return ST->hasSVE() ? 5 : 0;

@@ -22,8 +22,10 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/InstructionCost.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 #include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
@@ -549,6 +551,55 @@ AArch64TTIImpl::getPopcntSupport(unsigned TyWidth) const {
     return TTI::PSK_FastHardware;
   // TODO: AArch64TargetLowering::LowerCTPOP() supports 128bit popcount.
   return TTI::PSK_Software;
+}
+
+// GPRs (containing integers and pointers) have ClassID 0, FP/NEON/SVE
+// registers (they all must be in the same class as they "overlap") have ClassID
+// 1, and SVE predicates ClassID 2.
+// TODO: SME tiles? I think they should go into the ClassID 1, but I am unsure.
+unsigned AArch64TTIImpl::getRegisterClassForType(bool Vector, Type *Ty) const {
+  if (Vector || isa_and_nonnull<VectorType>(Ty))
+    return isa_and_nonnull<ScalableVectorType>(Ty) && Ty->isIntOrIntVectorTy(1)
+      ? AArch64RegisterClass::PR
+      : AArch64RegisterClass::FPR;
+
+  if (!Ty || Ty->isAggregateType())
+    return BaseT::getRegisterClassForType(Vector, Ty);
+
+  Ty = Ty->getScalarType();
+  if (Ty->isIntOrPtrTy())
+    return AArch64RegisterClass::GPR;
+  if (Ty->isFloatingPointTy())
+    return AArch64RegisterClass::FPR;
+
+  // Ty can be VoidTyID
+  return AArch64RegisterClass::GPR;
+}
+
+unsigned AArch64TTIImpl::getRegUsageForType(Type *Ty) const {
+  auto *VecTy = dyn_cast<VectorType>(Ty);
+  if (!VecTy)
+    // The only user of this, as of now, is the vectorizer, so other
+    // cases don't need that much consideration.
+    return BaseT::getRegUsageForType(Ty);
+
+  if (!ST->hasNEON())
+    return VecTy->isScalableTy() ? INT_MAX
+                                 : VecTy->getElementCount().getFixedValue();
+
+  if (ST->hasSVE() &&
+      (VecTy->isScalableTy() || ST->useSVEForFixedLengthVectors())) {
+    unsigned ElmSize =
+        VecTy->isIntOrIntVectorTy(1)
+            ? 8 // SVE predicates have a max. granularity of one byte.
+            : DL.getTypeSizeInBits(Ty->getScalarType()).getFixedValue();
+
+    // Always use at least one SVE register, more if necessary.
+    return (ElmSize * VecTy->getElementCount().getKnownMinValue() + 127) / 128;
+  }
+
+  // Use the fallback/original logic for NEON.
+  return BaseT::getRegUsageForType(Ty);
 }
 
 static bool isUnpackedVectorVT(EVT VecVT) {

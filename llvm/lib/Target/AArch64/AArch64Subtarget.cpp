@@ -287,6 +287,13 @@ void AArch64Subtarget::initializeProperties(bool HasMinSize) {
     MaxBytesForLoopAlignment = 16;
     VScaleForTuning = 2;
     DefaultSVETFOpts = TailFoldingOpts::Simple;
+    // Neoverse V1 has 4 NEON FP execution units, so a IC of 4 can be helpfull
+    // to maximise instruction-level parallelism. In theory, a IC of 2 (default)
+    // for SVE is enough because the instr. throughput for SVE is half that of
+    // NEON, but in practice, a higher IC can still help, even for SVE!
+    MaxInterleaveFactor = 4;
+    // Only used by default-disabled passes (e.g. LoopInterchange).
+    CacheLineSize = 64;
     break;
   case Neoverse512TVB:
     PrefFunctionAlignment = Align(16);
