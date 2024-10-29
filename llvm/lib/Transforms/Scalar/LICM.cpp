@@ -169,6 +169,13 @@ cl::opt<unsigned> llvm::SetLicmMssaNoAccForPromotionCap(
              "number of accesses allowed to be present in a loop in order to "
              "enable memory promotion."));
 
+// Enable the use of IR metadata added by directives such as
+// '#pragma clang loop vectorize(assume_safety)' or '#pragma omp simd'.
+static cl::opt<bool> UseParallelAccessMD(
+    "licm-use-parallel-access-md", cl::init(true), cl::Hidden,
+    cl::desc("Use the !llvm.loop.parallel_accesses MD as extra information "
+             "for hoisting/sinking loop-invariant accesses."));
+
 static bool inSubLoop(BasicBlock *BB, Loop *CurLoop, LoopInfo *LI);
 static bool isNotUsedOrFoldableInLoop(const Instruction &I, const Loop *CurLoop,
                                       const LoopSafetyInfo *SafetyInfo,
@@ -439,6 +446,10 @@ bool LoopInvariantCodeMotion::runOnLoop(Loop *L, AAResults *AA, LoopInfo *LI,
   });
 
   MemorySSAUpdater MSSAU(MSSA);
+
+  if (UseParallelAccessMD)
+    addNoAliasInfoDerivedFromParallelAccessesMD(*LI, *L, *SE, *AA, &MSSAU);
+
   SinkAndHoistLICMFlags Flags(LicmMssaOptCap, LicmMssaNoAccForPromotionCap,
                               /*IsSink=*/true, *L, *MSSA);
 

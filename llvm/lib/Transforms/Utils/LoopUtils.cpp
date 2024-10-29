@@ -2246,3 +2246,101 @@ llvm::hasPartialIVCondition(const Loop &L, unsigned MSSAThreshold,
 
   return {};
 }
+
+bool llvm::addNoAliasInfoDerivedFromParallelAccessesMD(
+    const LoopInfo &LI, const Loop &L, ScalarEvolution &SE, AAResults &AA,
+    MemorySSAUpdater *MSSAU) {
+  if (!L.isAnnotatedParallel())
+    return false;
+
+  SmallSetVector<Instruction *, 4> InvariantAccesses;
+  SmallSetVector<Instruction *, 4> VariantAccesses;
+  for (BasicBlock *BB : L.blocks())
+    for (Instruction &I : *BB) {
+      Value *Ptr = getLoadStorePointerOperand(&I);
+      if (!Ptr)
+        continue;
+
+      if (L.isLoopInvariant(Ptr))
+        InvariantAccesses.insert(&I);
+
+      // For now, only handle the cases I am sure about: Affine accesses
+      // across the loop. Things get more complicated for indirect memory
+      // accesses, this is less of a algorithmic question and more me beeing
+      // unsure about the wording in the OpenMP specification and the LLVM
+      // language reference.
+      if (const auto *PtrSCEV = dyn_cast<SCEVAddRecExpr>(SE.getSCEV(Ptr));
+          PtrSCEV && PtrSCEV->getLoop() == &L)
+        VariantAccesses.insert(&I);
+    }
+
+  if (InvariantAccesses.empty() || VariantAccesses.empty())
+    return false;
+
+  // Loops with the '!llvm.loop.parallel_accesses' MD do not have any loop
+  // carried memory dependencies. It is the users task to ensure this. For the
+  // compiler, this means that there can be no aliasing between a loop-variant
+  // and a loop-invariant memory access!
+
+  bool Changed = false;
+  auto &Ctx = L.getHeader()->getContext();
+  auto &F = *L.getHeader()->getParent();
+  MDBuilder MDB(Ctx);
+  MDNode *Domain = nullptr;
+
+  auto AddNoAliasMDBetween = [&](StoreInst *SI,
+                                 ArrayRef<Instruction *> Accesses) {
+    assert(!is_contained(Accesses, SI));
+
+    // Avoid adding useless MD if TBAA or so can already tell.
+    SmallVector<Instruction *> CouldNeedMD;
+    for (Instruction *I : Accesses)
+      if (AA.alias(MemoryLocation::get(SI), MemoryLocation::get(I)) ==
+          AliasResult::MayAlias)
+        CouldNeedMD.push_back(I);
+
+    // Return early to avoid creation of unnesessary scopes.
+    if (CouldNeedMD.empty())
+      return;
+
+    Changed = true;
+    if (!Domain)
+      Domain = MDB.createAnonymousAliasScopeDomain(
+          (F.getName() + "." + L.getName() + ".noalias.scope.domain").str());
+
+    MDNode *Scope = MDB.createAnonymousAliasScope(
+        Domain,
+        (F.getName() + "." + L.getName() + ".scope." + SI->getName()).str());
+    for (Instruction *I : CouldNeedMD) {
+      LLVM_DEBUG(dbgs() << "NoAlias between " << *SI << "\n"
+                        << "            and " << *I << "\n");
+      I->setMetadata(
+          LLVMContext::MD_alias_scope,
+          MDNode::concatenate(I->getMetadata(LLVMContext::MD_alias_scope),
+                              MDNode::get(Ctx, {Scope})));
+    }
+
+    SI->setMetadata(
+        LLVMContext::MD_noalias,
+        MDNode::concatenate(SI->getMetadata(LLVMContext::MD_noalias),
+                            MDNode::get(Ctx, {Scope})));
+  };
+
+  // Add noalias MD between invariant stores and all variant accesses.
+  for (Instruction *InvAcc : InvariantAccesses)
+    if (auto *SI = dyn_cast<StoreInst>(InvAcc))
+      AddNoAliasMDBetween(SI, VariantAccesses.getArrayRef());
+
+  // Add noalias MD between variant stores and all invariant accesses.
+  for (Instruction *VarAcc : VariantAccesses)
+    if (auto *SI = dyn_cast<StoreInst>(VarAcc))
+      AddNoAliasMDBetween(SI, InvariantAccesses.getArrayRef());
+
+  // TODO: ScopedNoAlaisAA is stateless, so changing the IR is enough
+  // and it does not need to be updated/invalidated. MSSA is lazy and will
+  // see the changes when queried for the first time after this function
+  // was run. This means that the effects will be visible. It is legal to
+  // "miss" the changes (more pessimistic may-aliases), but it would be better
+  // to properly invalidate/update AA and MSSA in the future.
+  return Changed;
+}

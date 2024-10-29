@@ -577,6 +577,15 @@ std::optional<IVConditionInfo> hasPartialIVCondition(const Loop &L,
                                                      const MemorySSA &MSSA,
                                                      AAResults &AA);
 
+/// If the given loop has parallel accesses MD (as created by directives
+/// such as '#pragma clang loop vectorize(assume_safety)' or '#pragma omp ...',
+/// add additional noalias information to the loop that can be derived from it.
+/// This can then be used for improved loop-invariant code motion, among others.
+/// If information was added, it returns true.
+bool addNoAliasInfoDerivedFromParallelAccessesMD(
+    const LoopInfo &LI, const Loop &L, ScalarEvolution &SE, AAResults &AA,
+    MemorySSAUpdater *MSSAU = nullptr);
+
 } // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_UTILS_LOOPUTILS_H
