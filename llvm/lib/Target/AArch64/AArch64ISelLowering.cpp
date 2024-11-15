@@ -19751,6 +19751,59 @@ performExtractVectorEltCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
   return SDValue();
 }
 
+static SDValue simplifyAlternatingMask(SDNode *N, SelectionDAG &DAG) {
+  // Try to match:
+  //    t2: nxv2i1 = splat_vector Constant:i1<0>
+  //    t7: nxv2i1 = splat_vector Constant:i1<-1>
+  //  t8: nxv2i1,nxv2i1 = vector_interleave t2, t7
+  //    t0: ch,glue = EntryToken
+  //    t9: nxv4i1 = concat_vectors t8, t8:1
+
+  // Match the concatenation of a interleave of two vectors.
+  EVT VT = N->getValueType(0);
+  SDValue N0 = N->getOperand(0), N1 = N->getOperand(1);
+  if (!VT.isScalableVector() || VT.getVectorElementType() != MVT::i1 ||
+      N0.getNode() != N1.getNode() || N0.getResNo() != 0 ||
+      N1.getResNo() != 1 || N0.getOpcode() != ISD::VECTOR_INTERLEAVE)
+    return SDValue();
+
+  // Match the interleave of a all-zero and a all-true constant mask.
+  N0 = N->getOperand(0).getOperand(0);
+  N1 = N->getOperand(0).getOperand(1);
+  ConstantSDNode *C0 = nullptr, *C1 = nullptr;
+  if (N0.getOpcode() != ISD::SPLAT_VECTOR ||
+      N1.getOpcode() != ISD::SPLAT_VECTOR ||
+      !(C0 = dyn_cast<ConstantSDNode>(N0.getOperand(0))) ||
+      !(C1 = dyn_cast<ConstantSDNode>(N1.getOperand(0))) ||
+      !((C0->isZero() && C1->isAllOnes()) || (C0->isAllOnes() && C1->isZero())))
+    return SDValue();
+
+  // Replace the interleave of two constant masks by a single ptrue.
+  // Use it with a 2x wider element in order to effectively have a
+  // alternating mask.
+  MVT PTrueVT;
+  switch (VT.getVectorMinNumElements()) {
+  case 2:
+    PTrueVT = MVT::nxv1i1;
+    break;
+  case 4:
+    PTrueVT = MVT::nxv2i1;
+    break;
+  case 8:
+    PTrueVT = MVT::nxv4i1;
+    break;
+  case 16:
+    PTrueVT = MVT::nxv8i1;
+    break;
+  default:
+    return SDValue();
+  }
+
+  SDValue PTrue = getSVEPredicateBitCast(
+      VT, getPTrue(DAG, N, PTrueVT, AArch64SVEPredPattern::all), DAG);
+  return C0->isZero() ? DAG.getNOT(N, PTrue, VT) : PTrue;
+}
+
 static SDValue performConcatVectorsCombine(SDNode *N,
                                            TargetLowering::DAGCombinerInfo &DCI,
                                            SelectionDAG &DAG) {
@@ -19760,7 +19813,7 @@ static SDValue performConcatVectorsCombine(SDNode *N,
   unsigned N0Opc = N0->getOpcode(), N1Opc = N1->getOpcode();
 
   if (VT.isScalableVector())
-    return SDValue();
+    return simplifyAlternatingMask(N, DAG);
 
   if (N->getNumOperands() == 2 && N0Opc == ISD::TRUNCATE &&
       N1Opc == ISD::TRUNCATE) {
