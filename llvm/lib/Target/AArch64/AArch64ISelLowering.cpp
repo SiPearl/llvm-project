@@ -23,6 +23,7 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -26105,11 +26106,64 @@ static SDValue removeRedundantInsertVectorElt(SDNode *N) {
 }
 
 static SDValue
+tryToConstructVectorUsingINSR(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
+
+  // Bail out early if there is nothing to win here:
+  EVT VT = N->getValueType(0);
+  if (!VT.isScalableVector() || DCI.isBeforeLegalize() ||
+      N->getOperand(0).getOpcode() != ISD::INSERT_VECTOR_ELT ||
+      !isa<ConstantSDNode>(N->getOperand(2).getNode()))
+    return SDValue();
+
+  // Check if this is a chain of insertelement ops and that
+  // starts with a poison or undef value where the insert
+  // positions are all constants.
+  std::map<unsigned, SDValue> Values;
+  SDNode *Vec = N;
+  while (Vec->getOpcode() == ISD::INSERT_VECTOR_ELT) {
+    if (!Vec->hasOneUse() || !isa<ConstantSDNode>(Vec->getOperand(2)))
+      return SDValue();
+
+    // Inserting at the same position multiple times could be supported, but
+    // would require a bit more logic to keep track of the last inserted value.
+    unsigned Pos = cast<ConstantSDNode>(Vec->getOperand(2))->getZExtValue();
+    if (Values.find(Pos) != Values.end())
+      return SDValue();
+
+    Values[Pos] = Vec->getOperand(1);
+    Vec = Vec->getOperand(0).getNode();
+  }
+  unsigned MinPos = Values.begin()->first, MaxPos = Values.rbegin()->first;
+  // TODO: Should there be a check for how many unfilled lanes there are?
+  // E.g. if only the very first and the very last lane are set, this would
+  // insert (MaxPos - MinPos) - 1 undef values, and the normal codegen might
+  // be better (it does not have to handle fillers).
+  if (!Vec->isUndef() || MinPos != 0)
+    return SDValue();
+
+  // Instead of the insert element chain, generate INSR instructions,
+  // which shift the vector, so we must insert backwards.
+  SDLoc DL(N);
+  SDValue Chain = DCI.DAG.getUNDEF(VT);
+  for (unsigned I = 0; I <= MaxPos; I++) {
+    SDValue V = Values[MaxPos - I];
+    if (!V)
+      V = DCI.DAG.getUNDEF(VT.getVectorElementType());
+    Chain = DCI.DAG.getNode(AArch64ISD::INSR, DL, VT, Chain, V);
+  }
+
+  return Chain;
+}
+
+static SDValue
 performInsertVectorEltCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
   if (SDValue Res = removeRedundantInsertVectorElt(N))
     return Res;
 
-  return performPostLD1Combine(N, DCI, true);
+  if (SDValue Res = performPostLD1Combine(N, DCI, true))
+    return Res;
+
+  return tryToConstructVectorUsingINSR(N, DCI);
 }
 
 static SDValue performFPExtendCombine(SDNode *N, SelectionDAG &DAG,

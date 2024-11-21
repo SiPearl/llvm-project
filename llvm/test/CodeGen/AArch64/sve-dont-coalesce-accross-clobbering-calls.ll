@@ -22,15 +22,12 @@ define void @bar(ptr %src, ptr %dst, float %exp) #0 {
 ; CHECK-NEXT:    fmov s0, s9
 ; CHECK-NEXT:    fmov s1, s8
 ; CHECK-NEXT:    bl foo
-; CHECK-NEXT:    mov w8, #1 // =0x1
-; CHECK-NEXT:    index z1.s, #0, #1
-; CHECK-NEXT:    ptrue p0.s
-; CHECK-NEXT:    mov z2.s, w8
-; CHECK-NEXT:    ldp d9, d8, [sp, #16] // 16-byte Folded Reload
-; CHECK-NEXT:    cmpeq p0.s, p0/z, z1.s, z2.s
+; CHECK-NEXT:    // kill: def $s0 killed $s0 def $z0
 ; CHECK-NEXT:    fmov s1, s10
-; CHECK-NEXT:    mov z1.s, p0/m, s0
-; CHECK-NEXT:    str z1, [x19]
+; CHECK-NEXT:    ldp d9, d8, [sp, #16] // 16-byte Folded Reload
+; CHECK-NEXT:    insr z0.s, s0
+; CHECK-NEXT:    insr z0.s, s1
+; CHECK-NEXT:    str z0, [x19]
 ; CHECK-NEXT:    ldp x30, x19, [sp, #32] // 16-byte Folded Reload
 ; CHECK-NEXT:    ldr d10, [sp], #48 // 8-byte Folded Reload
 ; CHECK-NEXT:    ret
@@ -57,16 +54,12 @@ define void @use_of_sve_reg_after_call(ptr %src, ptr %dst, float %exp) #0 {
 ; CHECK-NEXT:    str z0, [sp] // 16-byte Folded Spill
 ; CHECK-NEXT:    // kill: def $s0 killed $s0 killed $z0
 ; CHECK-NEXT:    bl foo
-; CHECK-NEXT:    mov w8, #1 // =0x1
-; CHECK-NEXT:    index z1.s, #0, #1
-; CHECK-NEXT:    ptrue p0.s
-; CHECK-NEXT:    mov z2.s, w8
-; CHECK-NEXT:    // kill: def $s0 killed $s0 def $z0
-; CHECK-NEXT:    cmpeq p0.s, p0/z, z1.s, z2.s
 ; CHECK-NEXT:    ldr z1, [sp] // 16-byte Folded Reload
+; CHECK-NEXT:    // kill: def $s0 killed $s0 def $z0
 ; CHECK-NEXT:    mov z1.s, z1.s[1]
-; CHECK-NEXT:    mov z0.s, p0/m, s1
-; CHECK-NEXT:    str z0, [x19]
+; CHECK-NEXT:    insr z1.s, s1
+; CHECK-NEXT:    insr z1.s, s0
+; CHECK-NEXT:    str z1, [x19]
 ; CHECK-NEXT:    addvl sp, sp, #1
 ; CHECK-NEXT:    ldp x30, x19, [sp, #16] // 16-byte Folded Reload
 ; CHECK-NEXT:    ldr x29, [sp], #32 // 8-byte Folded Reload
