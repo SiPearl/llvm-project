@@ -54,6 +54,7 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetCallingConv.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/CodeGenTypes/MachineValueType.h"
@@ -19751,6 +19752,30 @@ performExtractVectorEltCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
   return SDValue();
 }
 
+static SDValue getSVEPredicateForHalfNElms(EVT VT, SDLoc DL,
+                                           SelectionDAG &DAG) {
+  MVT PTrueVT;
+  switch (VT.getVectorMinNumElements()) {
+  case 2:
+    PTrueVT = MVT::nxv1i1;
+    break;
+  case 4:
+    PTrueVT = MVT::nxv2i1;
+    break;
+  case 8:
+    PTrueVT = MVT::nxv4i1;
+    break;
+  case 16:
+    PTrueVT = MVT::nxv8i1;
+    break;
+  default:
+    return SDValue();
+  }
+
+  return getSVEPredicateBitCast(
+      VT, getPTrue(DAG, DL, PTrueVT, AArch64SVEPredPattern::all), DAG);
+}
+
 static SDValue simplifyAlternatingMask(SDNode *N, SelectionDAG &DAG) {
   // Try to match:
   //    t2: nxv2i1 = splat_vector Constant:i1<0>
@@ -19781,27 +19806,32 @@ static SDValue simplifyAlternatingMask(SDNode *N, SelectionDAG &DAG) {
   // Replace the interleave of two constant masks by a single ptrue.
   // Use it with a 2x wider element in order to effectively have a
   // alternating mask.
-  MVT PTrueVT;
-  switch (VT.getVectorMinNumElements()) {
-  case 2:
-    PTrueVT = MVT::nxv1i1;
-    break;
-  case 4:
-    PTrueVT = MVT::nxv2i1;
-    break;
-  case 8:
-    PTrueVT = MVT::nxv4i1;
-    break;
-  case 16:
-    PTrueVT = MVT::nxv8i1;
-    break;
-  default:
-    return SDValue();
-  }
+  SDValue PTrue = getSVEPredicateForHalfNElms(VT, N, DAG);
+  return C0->isZero() && PTrue ? DAG.getNOT(N, PTrue, VT) : PTrue;
+}
 
-  SDValue PTrue = getSVEPredicateBitCast(
-      VT, getPTrue(DAG, N, PTrueVT, AArch64SVEPredPattern::all), DAG);
-  return C0->isZero() ? DAG.getNOT(N, PTrue, VT) : PTrue;
+static SDValue simplifyAlternatingSplat(SDNode *N,
+                                        TargetLowering::DAGCombinerInfo &DCI,
+                                        SelectionDAG &DAG) {
+  EVT VT = N->getValueType(0);
+  SDValue Op = N->getOperand(0);
+  if (!VT.isScalableVT() || Op.getOpcode() != ISD::VECTOR_INTERLEAVE ||
+      Op.getNode() != N->getOperand(1).getNode() || Op.getResNo() != 0 ||
+      N->getOperand(1).getResNo() != 1 ||
+      Op.getOperand(0).getOpcode() != ISD::SPLAT_VECTOR ||
+      Op.getOperand(1).getOpcode() != ISD::SPLAT_VECTOR)
+    return SDValue();
+
+  SDValue ActiveVal = Op.getOperand(0).getOperand(0);
+  SDValue InactiveVal = Op.getOperand(1).getOperand(0);
+  SDValue PTrue = getSVEPredicateForHalfNElms(
+      MVT::getScalableVectorVT(MVT::i1, VT.getVectorMinNumElements()), N, DAG);
+  if (!PTrue)
+    return SDValue();
+
+  SDLoc DL(N);
+  return DAG.getNode(AArch64ISD::DUP_MERGE_PASSTHRU, DL, VT, PTrue, ActiveVal,
+                     DAG.getSplatVector(VT, DL, InactiveVal));
 }
 
 static SDValue performConcatVectorsCombine(SDNode *N,
@@ -19812,8 +19842,12 @@ static SDValue performConcatVectorsCombine(SDNode *N,
   SDValue N0 = N->getOperand(0), N1 = N->getOperand(1);
   unsigned N0Opc = N0->getOpcode(), N1Opc = N1->getOpcode();
 
-  if (VT.isScalableVector())
-    return simplifyAlternatingMask(N, DAG);
+  if (VT.isScalableVector()) {
+    if (auto V = simplifyAlternatingMask(N, DAG))
+      return V;
+
+    return simplifyAlternatingSplat(N, DCI, DAG);
+  }
 
   if (N->getNumOperands() == 2 && N0Opc == ISD::TRUNCATE &&
       N1Opc == ISD::TRUNCATE) {
