@@ -56,6 +56,8 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -122,6 +124,14 @@ static cl::opt<unsigned> FusionPeelMaxCount(
     "loop-fusion-peel-max-count", cl::init(0), cl::Hidden,
     cl::desc("Max number of iterations to be peeled from a loop, such that "
              "fusion can take place"));
+
+// Enabling this will give loop-fusion a cost-model inversly equivalent to that
+// of the current (also default-disabled) loop-distribution pass, meaning that
+// using this should avoid fusion<->distribution undoing each other.
+static cl::opt<bool> FusionOnlyOnSharedMemoryAccesses(
+    "loop-fusion-shared-accesses-only", cl::init(false), cl::Hidden,
+    cl::desc("Only enable loop-fusion for loops that do memory accesses into "
+             "the same allocations"));
 
 #ifndef NDEBUG
 static cl::opt<bool>
@@ -296,7 +306,6 @@ struct FusionCandidate {
     else
       dbgs() << "nullptr";
     dbgs() << "\n"
-           << (GuardBranch ? GuardBranch->getName() : "nullptr") << "\n"
            << "\tPreheader: " << (Preheader ? Preheader->getName() : "nullptr")
            << "\n"
            << "\tHeader: " << (Header ? Header->getName() : "nullptr") << "\n"
@@ -707,12 +716,36 @@ private:
 
   /// Determine if it is beneficial to fuse two loops.
   ///
-  /// For now, this method simply returns true because we want to fuse as much
-  /// as possible (primarily to test the pass). This method will evolve, over
-  /// time, to add heuristics for profitability of fusion.
+  /// For now, either fuse unconditionally or only on shared memory access.
+  /// The loop-distribute pass will not distribute partitions with shared
+  /// memory accesses, so this is a decent start.
+  ///
+  /// TODO: Use a better cost-model, e.g. one based on number of different
+  /// cacheline acccessed, etc. Fusion can cause more cache eviction is too
+  /// aggressive for example, or it can block vectorization.
   bool isBeneficialFusion(const FusionCandidate &FC0,
                           const FusionCandidate &FC1) {
-    return true;
+    if (!FusionOnlyOnSharedMemoryAccesses)
+      return true;
+
+    // Check for any consistent ordered depencency between FC0 and FC1.
+    // Checking for a must-alias between accesses would also be a alternative
+    // solution and closer to what loop distribution does, but AA is not
+    // a direct (only transitive) dependency of this pass.
+    auto IsAccessToSharedAllocation = [&](Instruction *I0,
+                                          Instruction *I1) -> bool {
+      auto Dep = DI.depends(I0, I1);
+      return Dep && !Dep->isConfused() && Dep->isOrdered();
+    };
+
+    for (Instruction *I0 :
+         concat<Instruction *const>(FC0.MemReads, FC0.MemWrites))
+      for (Instruction *I1 :
+           concat<Instruction *const>(FC1.MemReads, FC1.MemWrites))
+        if (IsAccessToSharedAllocation(I0, I1))
+          return true;
+
+    return false;
   }
 
   /// Determine if two fusion candidates have the same trip count (i.e., they
@@ -1246,12 +1279,27 @@ private:
       }
 
       if (OldL.contains(ExprL)) {
-        bool Pos = SE.isKnownPositive(Expr->getStepRecurrence(SE));
-        if (!UseMax || !Pos || !Expr->isAffine()) {
+        // When encountering inner loops and checking SCEVs between
+        // accesses for fusion, as long as the step is monotonically
+        // increasing, just look at the start values:
+        if (UseMax) {
+          bool Pos = SE.isKnownPositive(Expr->getStepRecurrence(SE));
+          if (!Pos || !Expr->isAffine()) {
+            Valid = false;
+            return Expr;
+          }
+          return visit(Expr->getStart());
+        }
+
+        // When comparing SCEVs because of ordered dependencies,
+        // we can't just throw away the AddRec itself and only
+        // use the start values.
+        const Loop *L = getNewSubLoopFor(ExprL);
+        if (!L) {
           Valid = false;
           return Expr;
         }
-        return visit(Expr->getStart());
+        ExprL = L;
       }
 
       for (const SCEV *Op : Expr->operands())
@@ -1264,6 +1312,29 @@ private:
   private:
     bool Valid, UseMax;
     const Loop &OldL, &NewL;
+
+    // A helper function for SCEV rewriting: Given a subloop of OldL,
+    // return the SCEV for the equiv. subloop in NewL for a symetric
+    // loop nest.
+    // Note that this is stricter than it needs to be: For a loop nest
+    // of a certain depth, this will result in a SCEV describing what would
+    // happen if all "layers" were merged, and not just the outer-most one.
+    // TODO: Also support loops with more than one subloop?
+    const Loop *getNewSubLoopFor(const Loop *OldSubLoop) const {
+      assert(OldL.contains(OldSubLoop));
+      unsigned Depth = OldSubLoop->getLoopDepth() - OldL.getLoopDepth();
+      const Loop *NewSL = &NewL, *OldSL = &OldL;
+      for (unsigned I = 0; I < Depth; I++) {
+        ArrayRef<const Loop *> NewSLs = NewSL->getSubLoops();
+        ArrayRef<const Loop *> OldSLs = OldSL->getSubLoops();
+        if (NewSLs.size() != 1 || OldSLs.size() != 1)
+          return nullptr;
+
+        NewSL = NewSLs[0];
+        OldSL = OldSLs[0];
+      }
+      return NewSL;
+    }
   };
 
   /// Return false if the access functions of \p I0 and \p I1 could cause
@@ -1287,7 +1358,8 @@ private:
 #ifndef NDEBUG
     if (VerboseFusionDebugging)
       LLVM_DEBUG(dbgs() << "    Access function after rewrite: " << *SCEVPtr0
-                        << " [Valid: " << Rewriter.wasValidSCEV() << "]\n");
+                        << " [Valid: " << Rewriter.wasValidSCEV()
+                        << ", EqualIsInvalid: " << EqualIsInvalid << "]\n");
 #endif
     if (!Rewriter.wasValidSCEV())
       return false;
@@ -1354,7 +1426,33 @@ private:
         LLVM_DEBUG(
             dbgs() << "TODO: Implement pred/succ dependence handling!\n");
 
-      // TODO: Can we actually use the dependence info analysis here?
+      // These kinds of dependencies are fundamentally blocking.
+      if (DepResult->isConfused() || !DepResult->isOrdered())
+        return false;
+
+      // If I0 dominates I1 before fusion, then that will also be true after
+      // fusion, and so fusion can be allowed if the dependency is
+      // loop-independent and the accessed indexes are the same after rewrite.
+      if ((DepResult->isFlow() || DepResult->isOutput()) &&
+          DepResult->isLoopIndependent()) {
+        const SCEV *SCEVPtr0 =
+            SE.getSCEVAtScope(getLoadStorePointerOperand(&I0), FC0.L);
+        const SCEV *SCEVPtr1 =
+            SE.getSCEVAtScope(getLoadStorePointerOperand(&I1), FC1.L);
+        AddRecLoopReplacer Rewriter(SE, *FC0.L, *FC1.L, false);
+        SCEVPtr0 = Rewriter.visit(SCEVPtr0);
+        if (!Rewriter.wasValidSCEV())
+          return false;
+
+        LLVM_DEBUG(
+            dbgs() << "Loop-Independent Flow or Output Dep.: Compare SCEVs:\n"
+                   << "\tPtr0: " << *SCEVPtr0 << "\n"
+                   << "\tPtr1: " << *SCEVPtr1 << "\n");
+        return SE.isKnownPredicate(ICmpInst::ICMP_SLE, SCEVPtr0, SCEVPtr1);
+      }
+
+      // TODO: Handle even more cases where there are dependencies but fusion
+      // is still legal?
       return false;
     }
 
