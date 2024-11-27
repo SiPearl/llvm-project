@@ -6,7 +6,8 @@
 #
 #===------------------------------------------------------------------------===#
 
-add_flang_library(FortranDecimal STATIC
+set(FORTRAN_DECIMAL_TYPE CACHE STRING "")
+add_flang_library(FortranDecimal ${FORTRAN_DECIMAL_TYPE}
   binary-to-decimal.cpp
   decimal-to-binary.cpp
 )

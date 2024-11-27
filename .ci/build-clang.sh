@@ -22,6 +22,8 @@ echo "Install path: ${install_prefix}"
 
 sysroot=${SYSROOT:?}
 sysroot_option=""
+f128support_option=""
+host_option=""
 omp_option=""
 libpfm=""
 linker=ld
@@ -33,6 +35,10 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
     fi
 
     sysroot_option="-DDEFAULT_SYSROOT=${sysroot}"
+    f128support_option="-DHAVE_LDBL_MANT_DIG_113:BOOL=ON"
+    # If cross-compilation, then build host-specific libFortran{Decimal,Runtime}
+    # as static, since flang's CMake is bad at cross-compilation
+    host_option=" -DFORTRAN_DECIMAL_TYPE=STATIC -DFORTRAN_RUNTIME_TYPE=STATIC"
     omp_option+=" -DLIBOMP_LDFLAGS=-Wl,-rpath-link=${sysroot}/lib/${TARGET_TRIPLE}:${sysroot}/usr/lib"
     omp_option+=" -DLIBOMP_OMPD_SUPPORT=OFF"
     omp_option+=" -DLIBOMP_HAVE_SHM_OPEN_WITH_LRT=TRUE"
@@ -120,7 +126,7 @@ pushd ${build_directory}
         -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
         -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" \
         -DLLVM_BINUTILS_INCDIR=${BINUTILS_INCDIR} \
-        ${shared_libs} ${sysroot_option} ${omp_option} ${libpfm} \
+        ${shared_libs} ${sysroot_option} ${host_option} ${omp_option} ${libpfm} \
         -DPython3_EXECUTABLE=python3 ${llvm_repo} -DLLVM_STATIC_LINK_CXX_STDLIB=On ${release_options} \
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TRIPLE}" # 2> ${artifacts_dir}/llvm-CMakeLogs.txt
 
@@ -200,7 +206,7 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
 
       make -j ${jobs} FortranDecimal
       make DESTDIR=${install_dir} install
-      cp ${build_decimal}/libFortranDecimal.a ${build_directory}/lib/
+      cp -d ${build_decimal}/libFortranDecimal.* ${build_directory}/lib/
     popd
 
     build_runtime=${BUILD_DIR:-"build_runtime_${TARGET_TRIPLE}${SYSROOT_SUFFIX}-${BUILD_TYPE}"}
@@ -213,11 +219,13 @@ if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
           -DLLVM_ENABLE_ASSERTIONS=On \
 	  -DCMAKE_C_COMPILER="${install_dir}${package_prefix}/bin/clang" \
 	  -DCMAKE_CXX_COMPILER="${install_dir}${package_prefix}/bin/clang++" \
+	  ${f128support_option} \
+	  -DCMAKE_SHARED_LINKER_FLAGS="-L${build_directory}/lib/" \
           -DLLVM_TARGETS_TO_BUILD="${TARGETS_TO_BUILD}" ${shared_libs}
 
       make -j ${jobs} FortranRuntime
       make DESTDIR=${install_dir} install
-      cp ${build_runtime}/libFortranRuntime.a ${build_directory}/lib/
+      cp -d ${build_runtime}/libFortranRuntime.* ${build_directory}/lib/
     popd
 fi
 
@@ -247,7 +255,7 @@ declare -A SKIPPED_TESTS
 
 SKIPPED_TESTS["tools/flang/test"]=""
 if [ -n "${sysroot}" -a "${sysroot}" != "native" ]; then
-    SKIPPED_TESTS["tools/flang/test"]="--xfail Driver/ctofortran.f90;Driver/exec.f90;Runtime/no-cpp-dep.c;Integration/iso-fortran-binding.cpp;Semantics/kinds04_q16.f90"
+    SKIPPED_TESTS["tools/flang/test"]="--xfail Driver/ctofortran.f90;Driver/exec.f90;Integration/iso-fortran-binding.cpp;Semantics/kinds04_q16.f90"
 fi
 
 for test_dir in ${LIT_TEST_DIRS} ; do
