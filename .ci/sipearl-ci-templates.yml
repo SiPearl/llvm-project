@@ -8,8 +8,8 @@ default:
   tags: ['sw']
 variables:
   SLURM_CPU:          16
-  SLURM_MEMORY:       50000 # MB
-  SLURM_DURATION:     0-2:00:00
+  SLURM_MEMORY:       10000 # MB
+  SLURM_DURATION:     0-3:00:00
   SLURM_ARTIFACT_DIR: ./artifacts
   SLURM_INLOCAL:      "true"
   DEFAULT_SLURM_ALLOC_TIMEOUT: ""
@@ -72,7 +72,7 @@ variables:
   extends: ['.slurm-ci']
   script:
     - echo "---- BUILD LLVM ----"
-    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/build-clang.sh ${TARGET}
+    - ${SLURM_SCRIPT_CMD} .ci/build-clang.sh ${TARGET}
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]
@@ -92,7 +92,7 @@ variables:
   script:
     - !reference [.slurm-ci-needs, script]
     - echo "---- TEST LLVM ----"
-    - ${SLURM_SCRIPT_CMD}  JOBS=${SLURM_CPU} .ci/test-clang.sh ${TARGET}
+    - ${SLURM_SCRIPT_CMD} .ci/test-clang.sh ${TARGET}
   after_script:
     - !reference [.slurm-ci-artifacts, after_script]
     - !reference [.slurm-ci, after_script]

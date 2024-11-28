@@ -30,6 +30,11 @@ artifacts=${ARTIFACTS:-"./artifacts"}
 install_prefix=${INSTALL_PREFIX:-"install_llvm"}
 jobs=${JOBS:-40}
 
+# Don't know how to perform multiply in yaml description...
+if [ -n "${SLURM_CPU:-""}" ]; then
+    jobs=$(( SLURM_CPU * 2 ))
+fi
+
 artifacts_dir=${current_directory}/${artifacts}
 install_prefix=${artifacts_dir}/${install_prefix}
 install_dir=${install_prefix}/${SW_INSTALL_SUFFIX}
