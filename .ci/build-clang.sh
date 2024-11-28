@@ -80,7 +80,7 @@ RELEASE_BRANCH=""
 CURRENT_BRANCH=$(get_branch)
 
 LLVM_COMPONENTS="dsymutil;llc;llvm-ar;llvm-cxxfilt;\
-llvm-cov;llvm-dwarfdump;llvm-link;llvm-nm;llvm-objdump;\
+llvm-cov;llvm-dwarfdump;llvm-link;llvm-nm;llvm-objdump;llvm-lto;LLVMgold;\
 llvm-profdata;llvm-ranlib;llvm-readelf;llvm-readobj;llvm-size;llvm-symbolizer;llvm-mca;\
 opt;clang;clang-format;clang-resource-headers;clangDriver;clangBasic;runtimes;\
 flang-new;flang-libraries;flang-headers;FortranRuntime;FortranDecimal;FortranCommon;\
