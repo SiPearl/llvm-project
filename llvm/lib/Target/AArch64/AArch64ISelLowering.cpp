@@ -19822,6 +19822,11 @@ static SDValue simplifyAlternatingSplat(SDNode *N,
       Op.getOperand(1).getOpcode() != ISD::SPLAT_VECTOR)
     return SDValue();
 
+  // Avoid doing this for splats that create non-SVE-native vector sizes.
+  if (VT.getVectorElementType().getSizeInBits() * VT.getVectorMinNumElements() >
+      128)
+    return SDValue();
+
   SDValue ActiveVal = Op.getOperand(0).getOperand(0);
   SDValue InactiveVal = Op.getOperand(1).getOperand(0);
   SDValue PTrue = getSVEPredicateForHalfNElms(

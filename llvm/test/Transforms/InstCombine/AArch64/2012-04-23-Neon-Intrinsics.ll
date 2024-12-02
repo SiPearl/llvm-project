@@ -62,7 +62,7 @@ define <4 x i32> @complex1ARM64(<4 x i16> %x) nounwind readnone ssp {
 ; CHECK-LABEL: define <4 x i32> @complex1ARM64(
 ; CHECK-SAME: <4 x i16> [[X:%.*]]) #[[ATTR0]] {
 ; CHECK-NEXT:  [[ENTRY:.*:]]
-; CHECK-NEXT:    [[A:%.*]] = tail call <4 x i32> @llvm.aarch64.neon.smull.v4i32(<4 x i16> splat (i16 2), <4 x i16> [[X]]) #[[ATTR2:[0-9]+]]
+; CHECK-NEXT:    [[A:%.*]] = tail call <4 x i32> @llvm.aarch64.neon.smull.v4i32(<4 x i16> [[X]], <4 x i16> splat (i16 2)) #[[ATTR2:[0-9]+]]
 ; CHECK-NEXT:    ret <4 x i32> [[A]]
 ;
 entry:

@@ -3806,6 +3806,16 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     }
     break;
   }
+  case Intrinsic::vector_interleave2: {
+    // Simplify the interleave of two splats to a single wide splat/
+    auto *SplatVal = getSplatValue(II->getArgOperand(0));
+    if (SplatVal && II->getArgOperand(0) == II->getArgOperand(1))
+      return replaceInstUsesWith(
+          CI,
+          Builder.CreateVectorSplat(
+              cast<VectorType>(II->getType())->getElementCount(), SplatVal));
+    break;
+  }
   case Intrinsic::is_fpclass: {
     if (Instruction *I = foldIntrinsicIsFPClass(*II))
       return I;
