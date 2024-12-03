@@ -1,4 +1,3 @@
-name=ompi generated=llvm:debian-11.0.0-arm64:llvm-aarch64-debian11 revfiles_path=.ci/sipearl/revfiles
 name=ompi generated=llvm:poky-linux-4.0.6-0118853-arm64:llvm-aarch64-poky4 revfiles_path=.ci/sipearl/revfiles
 name=ompi generated=llvm:native:llvm-x86 revfiles_path=.ci/sipearl/revfiles
 
