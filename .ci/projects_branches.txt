@@ -6,3 +6,4 @@ name=arm-papi branch=sipearl:sipearl
 name=aarch64 branch=sipearl:sipearl
 name=clang-plugins branch=sipearl:sipearl
 name=ompi branch=sipearl:sipearl
+name=llvm-test-suite branch=sipearl:sipearl

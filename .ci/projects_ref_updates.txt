@@ -1,3 +1,5 @@
 name=ompi generated=llvm:poky-linux-4.0.6-0118853-arm64:llvm-aarch64-poky4 revfiles_path=.ci/sipearl/revfiles
 name=ompi generated=llvm:native:llvm-x86 revfiles_path=.ci/sipearl/revfiles
+name=llvm-test-suite generated=llvm:poky-linux-4.0.6-0118853-arm64:llvm-aarch64-poky4 revfiles_path=.ci/revfiles
+name=llvm-test-suite generated=llvm:native:llvm-x86 revfiles_path=.ci/revfiles
 
