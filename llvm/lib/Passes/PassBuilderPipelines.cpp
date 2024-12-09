@@ -104,6 +104,7 @@
 #include "llvm/Transforms/Scalar/LoopDeletion.h"
 #include "llvm/Transforms/Scalar/LoopDistribute.h"
 #include "llvm/Transforms/Scalar/LoopFlatten.h"
+#include "llvm/Transforms/Scalar/LoopFuse.h"
 #include "llvm/Transforms/Scalar/LoopIdiomRecognize.h"
 #include "llvm/Transforms/Scalar/LoopInstSimplify.h"
 #include "llvm/Transforms/Scalar/LoopInterchange.h"
@@ -211,6 +212,10 @@ static cl::opt<bool> EnableUnrollAndJam("enable-unroll-and-jam",
 static cl::opt<bool> EnableLoopFlatten("enable-loop-flatten", cl::init(false),
                                        cl::Hidden,
                                        cl::desc("Enable the LoopFlatten Pass"));
+
+static cl::opt<bool> EnableLoopFusion("enable-loop-fusion", cl::init(false),
+                                      cl::Hidden,
+                                      cl::desc("Enable the LoopFusion pass"));
 
 // Experimentally allow loop header duplication. This should allow for better
 // optimization at Oz, since loop-idiom recognition can then recognize things
@@ -1551,6 +1556,21 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   LPM.addPass(LoopDeletionPass());
   OptimizePM.addPass(createFunctionToLoopPassAdaptor(
       std::move(LPM), /*UseMemorySSA=*/false, /*UseBlockFrequencyInfo=*/false));
+
+  if (EnableLoopFusion) {
+    // Where to put loop fusion exactly is not that easy, it needs to run after
+    // the simplifications, but the reason for putting it before vectorization
+    // is that epilogues, runtime-pointer-checks, or different VF/IC choices are
+    // likely to block fusion. It should run before distribution because
+    // distrubution is vectorization-legality-aware, and will undo fusion if it
+    // blocked vectorization.
+    OptimizePM.addPass(LoopFusePass());
+
+    // Loop fusion often creates store-to-load forwarding oppurtunities, and so
+    // re-running GVN here will not only de-duplicate inductions after loop
+    // fusion but also improve vectorization.
+    OptimizePM.addPass(GVNPass());
+  }
 
   // Distribute loops to allow partial vectorization.  I.e. isolate dependences
   // into separate loop that would otherwise inhibit vectorization.  This is
