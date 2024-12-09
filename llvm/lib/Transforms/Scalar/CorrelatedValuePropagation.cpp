@@ -355,9 +355,8 @@ static bool processCmp(CmpInst *Cmp, LazyValueInfo *LVI) {
 /// that cannot fire no matter what the incoming edge can safely be removed. If
 /// a case fires on every incoming edge then the entire switch can be removed
 /// and replaced with a branch to the case destination.
-static bool processSwitch(SwitchInst *I, LazyValueInfo *LVI,
-                          DominatorTree *DT) {
-  DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Lazy);
+static bool processSwitch(SwitchInst *I, LazyValueInfo *LVI, DominatorTree *DT,
+                          DomTreeUpdater &DTU) {
   Value *Cond = I->getCondition();
   BasicBlock *BB = I->getParent();
 
@@ -451,6 +450,7 @@ static bool processSwitch(SwitchInst *I, LazyValueInfo *LVI,
     // by a branch then do so now.
     ConstantFoldTerminator(BB, /*DeleteDeadConditions = */ false,
                            /*TLI = */ nullptr, &DTU);
+  DTU.flush();
   return Changed;
 }
 
@@ -1252,7 +1252,7 @@ static bool processTrunc(TruncInst *TI, LazyValueInfo *LVI) {
 }
 
 static bool runImpl(Function &F, LazyValueInfo *LVI, DominatorTree *DT,
-                    const SimplifyQuery &SQ) {
+                    DomTreeUpdater &DTU, const SimplifyQuery &SQ) {
   bool FnChanged = false;
   std::optional<ConstantRange> RetRange;
   if (F.hasExactDefinition() && F.getReturnType()->isIntOrIntVectorTy())
@@ -1323,7 +1323,7 @@ static bool runImpl(Function &F, LazyValueInfo *LVI, DominatorTree *DT,
     Instruction *Term = BB->getTerminator();
     switch (Term->getOpcode()) {
     case Instruction::Switch:
-      BBChanged |= processSwitch(cast<SwitchInst>(Term), LVI, DT);
+      BBChanged |= processSwitch(cast<SwitchInst>(Term), LVI, DT, DTU);
       break;
     case Instruction::Ret: {
       auto *RI = cast<ReturnInst>(Term);
@@ -1369,7 +1369,16 @@ CorrelatedValuePropagationPass::run(Function &F, FunctionAnalysisManager &AM) {
   LazyValueInfo *LVI = &AM.getResult<LazyValueAnalysis>(F);
   DominatorTree *DT = &AM.getResult<DominatorTreeAnalysis>(F);
 
-  bool Changed = runImpl(F, LVI, DT, getBestSimplifyQuery(AM, F));
+  // Use a DTU to inform LVI in case the CFG changes and to allow it to
+  // propagate information from immediate dominators to block dominated
+  // by cycles.
+  DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Lazy);
+  LVI->useDomTree(&DTU);
+
+  bool Changed = runImpl(F, LVI, DT, DTU, getBestSimplifyQuery(AM, F));
+
+  // Avoid use-after-free of the DTU in case LVI is preserved.
+  LVI->useDomTree(nullptr);
 
   PreservedAnalyses PA;
   if (!Changed) {

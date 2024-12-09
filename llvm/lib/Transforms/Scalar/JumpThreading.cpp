@@ -245,12 +245,14 @@ PreservedAnalyses JumpThreadingPass::run(Function &F,
   auto &AA = AM.getResult<AAManager>(F);
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
 
-  bool Changed =
-      runImpl(F, &AM, &TLI, &TTI, &LVI, &AA,
-              std::make_unique<DomTreeUpdater>(
-                  &DT, nullptr, DomTreeUpdater::UpdateStrategy::Lazy),
-              std::nullopt, std::nullopt);
+  auto DTU = std::make_unique<DomTreeUpdater>(
+      &DT, nullptr, DomTreeUpdater::UpdateStrategy::Lazy);
+  LVI.useDomTree(DTU.get());
 
+  bool Changed = runImpl(F, &AM, &TLI, &TTI, &LVI, &AA, std::move(DTU),
+                         std::nullopt, std::nullopt);
+
+  LVI.useDomTree(nullptr);
   if (!Changed)
     return PreservedAnalyses::all();
 

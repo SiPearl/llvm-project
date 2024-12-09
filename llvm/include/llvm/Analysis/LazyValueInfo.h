@@ -14,6 +14,7 @@
 #ifndef LLVM_ANALYSIS_LAZYVALUEINFO_H
 #define LLVM_ANALYSIS_LAZYVALUEINFO_H
 
+#include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
@@ -34,6 +35,7 @@ namespace llvm {
     AssumptionCache *AC = nullptr;
     const DataLayout *DL = nullptr;
     LazyValueInfoImpl *PImpl = nullptr;
+    DomTreeUpdater *DTU = nullptr;
     LazyValueInfo(const LazyValueInfo &) = delete;
     void operator=(const LazyValueInfo &) = delete;
 
@@ -118,6 +120,10 @@ namespace llvm {
 
     /// Inform the analysis cache that we have erased a block.
     void eraseBlock(BasicBlock *BB);
+
+    // Use a dominator tree maintained by whatever is using this pass
+    // through the updater passed as argument.
+    void useDomTree(DomTreeUpdater *DTU);
 
     /// Complete flush all previously computed values
     void clear();

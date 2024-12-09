@@ -16,18 +16,21 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueLattice.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
@@ -337,6 +340,10 @@ class LazyValueInfoImpl {
   AssumptionCache *AC;  ///< A pointer to the cache of @llvm.assume calls.
   const DataLayout &DL; ///< A mandatory DataLayout
 
+  // A optional DTU maintained by the pass using this analysis, used to
+  // handle cases with cycles between a definition and use.
+  DomTreeUpdater *DTU = nullptr;
+
   /// Declaration of the llvm.experimental.guard() intrinsic,
   /// if it exists in the module.
   Function *GuardDecl;
@@ -457,6 +464,8 @@ public:
   LazyValueInfoImpl(AssumptionCache *AC, const DataLayout &DL,
                     Function *GuardDecl)
       : AC(AC), DL(DL), GuardDecl(GuardDecl) {}
+
+  void setDTU(DomTreeUpdater *NewDTU) { DTU = NewDTU; }
 };
 } // namespace llvm
 
@@ -682,6 +691,44 @@ LazyValueInfoImpl::solveBlockValueNonLocal(Value *Val, BasicBlock *BB) {
     return ValueLatticeElement::getOverdefined();
   }
 
+  // If the value is defined outside BB and merging results from predecessors
+  // failed (e.g. because of cycles), use the information from the
+  // immediate dominator. This works because whatever is true about this value
+  // in the immediate dominator is definetely also true in dominated blocks
+  // (but not the other way round, which is why this is a fallback and not the
+  // default).
+  auto CheckImmediateDominator =
+      [&](Value *Val) -> std::optional<ValueLatticeElement> {
+    auto *I = dyn_cast<Instruction>(Val);
+    if (!DTU || DTU->hasPendingUpdates() || !BB->hasNPredecessorsOrMore(2) ||
+        (I && I->getParent() == BB))
+      return std::nullopt;
+
+    DominatorTree &DT = DTU->getDomTree();
+    assert(DT.getRoot()->getParent() == BB->getParent() &&
+           DT.verify(DominatorTree::VerificationLevel::Fast) && "Bad DT");
+    if (!all_of(predecessors(BB), [&](BasicBlock *Pred) -> bool {
+          // Jump-threading, which runs directly before correlated-value
+          // propagation, can create unreachable blocks without removing them.
+          // Unreachable blocks can appear as predecessors, but are ignored
+          // when building the DT, causing findNearestCommonDominator to crash.
+          assert(is_contained(map_range(*DT.getRoot()->getParent(),
+                                        [&](BasicBlock &BB) { return &BB; }),
+                              Pred) &&
+                 "Block must be in function, even if not reachable");
+          return DT.getNode(Pred) != nullptr;
+        }))
+      return std::nullopt;
+
+    BasicBlock *IDom = *predecessors(BB).begin();
+    for (BasicBlock *Pred : drop_begin(predecessors(BB)))
+      IDom = DT.findNearestCommonDominator(IDom, Pred);
+
+    // Because of the traversal order of the solver and the fact that there is
+    // no cache eviction, just quering the cache is all that needs to be done.
+    return TheCache.getCachedValueInfo(Val, IDom);
+  };
+
   // Loop over all of our predecessors, merging what we know from them into
   // result.  If we encounter an unexplored predecessor, we eagerly explore it
   // in a depth first manner.  In practice, this has the effect of discovering
@@ -705,6 +752,10 @@ LazyValueInfoImpl::solveBlockValueNonLocal(Value *Val, BasicBlock *BB) {
     // If we hit overdefined, exit early.  The BlockVals entry is already set
     // to overdefined.
     if (Result.isOverdefined()) {
+      if (std::optional<ValueLatticeElement> InImmDom =
+              CheckImmediateDominator(Val))
+        return InImmDom;
+
       LLVM_DEBUG(dbgs() << " compute BB '" << BB->getName()
                         << "' - overdefined because of pred '"
                         << Pred->getName() << "' (non local).\n");
@@ -1744,6 +1795,8 @@ LazyValueInfoImpl &LazyValueInfo::getOrCreateImpl(const Module *M) {
     Function *GuardDecl =
         Intrinsic::getDeclarationIfExists(M, Intrinsic::experimental_guard);
     PImpl = new LazyValueInfoImpl(AC, DL, GuardDecl);
+    if (DTU)
+      PImpl->setDTU(DTU);
   }
   return *static_cast<LazyValueInfoImpl *>(PImpl);
 }
@@ -2064,6 +2117,12 @@ void LazyValueInfo::forgetValue(Value *V) {
 void LazyValueInfo::eraseBlock(BasicBlock *BB) {
   if (auto *Impl = getImpl())
     Impl->eraseBlock(BB);
+}
+
+void LazyValueInfo::useDomTree(DomTreeUpdater *NewDTU) {
+  DTU = NewDTU;
+  if (auto *Impl = getImpl())
+    Impl->setDTU(NewDTU);
 }
 
 void LazyValueInfo::clear() {
