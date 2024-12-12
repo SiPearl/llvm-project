@@ -22,7 +22,9 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/LiveRegMatrix.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
@@ -1330,6 +1332,87 @@ bool AArch64RegisterInfo::shouldCoalesce(
     // which implements a 32 to 64 bit zero extension
     // which relies on the upper 32 bits being zeroed.
     return false;
+
+  // Don't extend the live interval of a SVE register across a
+  // function call that will clobber all SVE registers by coalescing!
+  if (MI->isCopy() && NewRC->hasSubClassEq(&AArch64::ZPRRegClass) &&
+      (!SrcRC->hasSubClassEq(&AArch64::ZPRRegClass) ||
+       !DstRC->hasSubClassEq(&AArch64::ZPR2RegClass))) {
+    // Return true if there is a call between DefMI and UseMI that
+    // will clobber the register class used. Can return false even if
+    // there will be a clobber.
+    auto ClobberedInBetween = [&](Register Reg, const MachineInstr &DefMI,
+                                  const MachineInstr &UseMI,
+                                  const TargetRegisterClass *OrigRC) -> bool {
+      const MachineBasicBlock *BB = DefMI.getParent();
+      if (BB != UseMI.getParent())
+        return false; // TODO: Handle cross-BB case.
+
+      // Note that because there is no more SSA here, a def. does not
+      // have to come before a use.
+      // TODO: Use LiveIntervals &LIS?
+      bool FoundUse = false;
+      bool FoundClobberingCall = false;
+      for (auto Iter = ++DefMI.getIterator(); Iter != BB->instr_end(); ++Iter) {
+        const MachineInstr &MI = *Iter;
+        if (&UseMI == &MI) {
+          FoundUse = true;
+          break;
+        }
+
+        // Stop looking for a clobbering call if another instr. overwriting that
+        // register is found. This would end the live interval anyways.
+        if (any_of(MI.defs(), [&](MachineOperand Def) -> bool {
+              return Def.isReg() && Def.getReg() == Reg;
+            }))
+          break;
+
+        // The actual MI will already be a branch-and-link, or a indirect branch
+        // and link, or a pointer authenticated one, but the clobber mask is
+        // the first implicit operand in all cases.
+        if (!MI.isCall() || MI.getNumImplicitOperands() == 0 ||
+            !MI.getOperand(MI.getNumExplicitOperands()).isRegMask())
+          continue;
+
+        auto RegMask = MI.getOperand(MI.getNumExplicitOperands());
+        FoundClobberingCall |=
+            all_of(NewRC->getRegisters(),
+                   [&](MCPhysReg Reg) -> bool {
+                     return RegMask.clobbersPhysReg(Reg);
+                   }) &&
+            !all_of(OrigRC->getRegisters(), [&](MCPhysReg Reg) -> bool {
+              // If all registers of the orig. register class are
+              // clobbered as well, we could not avoid a spill anyways.
+              return RegMask.clobbersPhysReg(Reg);
+            });
+      }
+
+      return FoundUse && FoundClobberingCall;
+    };
+
+    Register SrcReg = MI->getOperand(1).getReg();
+    Register DstReg = MI->getOperand(0).getReg();
+
+    // If the value started in a non-SVE reg, check for a call only
+    // between the def. and the copy (The value already was in a SVE reg.
+    // from the copy to the uses anyways).
+    if (!SrcRC->hasSubClassEq(&AArch64::ZPR2RegClass) &&
+        any_of(MRI.def_instructions(SrcReg),
+               [&](const MachineInstr &DefMI) -> bool {
+                 return ClobberedInBetween(SrcReg, DefMI, *MI, SrcRC);
+               }))
+      return false;
+
+    // If the value started as SVE reg, check for a call only between
+    // the copy and any use of the copy (The value aleady was in a SVE
+    // reg. form the def. to the copy anyways).
+    if (SrcRC->hasSubClassEq(&AArch64::ZPRRegClass) &&
+        any_of(MRI.use_nodbg_instructions(DstReg),
+               [&](const MachineInstr &UseMI) -> bool {
+                 return ClobberedInBetween(DstReg, *MI, UseMI, DstRC);
+               }))
+      return false;
+  }
 
   auto IsCoalescerBarrier = [](const MachineInstr &MI) {
     switch (MI.getOpcode()) {
