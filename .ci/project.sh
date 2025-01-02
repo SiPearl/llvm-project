@@ -32,7 +32,7 @@ jobs=${JOBS:-40}
 
 # Don't know how to perform multiply in yaml description...
 if [ -n "${SLURM_CPU:-""}" ]; then
-    jobs=$(( SLURM_CPU * 2 ))
+    jobs=${SLURM_CPU}
 fi
 
 artifacts_dir=${current_directory}/${artifacts}

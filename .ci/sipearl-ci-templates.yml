@@ -8,7 +8,7 @@ default:
   tags: ['sw']
 variables:
   SLURM_CPU:          16
-  SLURM_MEMORY:       10000 # MB
+  SLURM_MEMORY:       30000 # MB
   SLURM_DURATION:     0-3:00:00
   SLURM_ARTIFACT_DIR: ./artifacts
   SLURM_INLOCAL:      "true"
