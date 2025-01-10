@@ -60,6 +60,10 @@ set -x
 
 module_load python-x86
 
+set +u
+TOOLSROOT=/toolsroot source /toolsroot/lnx/scripts/SPLmanagetools.sh -set hpc_gcc-12.1.0-full+isl+binutils
+set -u
+
 CC=$(which gcc)
 CXX=$(which g++)
 
