@@ -25,6 +25,7 @@
 #include "flang/Optimizer/Builder/Runtime/Allocatable.h"
 #include "flang/Optimizer/Builder/Runtime/CUDA/Descriptor.h"
 #include "flang/Optimizer/Builder/Runtime/Character.h"
+#include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/Command.h"
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Runtime/Exceptions.h"
@@ -778,6 +779,10 @@ static constexpr IntrinsicHandler handlers[]{
      /*isElemental=*/false},
     {"not", &I::genNot},
     {"null", &I::genNull, {{{"mold", asInquired}}}, /*isElemental=*/false},
+    {"num_images",
+     &I::genNumImages,
+     {{{"team", asBox}, {"team_number", asAddr}}},
+     /*isElemental*/ false},
     {"pack",
      &I::genPack,
      {{{"array", asBox},
@@ -7283,6 +7288,20 @@ mlir::Value IntrinsicLibrary::genNVVMTime(mlir::Type resultType,
                                           llvm::ArrayRef<mlir::Value> args) {
   assert(args.size() == 0 && "expect no arguments");
   return OpTy::create(builder, loc, resultType).getResult();
+}
+
+// NUM_IMAGES
+fir::ExtendedValue
+IntrinsicLibrary::genNumImages(mlir::Type resultType,
+                               llvm::ArrayRef<fir::ExtendedValue> args) {
+  auto numArgs = args.size();
+  assert(numArgs == 0 || numArgs == 1);
+
+  if (numArgs) {
+    return fir::runtime::getNumImagesWithTeam(builder, loc,
+                                              fir::getBase(args[0]));
+  }
+  return fir::runtime::getNumImages(builder, loc);
 }
 
 // PACK
