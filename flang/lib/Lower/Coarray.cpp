@@ -188,6 +188,40 @@ Fortran::lower::genCoarrayCoBounds(Fortran::lower::AbstractConverter &converter,
   return {lcobounds, ucobounds};
 }
 
+/// From cosubscript, generate call to runtime function prif_image_index
+/// associated to an addr
+mlir::Value Fortran::lower::getImageIndexFromCosubscripts(
+    fir::FirOpBuilder &builder, mlir::Location loc,
+    const Fortran::evaluate::CoarrayRef &expr, mlir::Value handle) {
+  // Creation of the cosubscripts array
+  mlir::Type i64Ty = builder.getI64Type();
+  unsigned corank = expr.cosubscript().size();
+  mlir::Type indexType = builder.getIndexType();
+  mlir::Type arrayType = fir::SequenceType::get(
+      {static_cast<fir::SequenceType::Extent>(corank)}, i64Ty);
+  mlir::Value cosubscripts = builder.createTemporary(loc, arrayType);
+  mlir::Type addrType = builder.getRefType(i64Ty);
+  for (unsigned dim = 0; dim < corank; ++dim) {
+    auto image = ToInt64(expr.cosubscript()[dim]);
+    mlir::Value idx;
+    if (image.has_value())
+      idx = builder.createIntegerConstant(loc, i64Ty, image.value());
+    else {
+      auto s = ignoreEvConvert(expr.cosubscript()[dim]);
+      TODO(loc, "getting image_index with a non constant cosubscript.");
+    }
+
+    auto index = builder.createIntegerConstant(loc, indexType, dim);
+    auto coAddr =
+        builder.create<fir::CoordinateOp>(loc, addrType, cosubscripts, index);
+    builder.create<fir::StoreOp>(loc, idx, coAddr);
+  }
+  cosubscripts = builder.createBox(loc, cosubscripts);
+
+  // Computation of the image_index
+  return fir::runtime::getImageIndex(builder, loc, handle, cosubscripts);
+}
+
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
 //===----------------------------------------------------------------------===//

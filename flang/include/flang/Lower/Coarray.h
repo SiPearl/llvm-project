@@ -67,6 +67,13 @@ llvm::SmallVector<mlir::Value, 4>
 genCoSubscripts(AbstractConverter &converter, mlir::Location loc,
             const SomeExpr &expr, StatementContext &stmtCtx);
 
+/// From cosubscript, generate call to runtime function prif_image_index
+/// associated to an addr
+mlir::Value
+getImageIndexFromCosubscripts(fir::FirOpBuilder &builder, mlir::Location loc,
+                              const Fortran::evaluate::CoarrayRef &expr,
+                              mlir::Value coarrayAddr);
+
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
 //===----------------------------------------------------------------------===//
