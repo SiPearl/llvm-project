@@ -23,6 +23,17 @@ FORTRAN_EXTERN_C_BEGIN
 
 namespace Fortran::runtime {
 
+// Map each coarray_handle pointer to the coarray base_addr
+// FIXME: Improving storing of the coarray handle
+static std::map<void *, Descriptor &> map_coarray_handle;
+
+void RTNAME(saveCoarrayHandle)(void *base_addr, Descriptor &coarray_handle);
+
+Descriptor &RTNAME(getCoarrayHandle)(void *base_addr);
+
+void RTNAME(computeLastUcobound)(
+    int num_images, Descriptor &lcobounds, Descriptor &ucobounds);
+
 } // namespace Fortran::runtime
 
 // FIXME: Improving this part with a compiler flag later ?
@@ -41,6 +52,8 @@ DECLARE_UNIMPLEMENTED_PRIF(this_image_with_dim, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team_number, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(allocate_coarray, void *, void *, void *, void *,
+    void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)

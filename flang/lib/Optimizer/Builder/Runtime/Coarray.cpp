@@ -28,6 +28,45 @@ static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
   return !fir::getBase(exv);
 }
 
+/// Generate call to runtime function that store prif_coarray_handle with addr
+void fir::runtime::saveCoarrayHandle(fir::FirOpBuilder &builder,
+                                     mlir::Location loc, mlir::Value addr,
+                                     mlir::Value handle) {
+  mlir::func::FuncOp func =
+      fir::runtime::getRuntimeFunc<mkRTKey(saveCoarrayHandle)>(loc, builder);
+
+  mlir::Value refHandle = builder.create<fir::BoxAddrOp>(
+      loc, builder.getRefType(handle.getType()), handle);
+  llvm::SmallVector<mlir::Value> args = {addr, refHandle};
+  builder.create<fir::CallOp>(loc, func, args);
+}
+
+/// Generate call to runtime function to retrieve prif_coarray_handle
+/// associated to an addr
+mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
+                                           mlir::Location loc,
+                                           mlir::Value addr) {
+  mlir::func::FuncOp func =
+      fir::runtime::getRuntimeFunc<mkRTKey(getCoarrayHandle)>(loc, builder);
+
+  llvm::SmallVector<mlir::Value> args = {addr};
+  // return builder.create<fir::CallOp>(loc, func, args).getResult(0);
+  return builder.createBox(
+      loc, builder.create<fir::CallOp>(loc, func, args).getResult(0));
+}
+
+/// Generate call to runtime function to compute the lastest ucobound.
+void fir::runtime::computeLastUcobound(fir::FirOpBuilder &builder,
+                                       mlir::Location loc,
+                                       mlir::Value lcobounds,
+                                       mlir::Value ucobounds) {
+  mlir::func::FuncOp func =
+      fir::runtime::getRuntimeFunc<mkRTKey(computeLastUcobound)>(loc, builder);
+  mlir::Value num_images = fir::runtime::getNumImages(builder, loc);
+  llvm::SmallVector<mlir::Value> args = {num_images, lcobounds, ucobounds};
+  builder.create<fir::CallOp>(loc, func, args);
+}
+
 /// Generate Call to runtime prif_num_images
 mlir::Value fir::runtime::getNumImages(fir::FirOpBuilder &builder, mlir::Location loc) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());

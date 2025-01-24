@@ -1977,12 +1977,12 @@ void Fortran::lower::mapSymbolAttributes(
     return;
   }
 
+  Fortran::lower::BoxAnalyzer ba;
+  ba.analyze(sym);
+
   const bool isAssumedRank = Fortran::evaluate::IsAssumedRank(sym);
   if (isAssumedRank && !allowAssumedRank)
     TODO(loc, "assumed-rank variable in procedure implemented in Fortran");
-
-  Fortran::lower::BoxAnalyzer ba;
-  ba.analyze(sym);
 
   // First deal with pointers and allocatables, because their handling here
   // is the same regardless of their rank.
@@ -2238,7 +2238,10 @@ void Fortran::lower::mapSymbolAttributes(
   auto arg = symMap.lookupSymbol(sym).getAddr();
   mlir::Value addr = preAlloc;
 
-  if (arg)
+  if (Fortran::evaluate::IsCoarray(sym))
+    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym,
+                                              fir::getBaseTypeOf(addr));
+  else if (arg)
     if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(arg.getType())) {
       // Contiguous assumed shape that can be tracked without a fir.box.
       mlir::Type refTy = builder.getRefType(boxTy.getEleTy());
@@ -2247,7 +2250,7 @@ void Fortran::lower::mapSymbolAttributes(
 
   // Compute/Extract character length.
   if (ba.isChar()) {
-    if (arg) {
+    if (arg && !Fortran::evaluate::IsCoarray(sym)) {
       assert(!preAlloc && "dummy cannot be pre-allocated");
       if (mlir::isa<fir::BoxCharType>(arg.getType())) {
         std::tie(addr, len) = charHelp.createUnboxChar(arg);

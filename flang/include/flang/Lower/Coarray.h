@@ -50,6 +50,12 @@ void genFormTeamStatement(AbstractConverter &, pft::Evaluation &eval,
 // COARRAY utils 
 //===----------------------------------------------------------------------===//
 
+// Compute the colower and coupper bounds for a coarray and return an array of
+// bounds.
+std::pair<mlir::Value, mlir::Value>
+genCoarrayCoBounds(AbstractConverter &converter, mlir::Location loc,
+                   const semantics::Symbol &sym);
+
 /// From coarray expression, generate vectors of mlir::Value with cosubscripts
 llvm::SmallVector<mlir::Value, 4> genCoshape(AbstractConverter &converter,
                                              mlir::Location loc,
@@ -60,6 +66,18 @@ llvm::SmallVector<mlir::Value, 4> genCoshape(AbstractConverter &converter,
 llvm::SmallVector<mlir::Value, 4>
 genCoSubscripts(AbstractConverter &converter, mlir::Location loc,
             const SomeExpr &expr, StatementContext &stmtCtx);
+
+//===----------------------------------------------------------------------===//
+// COARRAY memory management
+//===----------------------------------------------------------------------===//
+
+void genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
+                        mlir::Location loc, const semantics::Symbol &sym,
+                        fir::MutableBoxValue);
+
+mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
+                               mlir::Location loc, const semantics::Symbol &sym,
+                               mlir::Type allocType);
 
 //===----------------------------------------------------------------------===//
 // COARRAY expressions

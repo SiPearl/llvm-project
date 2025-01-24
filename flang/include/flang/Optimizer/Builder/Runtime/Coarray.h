@@ -41,6 +41,19 @@ namespace fir::runtime {
   return oss.str();               \
 }()
 
+/// Generate call to runtime function that store prif_coarray_handle with addr
+void saveCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
+                       mlir::Value addr, mlir::Value handle);
+
+/// Generate call to runtime function to retrieve prif_coarray_handle
+/// associated to an addr
+mlir::Value getCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
+                             mlir::Value addr);
+
+/// Generate call to runtime function to compute the lastest ucobound.
+void computeLastUcobound(fir::FirOpBuilder &builder, mlir::Location loc,
+                         mlir::Value lcobounds, mlir::Value ucobounds);
+
 /// Generate Call to runtime prif_num_images
 mlir::Value getNumImages(fir::FirOpBuilder &builder, mlir::Location loc);
 
