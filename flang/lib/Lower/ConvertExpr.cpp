@@ -1839,6 +1839,35 @@ public:
         box, fir::factory::getNonDefaultLowerBounds(builder, loc, exv),
         fir::factory::getNonDeferredLenParams(exv));
   }
+    
+  /// Helper to lower intrinsic arguments to a fir::BoxValue.
+  /// It preserves all the non default lower bounds/non deferred length
+  /// parameter information. It preserves also all the lower cobounds, 
+  /// upper cobounds and cosubscripts information in case that the argument is a 
+  /// coarray.
+  ExtValue lowerIntrinsicArgumentAsCoarrayBox(const Fortran::lower::SomeExpr &expr) {
+    mlir::Location loc = getLoc();
+    ExtValue exv = genBoxArg(expr);
+    auto exvTy = fir::getBase(exv).getType();
+    if (mlir::isa<mlir::FunctionType>(exvTy)) {
+      auto boxProcTy =
+          builder.getBoxProcType(mlir::cast<mlir::FunctionType>(exvTy));
+      return builder.create<fir::EmboxProcOp>(loc, boxProcTy,
+                                              fir::getBase(exv));
+    }
+    mlir::Value box = builder.createBox(loc, exv, exv.isPolymorphic());
+    if (Fortran::lower::isParentComponent(expr)) {
+      fir::ExtendedValue newExv =
+          Fortran::lower::updateBoxForParentComponent(converter, box, expr);
+      box = fir::getBase(newExv);
+    }
+    /// Generate cobounds and cosubscripts
+    return fir::BoxValue(
+        box, fir::factory::getNonDefaultLowerBounds(builder, loc, exv),
+        fir::factory::getNonDeferredLenParams(exv),
+        Fortran::lower::genCoshape(converter, loc, expr, stmtCtx),
+        Fortran::lower::genCoSubscripts(converter, loc, expr, stmtCtx));
+  }
 
   /// Generate a call to a Fortran intrinsic or intrinsic module procedure.
   ExtValue genIntrinsicRef(
@@ -1877,6 +1906,10 @@ public:
           return;
         case fir::LowerIntrinsicArgAs::Inquired:
           operands.emplace_back(lowerIntrinsicArgumentAsInquired(expr),
+                                std::nullopt);
+          return;
+        case fir::LowerIntrinsicArgAs::CoarrayBox:
+          operands.emplace_back(lowerIntrinsicArgumentAsCoarrayBox(expr),
                                 std::nullopt);
           return;
         }
@@ -1954,6 +1987,7 @@ public:
           operands.emplace_back(
               genOptionalAddr(builder, loc, optional, isPresent));
           continue;
+        case fir::LowerIntrinsicArgAs::CoarrayBox: // TODO
         case fir::LowerIntrinsicArgAs::Box:
           operands.emplace_back(
               genOptionalBox(builder, loc, optional, isPresent));
@@ -1976,6 +2010,9 @@ public:
         continue;
       case fir::LowerIntrinsicArgAs::Inquired:
         operands.emplace_back(lowerIntrinsicArgumentAsInquired(*expr));
+        continue;
+      case fir::LowerIntrinsicArgAs::CoarrayBox:
+        operands.emplace_back(lowerIntrinsicArgumentAsCoarrayBox(*expr));
         continue;
       }
       llvm_unreachable("bad switch");
@@ -4739,6 +4776,7 @@ private:
           PushSemantics(ConstituentSemantics::RefOpaque);
           operands.emplace_back(genElementalArgument(*expr));
         } break;
+        case fir::LowerIntrinsicArgAs::CoarrayBox: // TODO
         case fir::LowerIntrinsicArgAs::Box: {
           PushSemantics(ConstituentSemantics::RefOpaque);
           auto lambda = genElementalArgument(*expr);

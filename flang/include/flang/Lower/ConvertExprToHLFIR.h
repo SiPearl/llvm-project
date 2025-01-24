@@ -64,6 +64,21 @@ fir::ExtendedValue convertToBox(mlir::Location loc,
                                 Fortran::lower::StatementContext &,
                                 mlir::Type fortranType);
 
+
+/// Lower an evaluate::Expr object to a fir.box, and a procedure designator to a
+/// fir.boxproc<> with coarray information
+fir::ExtendedValue convertExprToCoarrayBox(mlir::Location loc,
+                                    Fortran::lower::AbstractConverter &,
+                                    const Fortran::lower::SomeExpr &,
+                                    Fortran::lower::SymMap &,
+                                    Fortran::lower::StatementContext &);
+fir::ExtendedValue
+convertToCoarrayBox(mlir::Location loc, Fortran::lower::AbstractConverter &,
+                    hlfir::Entity entity, Fortran::lower::StatementContext &,
+                    mlir::Type fortranType,
+                    llvm::SmallVector<mlir::Value, 4> coshape = {},
+                    llvm::SmallVector<mlir::Value, 4> cosubscripts = {});
+
 /// Lower an evaluate::Expr to fir::ExtendedValue address.
 /// The address may be a raw fir.ref<T>, or a fir.box<T>/fir.class<T>, or a
 /// fir.boxproc<>. Pointers and allocatable are dereferenced.
