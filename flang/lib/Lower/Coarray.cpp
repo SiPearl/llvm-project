@@ -59,8 +59,44 @@ void Fortran::lower::genChangeTeamConstruct(
 void Fortran::lower::genChangeTeamStmt(
     Fortran::lower::AbstractConverter &converter,
     Fortran::lower::pft::Evaluation &,
-    const Fortran::parser::ChangeTeamStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: CHANGE TEAM statement");
+    const Fortran::parser::ChangeTeamStmt &stmt) {
+  // TODO(converter.getCurrentLocation(), "coarray: CHANGE TEAM statement");
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  mlir::Value errMsg, stat, team;
+  // Handle STAT and ERRMSG values
+  Fortran::lower::StatementContext stmtCtx;
+  const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList =
+      std::get<std::list<Fortran::parser::StatOrErrmsg>>(stmt.t);
+  for (const Fortran::parser::StatOrErrmsg &statOrErr : statOrErrList) {
+    std::visit(
+        Fortran::common::visitors{
+            [&](const Fortran::parser::StatVariable &statVar) {
+              const auto *expr = Fortran::semantics::GetExpr(statVar);
+              stat = fir::getBase(converter.genExprAddr(loc, *expr, stmtCtx));
+            },
+            [&](const Fortran::parser::MsgVariable &errMsgVar) {
+              const auto *expr = Fortran::semantics::GetExpr(errMsgVar);
+              errMsg = fir::getBase(converter.genExprBox(loc, *expr, stmtCtx));
+            },
+        },
+        statOrErr.u);
+  }
+
+  if (isStaticallyAbsent(stat))
+    stat = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  if (isStaticallyAbsent(errMsg))
+    errMsg = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+
+  // Handle TEAM-VALUE
+  const auto *teamExpr =
+      Fortran::semantics::GetExpr(std::get<Fortran::parser::TeamValue>(stmt.t));
+  team = fir::getBase(converter.genExprBox(loc, *teamExpr, stmtCtx));
+
+  fir::runtime::genChangeTeamStatement(builder, loc, team, stat, errMsg);
 }
 
 void Fortran::lower::genEndChangeTeamStmt(
