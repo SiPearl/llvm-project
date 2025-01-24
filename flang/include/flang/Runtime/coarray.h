@@ -83,6 +83,12 @@ DECLARE_UNIMPLEMENTED_PRIF(co_min, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(
     co_min_character, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_sum, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    form_team, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(get_team, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(team_number, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(change_team, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(end_team, void *, void *, void *)
 
 FORTRAN_EXTERN_C_END
 

@@ -137,6 +137,12 @@ void genCoMin(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
 void genCoSum(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
               mlir::Value resultImage, mlir::Value stat, mlir::Value errmsg);
 
+/// Generate call to runtime subroutine prif_form_team
+void genFormTeamStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                          mlir::Value teamNumber, mlir::Value team,
+                          mlir::Value newIndex, mlir::Value stat,
+                          mlir::Value errMsg);
+
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
 

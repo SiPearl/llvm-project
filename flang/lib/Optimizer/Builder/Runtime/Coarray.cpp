@@ -405,3 +405,22 @@ void fir::runtime::genCoSum(fir::FirOpBuilder &builder, mlir::Location loc,
   genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
                           PRIFNAME_SUB("co_sum"));
 }
+
+/// Generate call to runtime subroutine prif_form_team
+void fir::runtime::genFormTeamStatement(fir::FirOpBuilder &builder,
+                                        mlir::Location loc,
+                                        mlir::Value teamNumber,
+                                        mlir::Value team, mlir::Value newIndex,
+                                        mlir::Value stat, mlir::Value errMsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("form_team"), ftype);
+
+  mlir::Value none = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  llvm::SmallVector<mlir::Value> localArgs = {teamNumber, team, newIndex,
+                                              stat,       none, errMsg};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
