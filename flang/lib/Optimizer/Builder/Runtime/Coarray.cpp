@@ -181,6 +181,60 @@ mlir::Value fir::runtime::getImageIndex(fir::FirOpBuilder &builder,
   return builder.create<fir::LoadOp>(loc, result);
 }
 
+/// Generate Call to runtime prif_lcobound_{with|no}_dim
+mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value handle,
+                                       size_t corank, mlir::Value dim) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type resultType = fir::SequenceType::get(
+      static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
+  mlir::Value result =
+      builder.createBox(loc, builder.createTemporary(loc, resultType));
+
+  mlir::func::FuncOp funcOp;
+  llvm::SmallVector<mlir::Value> localArgs = {handle};
+  if (isStaticallyAbsent(dim)) {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("lcobound_no_dim"), ftype);
+    localArgs.emplace_back(result);
+  } else {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("lcobound_with_dim"), ftype);
+    localArgs.insert(localArgs.end(), {dim, result});
+  }
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return result;
+}
+
+/// Generate Call to runtime prif_ucobound_{with|no}_dim
+mlir::Value fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value handle,
+                                       size_t corank, mlir::Value dim) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type resultType = fir::SequenceType::get(
+      static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
+  mlir::Value result =
+      builder.createBox(loc, builder.createTemporary(loc, resultType));
+
+  mlir::func::FuncOp funcOp;
+  llvm::SmallVector<mlir::Value> localArgs = {handle};
+  if (isStaticallyAbsent(dim)) {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("ucobound_no_dim"), ftype);
+    localArgs.emplace_back(result);
+  } else {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("ucobound_with_dim"), ftype);
+    localArgs.insert(localArgs.end(), {dim, result});
+  }
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return result;
+}
+
 /// Generate call to runtime subroutine prif_sync_all
 void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,

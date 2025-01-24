@@ -460,6 +460,10 @@ static constexpr IntrinsicHandler handlers[]{
      &I::genLbound,
      {{{"array", asInquired}, {"dim", asValue}, {"kind", asValue}}},
      /*isElemental=*/false},
+    {"lcobound",
+     &I::genLcobound,
+     {{{"coarray", asCoarrayBox}, {"dim", asAddr}, {"kind", asValue}}},
+     /*isElemental=*/false},
     {"leadz", &I::genLeadz},
     {"len",
      &I::genLen,
@@ -722,6 +726,10 @@ static constexpr IntrinsicHandler handlers[]{
     {"ubound",
      &I::genUbound,
      {{{"array", asBox}, {"dim", asValue}, {"kind", asValue}}},
+     /*isElemental=*/false},
+    {"ucobound",
+     &I::genUcobound,
+     {{{"coarray", asCoarrayBox}, {"dim", asAddr}, {"kind", asValue}}},
      /*isElemental=*/false},
     {"umaskl", &I::genMask<mlir::arith::ShLIOp>},
     {"umaskr", &I::genMask<mlir::arith::ShRUIOp>},
@@ -7573,6 +7581,48 @@ IntrinsicLibrary::genUbound(mlir::Type resultType,
   return genBoundInquiry(builder, loc, resultType, args, kindPos,
                          fir::runtime::genUbound,
                          /*needAccurateLowerBound=*/true);
+}
+
+// LCOBOUND
+fir::ExtendedValue
+IntrinsicLibrary::genLcobound(mlir::Type resultType,
+                              llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2 || args.size() == 3);
+
+  // Handle the coarray handle
+  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  mlir::Value dim;
+  const bool dimIsAbsent = args.size() == 2 || isStaticallyAbsent(args, 1);
+  if (!dimIsAbsent) {
+    // Handle the DIM argument
+    dim = fir::getBase(args[1]);
+  }
+  mlir::Value result =
+      fir::runtime::genLCoBounds(builder, loc, handle, args[0].corank(), dim);
+  return result;
+}
+
+// UCOBOUND
+fir::ExtendedValue
+IntrinsicLibrary::genUcobound(mlir::Type resultType,
+                              llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2 || args.size() == 3);
+
+  // Handle the coarray handle
+  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  mlir::Value dim;
+  const bool dimIsAbsent = args.size() == 2 || isStaticallyAbsent(args, 1);
+  if (!dimIsAbsent) {
+    // Handle the DIM argument
+    dim = fir::getBase(args[1]);
+  }
+  mlir::Value result =
+      fir::runtime::genUCoBounds(builder, loc, handle, args[0].corank(), dim);
+  return result;
 }
 
 // SPACING

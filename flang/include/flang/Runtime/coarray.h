@@ -60,6 +60,10 @@ DECLARE_UNIMPLEMENTED_PRIF(
     image_index_with_team, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(
     image_index_with_team_number, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(lcobound_no_dim, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(lcobound_with_dim, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(ucobound_no_dim, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(ucobound_with_dim, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(allocate_coarray, void *, void *, void *, void *,
     void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
