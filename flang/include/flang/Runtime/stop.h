@@ -22,6 +22,7 @@ NORETURN RT_API_ATTRS void RTNAME(StopStatement)(
     bool quiet DEFAULT_VALUE(false));
 NORETURN RT_API_ATTRS void RTNAME(StopStatementText)(const char *, size_t,
     bool isErrorStop DEFAULT_VALUE(false), bool quiet DEFAULT_VALUE(false));
+void RTNAME(CloseAllExternalUnits)(const char *why);
 void RTNAME(PauseStatement)(NO_ARGUMENTS);
 void RTNAME(PauseStatementInt)(int);
 void RTNAME(PauseStatementText)(const char *, size_t);

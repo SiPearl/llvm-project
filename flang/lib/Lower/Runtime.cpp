@@ -176,8 +176,13 @@ void Fortran::lower::genFailImageStatement(
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Location loc = converter.getCurrentLocation();
   mlir::func::FuncOp callee =
-      fir::runtime::getRuntimeFunc<mkRTKey(FailImageStatement)>(loc, builder);
-  builder.create<fir::CallOp>(loc, callee, std::nullopt);
+      fir::runtime::getRuntimeFunc<mkRTKey(CloseAllExternalUnits)>(loc,
+                                                                   builder);
+  mlir::Value why = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  llvm::SmallVector<mlir::Value> args = {why};
+  builder.create<fir::CallOp>(loc, callee, args);
+  fir::runtime::genFailImageStatement(builder, loc);
   genUnreachable(builder, loc);
 }
 

@@ -60,7 +60,7 @@ extern "C" {
   }
 }
 
-static void CloseAllExternalUnits(const char *why) {
+void RTNAME(CloseAllExternalUnits)(const char *why) {
   Fortran::runtime::io::IoErrorHandler handler{why};
   Fortran::runtime::io::ExternalFileUnit::CloseAll(handler);
 }
@@ -84,7 +84,7 @@ static void CloseAllExternalUnits(const char *why) {
   }
   Fortran::runtime::DeviceTrap();
 #else
-  CloseAllExternalUnits("STOP statement");
+  RTNAME(CloseAllExternalUnits)("STOP statement");
   if (Fortran::runtime::executionEnvironment.noStopMessage && code == 0) {
     quiet = true;
   }
@@ -113,7 +113,7 @@ static void CloseAllExternalUnits(const char *why) {
   }
   Fortran::runtime::DeviceTrap();
 #else
-  CloseAllExternalUnits("STOP statement");
+  RTNAME(CloseAllExternalUnits)("STOP statement");
   if (!quiet) {
     if (Fortran::runtime::executionEnvironment.noStopMessage && !isErrorStop) {
       std::fprintf(stderr, "%.*s\n", static_cast<int>(length), code);
@@ -143,7 +143,7 @@ static bool StartPause() {
 static void EndPause() {
   std::fflush(nullptr);
   if (std::fgetc(stdin) == EOF) {
-    CloseAllExternalUnits("PAUSE statement");
+    RTNAME(CloseAllExternalUnits)("PAUSE statement");
     std::exit(EXIT_SUCCESS);
   }
 }
@@ -173,17 +173,17 @@ void RTNAME(PauseStatementText)(const char *code, std::size_t length) {
 
 [[noreturn]] void RTNAME(FailImageStatement)() {
   Fortran::runtime::NotifyOtherImagesOfFailImageStatement();
-  CloseAllExternalUnits("FAIL IMAGE statement");
+  RTNAME(CloseAllExternalUnits)("FAIL IMAGE statement");
   std::exit(EXIT_FAILURE);
 }
 
 [[noreturn]] void RTNAME(ProgramEndStatement)() {
-  CloseAllExternalUnits("END statement");
+  RTNAME(CloseAllExternalUnits)("END statement");
   std::exit(EXIT_SUCCESS);
 }
 
 [[noreturn]] void RTNAME(Exit)(int status) {
-  CloseAllExternalUnits("CALL EXIT()");
+  RTNAME(CloseAllExternalUnits)("CALL EXIT()");
   std::exit(status);
 }
 
