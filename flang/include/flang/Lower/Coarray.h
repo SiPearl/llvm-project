@@ -47,6 +47,21 @@ void genFormTeamStatement(AbstractConverter &, pft::Evaluation &eval,
                           const parser::FormTeamStmt &);
 
 //===----------------------------------------------------------------------===//
+// COARRAY utils 
+//===----------------------------------------------------------------------===//
+
+/// From coarray expression, generate vectors of mlir::Value with cosubscripts
+llvm::SmallVector<mlir::Value, 4> genCoshape(AbstractConverter &converter,
+                                             mlir::Location loc,
+                                             const SomeExpr &expr,
+                                             StatementContext &stmtCtx);
+
+/// From coarray expression, generate vector of cosubscript 
+llvm::SmallVector<mlir::Value, 4>
+genCoSubscripts(AbstractConverter &converter, mlir::Location loc,
+            const SomeExpr &expr, StatementContext &stmtCtx);
+
+//===----------------------------------------------------------------------===//
 // COARRAY expressions
 //===----------------------------------------------------------------------===//
 

@@ -1104,6 +1104,21 @@ hlfir::convertToBox(mlir::Location loc, fir::FirOpBuilder &builder,
 }
 
 std::pair<fir::ExtendedValue, std::optional<hlfir::CleanupFunction>>
+hlfir::convertToCoarrayBox(mlir::Location loc, fir::FirOpBuilder &builder,
+                           hlfir::Entity entity, mlir::Type targetType,
+                           llvm::ArrayRef<mlir::Value> coshape,
+                           llvm::ArrayRef<mlir::Value> cosubscripts) {
+  auto [exv, cleanup] = convertToBox(loc, builder, entity, targetType);
+  if (const fir::BoxValue *box = exv.getBoxOf<fir::BoxValue>()) {
+    fir::BoxValue coarrayBox(box->getAddr(), box->getLBounds(),
+                             box->getExplicitParameters(),
+                             box->getExplicitExtents(), coshape, cosubscripts);
+    return {coarrayBox, cleanup};
+  }
+  return {exv, cleanup};
+}
+
+std::pair<fir::ExtendedValue, std::optional<hlfir::CleanupFunction>>
 hlfir::convertToAddress(mlir::Location loc, fir::FirOpBuilder &builder,
                         hlfir::Entity entity, mlir::Type targetType) {
   hlfir::Entity derefedEntity =

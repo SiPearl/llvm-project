@@ -464,6 +464,12 @@ std::pair<fir::ExtendedValue, std::optional<hlfir::CleanupFunction>>
 convertToBox(mlir::Location loc, fir::FirOpBuilder &builder,
              hlfir::Entity entity, mlir::Type targetType);
 
+std::pair<fir::ExtendedValue, std::optional<hlfir::CleanupFunction>>
+convertToCoarrayBox(mlir::Location loc, fir::FirOpBuilder &builder,
+                    hlfir::Entity entity, mlir::Type targetType,
+                    llvm::ArrayRef<mlir::Value> coshape = {},
+                    llvm::ArrayRef<mlir::Value> cosubscripts = {});
+
 /// Clone an hlfir.elemental_addr into an hlfir.elemental value.
 hlfir::ElementalOp cloneToElementalOp(mlir::Location loc,
                                       fir::FirOpBuilder &builder,

@@ -293,9 +293,11 @@ public:
   BoxValue(mlir::Value addr) : AbstractIrBox{addr} { assert(verify()); }
   BoxValue(mlir::Value addr, llvm::ArrayRef<mlir::Value> lbounds,
            llvm::ArrayRef<mlir::Value> explicitParams,
-           llvm::ArrayRef<mlir::Value> explicitExtents = {})
+           llvm::ArrayRef<mlir::Value> explicitExtents = {},
+           llvm::ArrayRef<mlir::Value> coshape = {},
+           llvm::ArrayRef<mlir::Value> cosubscripts = {})
       : AbstractIrBox{addr, lbounds, explicitExtents},
-        explicitParams{explicitParams} {
+        explicitParams{explicitParams}, coshape{coshape} {
     assert(verify());
   }
   // TODO: check contiguous attribute of addr
@@ -324,6 +326,10 @@ public:
     return explicitParams;
   }
 
+  llvm::ArrayRef<mlir::Value> getCoshape() const { return coshape; }
+
+  unsigned corank() const { return coshape.size(); }
+
 protected:
   // Verify constructor invariants.
   bool verify() const;
@@ -331,6 +337,8 @@ protected:
   // Only field when the BoxValue has explicit LEN parameters.
   // Otherwise, the LEN parameters are in the fir.box.
   llvm::SmallVector<mlir::Value, 2> explicitParams;
+  llvm::SmallVector<mlir::Value, 4> coshape;
+  llvm::SmallVector<mlir::Value, 4> cosubscripts;
 };
 
 /// Set of variables (addresses) holding the allocatable properties. These may
@@ -517,6 +525,11 @@ public:
                  [](const fir::ProcBoxValue &box) -> unsigned { return 0; },
                  [](const fir::PolymorphicValue &box) -> unsigned { return 0; },
                  [](const auto &box) -> unsigned { return box.rank(); });
+  }
+
+  unsigned corank() const {
+    return match([](const fir::BoxValue &box) -> unsigned { return box.corank(); },
+                 [](const auto &) -> unsigned { return 0; });
   }
 
   bool isPolymorphic() const {

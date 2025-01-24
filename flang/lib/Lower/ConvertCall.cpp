@@ -12,6 +12,7 @@
 
 #include "flang/Lower/ConvertCall.h"
 #include "flang/Lower/Allocatable.h"
+#include "flang/Lower/Coarray.h"
 #include "flang/Lower/ConvertExprToHLFIR.h"
 #include "flang/Lower/ConvertProcedureDesignator.h"
 #include "flang/Lower/ConvertVariable.h"
@@ -1960,6 +1961,7 @@ genIntrinsicRefCore(Fortran::lower::PreparedActualArguments &loweredActuals,
         operands.emplace_back(exv);
         continue;
       }
+      case fir::LowerIntrinsicArgAs::CoarrayBox: // TODO: Optional Coarray
       case fir::LowerIntrinsicArgAs::Box: {
         hlfir::Entity actual = arg.value()->getActual(loc, builder);
         auto [exv, cleanup] = genOptionalBox(builder, loc, actual, isPresent);
@@ -2021,6 +2023,18 @@ genIntrinsicRefCore(Fortran::lower::PreparedActualArguments &loweredActuals,
       // since the fir.box lowered here are now guaranteed to contain the local
       // lower bounds thanks to the hlfir.declare (the extra rebox can be
       // removed).
+      operands.emplace_back(Fortran::lower::translateToExtendedValue(
+          loc, builder, actual, stmtCtx));
+      continue;
+    case fir::LowerIntrinsicArgAs::CoarrayBox:
+      if (const Fortran::lower::SomeExpr *expr =
+              callContext.procRef.UnwrapArgExpr(arg.index())) {
+        operands.emplace_back(Fortran::lower::convertToCoarrayBox(
+            loc, converter, actual, stmtCtx, getActualFortranElementType(),
+            Fortran::lower::genCoshape(converter, loc, *expr, stmtCtx),
+            Fortran::lower::genCoSubscripts(converter, loc, *expr, stmtCtx)));
+        continue;
+      }
       operands.emplace_back(Fortran::lower::translateToExtendedValue(
           loc, builder, actual, stmtCtx));
       continue;
@@ -2544,6 +2558,12 @@ genCustomIntrinsicRef(const Fortran::evaluate::SpecificIntrinsic *intrinsic,
     case fir::LowerIntrinsicArgAs::Inquired:
       exv = Fortran::lower::translateToExtendedValue(loc, builder, actual,
                                                      stmtCtx);
+      break;
+    case fir::LowerIntrinsicArgAs::CoarrayBox:
+      exv = Fortran::lower::convertToCoarrayBox(
+          loc, converter, actual, stmtCtx, getActualFortranElementType(),
+          Fortran::lower::genCoshape(converter, loc, expr, stmtCtx),
+          Fortran::lower::genCoSubscripts(converter, loc, expr, stmtCtx));
       break;
     }
     if (!exv)

@@ -104,7 +104,9 @@ enum class LowerIntrinsicArgAs {
   /// Lower argument without assuming that the argument is fully defined.
   /// It can be used on unallocated allocatable, disassociated pointer,
   /// or absent optional. This is meant for inquiry intrinsic arguments.
-  Inquired
+  Inquired,
+  /// Lower argument to a box but with coarray information.
+  CoarrayBox,
 };
 
 /// Define how a given intrinsic argument must be lowered.
@@ -120,6 +122,8 @@ struct ArgLoweringRule {
   //    - absent box
   //  AsInquired:
   //    - no-op
+  //  CoarrayBox:
+  //    - absent box
   bool handleDynamicOptional;
 };
 
@@ -127,6 +131,7 @@ constexpr auto asValue = fir::LowerIntrinsicArgAs::Value;
 constexpr auto asAddr = fir::LowerIntrinsicArgAs::Addr;
 constexpr auto asBox = fir::LowerIntrinsicArgAs::Box;
 constexpr auto asInquired = fir::LowerIntrinsicArgAs::Inquired;
+constexpr auto asCoarrayBox = fir::LowerIntrinsicArgAs::CoarrayBox;
 
 /// Opaque class defining the argument lowering rules for all the argument of
 /// an intrinsic.
