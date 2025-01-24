@@ -40,6 +40,11 @@
 using namespace Fortran::semantics;
 using namespace Fortran::runtime;
 
+/// Test if an ExtendedValue is absent.
+static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
+  return !fir::getBase(exv);
+}
+
 //===----------------------------------------------------------------------===//
 // TEAM statements and constructs
 //===----------------------------------------------------------------------===//
@@ -67,8 +72,69 @@ void Fortran::lower::genEndChangeTeamStmt(
 
 void Fortran::lower::genFormTeamStatement(
     Fortran::lower::AbstractConverter &converter,
-    Fortran::lower::pft::Evaluation &, const Fortran::parser::FormTeamStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: FORM TEAM statement");
+    Fortran::lower::pft::Evaluation &,
+    const Fortran::parser::FormTeamStmt &stmt) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  mlir::Value errMsg, stat, newIndex, teamNumber, team;
+  // Handle NEW_INDEX, STAT and ERRMSG
+  std::list<Fortran::parser::StatOrErrmsg> statOrErrList{};
+  Fortran::lower::StatementContext stmtCtx;
+  const auto &formSpecList =
+      std::get<std::list<Fortran::parser::FormTeamStmt::FormTeamSpec>>(stmt.t);
+  for (const Fortran::parser::FormTeamStmt::FormTeamSpec &formSpec :
+       formSpecList) {
+    std::visit(
+        Fortran::common::visitors{
+            [&](const Fortran::parser::StatOrErrmsg &statOrErr) {
+              std::visit(
+                  Fortran::common::visitors{
+                      [&](const Fortran::parser::StatVariable &statVar) {
+                        const auto *expr = Fortran::semantics::GetExpr(statVar);
+                        stat = fir::getBase(
+                            converter.genExprAddr(loc, *expr, stmtCtx));
+                      },
+                      [&](const Fortran::parser::MsgVariable &errMsgVar) {
+                        const auto *expr =
+                            Fortran::semantics::GetExpr(errMsgVar);
+                        errMsg = fir::getBase(
+                            converter.genExprBox(loc, *expr, stmtCtx));
+                      },
+                  },
+                  statOrErr.u);
+            },
+            [&](const Fortran::parser::ScalarIntExpr &intExpr) {
+              fir::ExtendedValue newIndexExpr = converter.genExprValue(
+                  loc, Fortran::semantics::GetExpr(intExpr), stmtCtx);
+              newIndex = fir::getBase(newIndexExpr);
+            },
+        },
+        formSpec.u);
+  }
+  if (isStaticallyAbsent(newIndex))
+    newIndex = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  if (isStaticallyAbsent(stat))
+    stat = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  if (isStaticallyAbsent(errMsg))
+    errMsg = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+
+  // Handle TEAM-NUMBER
+  const auto *teamNumberExpr = Fortran::semantics::GetExpr(
+      std::get<Fortran::parser::ScalarIntExpr>(stmt.t));
+  teamNumber =
+      fir::getBase(converter.genExprAddr(loc, *teamNumberExpr, stmtCtx));
+
+  // Handle TEAM-VARIABLE
+  const auto *teamExpr = Fortran::semantics::GetExpr(
+      std::get<Fortran::parser::TeamVariable>(stmt.t));
+  team = fir::getBase(converter.genExprBox(loc, *teamExpr, stmtCtx));
+
+  fir::runtime::genFormTeamStatement(builder, loc, teamNumber, team, newIndex,
+                                     stat, errMsg);
 }
 
 //===----------------------------------------------------------------------===//
