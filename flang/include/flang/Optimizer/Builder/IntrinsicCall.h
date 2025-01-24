@@ -418,6 +418,8 @@ struct IntrinsicLibrary {
                                mlir::ArrayRef<fir::ExtendedValue> args);
   void genSystemClock(llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genTand(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genTeamNumber(mlir::Type,
+                                   llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genThisImage(mlir::Type,
                                   llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genTrailz(mlir::Type, llvm::ArrayRef<mlir::Value>);

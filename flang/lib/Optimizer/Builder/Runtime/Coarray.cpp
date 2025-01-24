@@ -493,3 +493,20 @@ mlir::Value fir::runtime::genGetTeam(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
   return team;
 }
+
+/// Generate call to runtime subroutine prif_team_number
+mlir::Value fir::runtime::genTeamNumber(fir::FirOpBuilder &builder,
+                                        mlir::Location loc, mlir::Value team) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("team_number"), ftype);
+
+  // Handle TEAM-NUMBER as result of prif_team_number
+  mlir::Value result = builder.createBox(
+      loc, builder.createTemporary(loc, builder.getI64Type()));
+
+  llvm::SmallVector<mlir::Value> localArgs = {team, result};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return builder.create<fir::LoadOp>(loc, result);
+}

@@ -715,6 +715,10 @@ static constexpr IntrinsicHandler handlers[]{
      {{{"count", asAddr}, {"count_rate", asAddr}, {"count_max", asAddr}}},
      /*isElemental=*/false},
     {"tand", &I::genTand},
+    {"team_number",
+     &I::genTeamNumber,
+     {{{"team", asBox, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"this_image",
      &I::genThisImage,
      {{{"coarray", asCoarrayBox},
@@ -7468,6 +7472,19 @@ mlir::Value IntrinsicLibrary::genTand(mlir::Type resultType,
   mlir::Value factor = builder.createConvert(loc, args[0].getType(), dfactor);
   mlir::Value arg = builder.create<mlir::arith::MulFOp>(loc, args[0], factor);
   return getRuntimeCallGenerator("tan", ftype)(builder, loc, {arg});
+}
+
+// TEAM_NUMBER
+fir::ExtendedValue
+IntrinsicLibrary::genTeamNumber(mlir::Type,
+                                llvm::ArrayRef<fir::ExtendedValue> args) {
+
+  assert(args.size() == 1);
+  mlir::Value team = isStaticallyAbsent(args[0])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, fir::BoxType::get(builder.getNoneType()))
+                         : fir::getBase(args[0]);
+  return fir::runtime::genTeamNumber(builder, loc, team);
 }
 
 // THIS_IMAGE
