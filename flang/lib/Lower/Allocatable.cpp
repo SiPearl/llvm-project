@@ -13,6 +13,7 @@
 #include "flang/Lower/Allocatable.h"
 #include "flang/Evaluate/tools.h"
 #include "flang/Lower/AbstractConverter.h"
+#include "flang/Lower/Coarray.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/ConvertVariable.h"
 #include "flang/Lower/Cuda.h"
@@ -487,8 +488,33 @@ private:
     // Generate a sequence of runtime calls.
     errorManager.genStatCheck(builder, loc);
     genAllocateObjectInit(box, allocatorIdx);
-    if (alloc.hasCoarraySpec())
-      TODO(loc, "coarray: allocation of a coarray object");
+    if (alloc.hasCoarraySpec()) {
+      Fortran::lower::StatementContext stmtCtx;
+      llvm::SmallVector<mlir::Value> extents;
+      mlir::Value one =
+          builder.createIntegerConstant(loc, builder.getI32Type(), 1);
+      for (const auto &iter : llvm::enumerate(alloc.getShapeSpecs())) {
+        mlir::Value lb;
+        const auto &bounds = iter.value().t;
+        if (const std::optional<Fortran::parser::BoundExpr> &lbExpr =
+                std::get<0>(bounds))
+          lb = fir::getBase(converter.genExprValue(
+              loc, Fortran::semantics::GetExpr(*lbExpr), stmtCtx));
+        else
+          lb = one;
+        mlir::Value ub = fir::getBase(converter.genExprValue(
+            loc, Fortran::semantics::GetExpr(std::get<1>(bounds)), stmtCtx));
+        mlir::Value extent = builder.createConvert(
+            loc, builder.getI64Type(),
+            builder.create<mlir::arith::AddIOp>(
+                loc, one, builder.create<mlir::arith::SubIOp>(loc, ub, lb)));
+        extents.push_back(extent);
+      }
+      Fortran::lower::genAllocateCoarray(converter, loc, alloc.getSymbol(), box,
+                                         extents);
+      postAllocationAction(alloc);
+      return;
+    }
     if (alloc.type.IsPolymorphic())
       genSetType(alloc, box, loc);
     genSetDeferredLengthParameters(alloc, box);

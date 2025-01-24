@@ -394,8 +394,8 @@ private:
   mlir::Type visit(const Fortran::evaluate::CoarrayRef &coarrayRef, PartInfo &partInfo) {
     // Coarray is a data entity with corank > 0 that must be scalar 
     // or array.
-    mlir::Type baseType = visit(coarrayRef.GetBase().GetLastSymbol(), partInfo);
-    if (auto seqType = baseType.dyn_cast<fir::SequenceType>()) {
+    mlir::Type baseType = visit(coarrayRef.base().GetLastSymbol(), partInfo);
+    if (auto seqType = mlir::dyn_cast<fir::SequenceType>(baseType)) {
       fir::FirOpBuilder &builder = getBuilder();
       mlir::Location loc = getLoc();
       mlir::Type idxTy = builder.getIndexType();
@@ -426,46 +426,50 @@ private:
       llvm::SmallVector<mlir::Value> resultExtents;
       fir::SequenceType::Shape resultTypeShape;
       bool sawVectorSubscripts = false;
-      for (auto subscript : llvm::enumerate(coarrayRef.subscript())) {
-        if (const auto *triplet =
-                std::get_if<Fortran::evaluate::Triplet>(&subscript.value().u)) {
-          mlir::Value lb, ub;
-          if (const auto &lbExpr = triplet->lower())
-            lb = genSubscript(*lbExpr);
-          else
-            lb = getBaseBounds(subscript.index()).first;
-          if (const auto &ubExpr = triplet->upper())
-            ub = genSubscript(*ubExpr);
-          else
-            ub = getBaseBounds(subscript.index()).second;
-          lb = builder.createConvert(loc, idxTy, lb);
-          ub = builder.createConvert(loc, idxTy, ub);
-          mlir::Value stride = genSubscript(triplet->stride());
-          stride = builder.createConvert(loc, idxTy, stride);
-          auto [extentValue, shapeExtent] =
-              tryGettingExtentFromFrontEnd(resultExtents.size());
-          resultTypeShape.push_back(shapeExtent);
-          if (!extentValue)
-            extentValue =
-                builder.genExtentFromTriplet(loc, lb, ub, stride, idxTy);
-          resultExtents.push_back(extentValue);
-          partInfo.subscripts.emplace_back(
-              hlfir::DesignateOp::Triplet{lb, ub, stride});
-        } else {
-          const auto &expr =
-              std::get<Fortran::evaluate::IndirectSubscriptIntegerExpr>(
-                  subscript.value().u)
-                  .value();
-          hlfir::Entity subscript = genSubscript(expr);
-          partInfo.subscripts.push_back(subscript);
-          if (expr.Rank() > 0) {
-            sawVectorSubscripts = true;
+      if (auto *arrayRef{
+              std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)}) {
+        for (auto subscript : llvm::enumerate(arrayRef->subscript())) {
+          if (const auto *triplet = std::get_if<Fortran::evaluate::Triplet>(
+                  &subscript.value().u)) {
+            mlir::Value lb, ub;
+            if (const auto &lbExpr = triplet->lower())
+              lb = genSubscript(*lbExpr);
+            else
+              lb = getBaseBounds(subscript.index()).first;
+            if (const auto &ubExpr = triplet->upper())
+              ub = genSubscript(*ubExpr);
+            else
+              ub = getBaseBounds(subscript.index()).second;
+            lb = builder.createConvert(loc, idxTy, lb);
+            ub = builder.createConvert(loc, idxTy, ub);
+            mlir::Value stride = genSubscript(triplet->stride());
+            stride = builder.createConvert(loc, idxTy, stride);
             auto [extentValue, shapeExtent] =
                 tryGettingExtentFromFrontEnd(resultExtents.size());
             resultTypeShape.push_back(shapeExtent);
             if (!extentValue)
-              extentValue = hlfir::genExtent(loc, builder, subscript, /*dim=*/0);
+              extentValue =
+                  builder.genExtentFromTriplet(loc, lb, ub, stride, idxTy);
             resultExtents.push_back(extentValue);
+            partInfo.subscripts.emplace_back(
+                hlfir::DesignateOp::Triplet{lb, ub, stride});
+          } else {
+            const auto &expr =
+                std::get<Fortran::evaluate::IndirectSubscriptIntegerExpr>(
+                    subscript.value().u)
+                    .value();
+            hlfir::Entity subscript = genSubscript(expr);
+            partInfo.subscripts.push_back(subscript);
+            if (expr.Rank() > 0) {
+              sawVectorSubscripts = true;
+              auto [extentValue, shapeExtent] =
+                  tryGettingExtentFromFrontEnd(resultExtents.size());
+              resultTypeShape.push_back(shapeExtent);
+              if (!extentValue)
+                extentValue =
+                    hlfir::genExtent(loc, builder, subscript, /*dim=*/0);
+              resultExtents.push_back(extentValue);
+            }
           }
         }
       }
@@ -490,7 +494,7 @@ private:
       } 
       return resultType;
     } else {
-     return baseType;
+      return baseType;
     }
   }
 
