@@ -37,4 +37,20 @@ void RTNAME(computeLastUcobound)(
         (num_images / index) + (num_images % index != 0);
 }
 
+void RTNAME(copy1DArrayToI64Array)(
+    const Descriptor &from, const Descriptor &to) {
+  void *from_ptr = from.raw().base_addr;
+  int64_t *to_ptr = (int64_t *)to.raw().base_addr;
+  int rank = from.raw().rank;
+  for (int j = 0; j < from.raw().dim[0].extent; j++) {
+    if (from.raw().type == CFI_type_int16_t)
+      to_ptr[j] = ((int16_t *)from_ptr)[j];
+    else if (from.raw().type == CFI_type_int32_t)
+      to_ptr[j] = ((int32_t *)from_ptr)[j];
+    else if (from.raw().type == CFI_type_int64_t)
+      to_ptr[j] = ((int64_t *)from_ptr)[j];
+    else if (from.raw().type == CFI_type_intmax_t)
+      to_ptr[j] = ((intmax_t *)from_ptr)[j];
+  }
+}
 } // namespace Fortran::runtime
