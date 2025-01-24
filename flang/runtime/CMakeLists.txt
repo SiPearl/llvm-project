@@ -118,6 +118,7 @@ set(sources
   assign.cpp
   buffer.cpp
   character.cpp
+  coarray.cpp
   command.cpp
   complex-powi.cpp
   complex-reduction.c
