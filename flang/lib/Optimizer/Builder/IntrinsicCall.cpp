@@ -315,6 +315,10 @@ static constexpr IntrinsicHandler handlers[]{
        {"trim_name", asAddr, handleDynamicOptional},
        {"errmsg", asBox, handleDynamicOptional}}},
      /*isElemental=*/false},
+    {"get_team",
+     &I::genGetTeam,
+     {{{"level", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"getcwd",
      &I::genGetCwd,
      {{{"c", asBox}, {"status", asAddr, handleDynamicOptional}}},
@@ -3994,6 +3998,18 @@ void IntrinsicLibrary::genGetEnvironmentVariable(
         .genThen([&]() { builder.createStoreWithConvert(loc, stat, statAddr); })
         .end();
   }
+}
+
+// GET_TEAM
+mlir::Value IntrinsicLibrary::genGetTeam(mlir::Type,
+                                         llvm::ArrayRef<mlir::Value> args) {
+
+  assert(args.size() == 1);
+  mlir::Value level = isStaticallyAbsent(args[0])
+                          ? builder.create<fir::AbsentOp>(
+                                loc, builder.getRefType(builder.getI32Type()))
+                          : args[0];
+  return fir::runtime::genGetTeam(builder, loc, level);
 }
 
 /// Process calls to Maxval, Minval, Product, Sum intrinsic functions that

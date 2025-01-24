@@ -156,6 +156,10 @@ void genChangeTeamStatement(fir::FirOpBuilder &builder, mlir::Location loc,
 void genEndTeamStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value stat, mlir::Value errMsg);
 
+/// Generate call to runtime subroutine prif_get_team
+mlir::Value genGetTeam(fir::FirOpBuilder &builder, mlir::Location loc,
+                       mlir::Value level);
+
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
 
