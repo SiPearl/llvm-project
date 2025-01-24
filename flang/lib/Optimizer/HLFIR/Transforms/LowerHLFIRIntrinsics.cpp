@@ -102,6 +102,7 @@ protected:
           cleanupFns.push_back(*cleanup);
         ret.emplace_back(exv);
       } break;
+      case fir::LowerIntrinsicArgAs::CoarrayBox:
       case fir::LowerIntrinsicArgAs::Box: {
         auto [box, cleanup] =
             hlfir::convertToBox(loc, builder, entity, desiredType);

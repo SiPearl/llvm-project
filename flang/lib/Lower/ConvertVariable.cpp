@@ -16,6 +16,7 @@
 #include "flang/Lower/BoxAnalyzer.h"
 #include "flang/Lower/CUDA.h"
 #include "flang/Lower/CallInterface.h"
+#include "flang/Lower/Coarray.h"
 #include "flang/Lower/ConvertConstant.h"
 #include "flang/Lower/ConvertExpr.h"
 #include "flang/Lower/ConvertExprToHLFIR.h"
