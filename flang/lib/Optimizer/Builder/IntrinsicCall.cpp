@@ -1002,6 +1002,10 @@ static constexpr IntrinsicHandler handlers[]{
      /*isElemental=*/false},
     {"tand", &I::genTand},
     {"tanpi", &I::genTanpi},
+    {"team_number",
+     &I::genTeamNumber,
+     {{{"team", asBox, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"this_grid", &I::genThisGrid, {}, /*isElemental=*/false},
     {"this_image",
      &I::genThisImage,
@@ -8651,6 +8655,19 @@ mlir::Value IntrinsicLibrary::genThisWarp(mlir::Type resultType,
       builder, loc, builder.getRefType(rankFieldTy), res, rankFieldIndex);
   fir::StoreOp::create(builder, loc, rank, rankCoord);
   return res;
+}
+
+// TEAM_NUMBER
+fir::ExtendedValue
+IntrinsicLibrary::genTeamNumber(mlir::Type,
+                                llvm::ArrayRef<fir::ExtendedValue> args) {
+
+  assert(args.size() == 1);
+  mlir::Value team = isStaticallyAbsent(args[0])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, fir::BoxType::get(builder.getNoneType()))
+                         : fir::getBase(args[0]);
+  return fir::runtime::genTeamNumber(builder, loc, team);
 }
 
 // THIS_IMAGE
