@@ -664,6 +664,12 @@ static constexpr IntrinsicHandler handlers[]{
      {{{"count", asAddr}, {"count_rate", asAddr}, {"count_max", asAddr}}},
      /*isElemental=*/false},
     {"tand", &I::genTand},
+    {"this_image",
+     &I::genThisImage,
+     {{{"coarray", asCoarrayBox},
+       {"dim", asAddr},
+       {"team", asBox, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"threadfence", &I::genThreadFence, {}, /*isElemental=*/false},
     {"threadfence_block", &I::genThreadFenceBlock, {}, /*isElemental=*/false},
     {"threadfence_system", &I::genThreadFenceSystem, {}, /*isElemental=*/false},
@@ -7254,6 +7260,43 @@ mlir::Value IntrinsicLibrary::genTand(mlir::Type resultType,
   mlir::Value factor = builder.createConvert(loc, args[0].getType(), dfactor);
   mlir::Value arg = builder.create<mlir::arith::MulFOp>(loc, args[0], factor);
   return getRuntimeCallGenerator("tan", ftype)(builder, loc, {arg});
+}
+
+// THIS_IMAGE
+fir::ExtendedValue
+IntrinsicLibrary::genThisImage(mlir::Type resultType,
+                               llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() >= 1 && args.size() <= 3);
+  const bool coarrayIsAbsent = args.size() == 1;
+  const bool dimIsAbsent = args.size() < 3;
+  mlir::Value team =
+      !isStaticallyAbsent(args, args.size() - 1)
+          ? fir::getBase(args[args.size() - 1])
+          : builder
+                .create<fir::AbsentOp>(loc,
+                                       fir::BoxType::get(builder.getNoneType()))
+                .getResult();
+
+  // FIXME: Need to check the lowering of TEAM argument.
+  // TEAM lowered as a box or an address ?
+  if (!coarrayIsAbsent) {
+    mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
+    mlir::Value handle =
+        fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+    mlir::Value dim;
+    mlir::Type thisImageType;
+    if (!dimIsAbsent) {
+      dim = fir::getBase(args[3]);
+      thisImageType = fir::SequenceType::get(
+          {static_cast<fir::SequenceType::Extent>(args[0].corank())},
+          builder.getI64Type());
+    } else {
+      thisImageType = builder.getI64Type();
+    }
+    return fir::runtime::getThisImageWithCoarray(builder, loc, thisImageType,
+                                                 handle, team, dim);
+  }
+  return fir::runtime::getThisImage(builder, loc, team);
 }
 
 // TRAILZ

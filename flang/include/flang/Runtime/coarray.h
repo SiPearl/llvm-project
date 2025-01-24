@@ -35,6 +35,9 @@ namespace Fortran::runtime {
 
 DECLARE_UNIMPLEMENTED_PRIF(init, void *)
 DECLARE_UNIMPLEMENTED_PRIF(stop, void *, void*, void*)
+DECLARE_UNIMPLEMENTED_PRIF(this_image_no_coarray, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(this_image_with_coarray, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(this_image_with_dim, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team_number, void *, void *)

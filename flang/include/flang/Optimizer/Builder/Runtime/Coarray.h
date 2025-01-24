@@ -49,6 +49,17 @@ mlir::Value getNumImages(fir::FirOpBuilder &builder, mlir::Location loc);
 mlir::Value getNumImagesWithTeam(fir::FirOpBuilder &builder, mlir::Location loc,
                    mlir::Value team);
 
+/// Generate Call to runtime prif_this_image_no_coarray
+mlir::Value getThisImage(fir::FirOpBuilder &builder, mlir::Location loc,
+                         mlir::Value team = {});
+
+/// Generate Call to runtime prif_this_image_with_coarray or
+/// prif_this_image_with_dim
+mlir::Value getThisImageWithCoarray(fir::FirOpBuilder &builder,
+                                    mlir::Location loc, mlir::Type resultType,
+                                    mlir::Value coarrayHandle, mlir::Value team,
+                                    mlir::Value dim = {});
+
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value stat, mlir::Value errmsg);

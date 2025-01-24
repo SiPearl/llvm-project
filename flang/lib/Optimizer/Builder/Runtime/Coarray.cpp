@@ -23,6 +23,11 @@
 using namespace Fortran::runtime;
 using namespace Fortran::semantics;
 
+/// Test if an ExtendedValue is absent.
+static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
+  return !fir::getBase(exv);
+}
+
 /// Generate Call to runtime prif_num_images
 mlir::Value fir::runtime::getNumImages(fir::FirOpBuilder &builder, mlir::Location loc) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
@@ -48,6 +53,34 @@ mlir::Value fir::runtime::getNumImagesWithTeam(fir::FirOpBuilder &builder, mlir:
   builder.create<fir::CallOp>(loc, funcOp, args);
   return builder.create<fir::LoadOp>(loc, result);
 
+}
+
+/// Generate Call to runtime prif_this_image_no_coarray
+mlir::Value fir::runtime::getThisImage(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value team) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("this_image_no_coarray"), ftype);
+
+  mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
+  mlir::Value teamArg =
+      !isStaticallyAbsent(team)
+          ? team
+          : builder.create<fir::AbsentOp>(
+                loc,
+                fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  llvm::SmallVector<mlir::Value> args = {teamArg, result};
+  builder.create<fir::CallOp>(loc, funcOp, args);
+  return builder.create<fir::LoadOp>(loc, result);
+}
+
+/// Generate Call to runtime prif_this_image_with_coarray or
+/// prif_this_image_with_dim
+mlir::Value fir::runtime::getThisImageWithCoarray(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Type resultType,
+    mlir::Value coarrayHandle, mlir::Value team, mlir::Value dim) {
+  TODO(loc, "intrinsic THIS_IMAGE with coarray in argument.");
 }
 
 /// Generate call to runtime subroutine prif_sync_all
