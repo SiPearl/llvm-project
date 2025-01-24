@@ -438,6 +438,9 @@ static constexpr IntrinsicHandler handlers[]{
        {"team", asAddr},
        {"team_number", asAddr}}},
      /*isElemental*/ false},
+    {"image_status",
+     &I::genImageStatus,
+     {{{"image", asAddr}, {"team", asBox, handleDynamicOptional}}}},
     {"index",
      &I::genIndex,
      {{{"string", asAddr},
@@ -5738,6 +5741,13 @@ IntrinsicLibrary::genImageIndex(mlir::Type resultType,
     team = fir::getBase(args[2]);
   }
   return fir::runtime::getImageIndex(builder, loc, handle, sub, team);
+}
+
+// IMAGE_STATUS
+mlir::Value IntrinsicLibrary::genImageStatus(mlir::Type resultType,
+                                             llvm::ArrayRef<mlir::Value> args) {
+  assert(args.size() == 2);
+  return fir::runtime::getImageStatus(builder, loc, args[0], args[1]);
 }
 
 // IOR

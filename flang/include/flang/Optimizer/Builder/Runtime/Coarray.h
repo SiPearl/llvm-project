@@ -76,6 +76,10 @@ mlir::Value getThisImageWithCoarray(fir::FirOpBuilder &builder,
                                     mlir::Value coarrayHandle, mlir::Value team,
                                     mlir::Value dim = {});
 
+/// Generate Call to runtime prif_image_status
+mlir::Value getImageStatus(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value image, mlir::Value team = {});
+
 /// Generate Call to runtime prif_this_image_index
 mlir::Value getImageIndex(fir::FirOpBuilder &builder, mlir::Location loc,
                           mlir::Value handle, mlir::Value sub,

@@ -154,6 +154,25 @@ mlir::Value fir::runtime::getThisImageWithCoarray(
   return builder.create<fir::LoadOp>(loc, result);
 }
 
+/// Generate Call to runtime prif_image_status
+mlir::Value fir::runtime::getImageStatus(fir::FirOpBuilder &builder,
+                                         mlir::Location loc, mlir::Value image,
+                                         mlir::Value team) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Value result = builder.createTemporary(loc, builder.getI32Type());
+
+  if (isStaticallyAbsent(team)) {
+    team = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  }
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("image_status"), ftype);
+  llvm::SmallVector<mlir::Value> localArgs = {image, team, result};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return builder.create<fir::LoadOp>(loc, result);
+}
+
 /// Generate call to runtime prif_this_image_index and assumed that sub is
 /// an array of i64 elements
 mlir::Value fir::runtime::getImageIndex(fir::FirOpBuilder &builder,

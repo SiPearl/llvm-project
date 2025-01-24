@@ -60,6 +60,7 @@ DECLARE_UNIMPLEMENTED_PRIF(
     image_index_with_team, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(
     image_index_with_team_number, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(image_status, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(coshape, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(lcobound_no_dim, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(lcobound_with_dim, void *, void *, void *)
