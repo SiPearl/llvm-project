@@ -166,3 +166,62 @@ void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
+/// Generate call to collective subroutines except co_reduce_
+/// A must be lowered as a box
+void genCollectiveSubroutine(fir::FirOpBuilder &builder, mlir::Location loc,
+                             mlir::Value A, mlir::Value sourceImage,
+                             mlir::Value stat, mlir::Value errmsg,
+                             std::string coName) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp = builder.createFunction(loc, coName, ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {A, sourceImage, stat, nullPtr,
+                                              errmsg};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+/// Generate call to runtime subroutine prif_co_broadcast
+void fir::runtime::genCoBroadcast(fir::FirOpBuilder &builder,
+                                  mlir::Location loc, mlir::Value A,
+                                  mlir::Value sourceImage, mlir::Value stat,
+                                  mlir::Value errmsg) {
+  genCollectiveSubroutine(builder, loc, A, sourceImage, stat, errmsg,
+                          PRIFNAME_SUB("co_broadcast"));
+}
+
+/// Generate call to runtime subroutine prif_co_max or prif_co_max_character
+void fir::runtime::genCoMax(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value A, mlir::Value resultImage,
+                            mlir::Value stat, mlir::Value errmsg) {
+  if (fir::unwrapPassByRefType(A.getType()).isInteger(8)) {
+    // FIXME: Need to embox A into a CharBoxValue or CharArrayBoxValue ?
+    genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
+                            PRIFNAME_SUB("co_max_character"));
+  } else {
+    genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
+                            PRIFNAME_SUB("co_max"));
+  }
+}
+
+/// Generate call to runtime subroutine prif_co_min or prif_co_min_character
+void fir::runtime::genCoMin(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value A, mlir::Value resultImage,
+                            mlir::Value stat, mlir::Value errmsg) {
+  if (fir::unwrapPassByRefType(A.getType()).isInteger(8)) {
+    // FIXME: Need to embox A into a CharBoxValue or CharArrayBoxValue ?
+    genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
+                            PRIFNAME_SUB("co_min_character"));
+  } else {
+    genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
+                            PRIFNAME_SUB("co_min"));
+  }
+}
+
+/// Generate call to runtime subroutine prif_co_sum_
+void fir::runtime::genCoSum(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value A, mlir::Value resultImage,
+                            mlir::Value stat, mlir::Value errmsg) {
+  genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
+                          PRIFNAME_SUB("co_sum"));
+}

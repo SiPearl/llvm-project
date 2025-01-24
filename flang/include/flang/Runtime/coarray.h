@@ -58,6 +58,14 @@ DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_team, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(co_broadcast, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(co_max, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    co_max_character, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(co_min, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    co_min_character, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(co_sum, void *, void *, void *, void *, void *)
 
 FORTRAN_EXTERN_C_END
 
