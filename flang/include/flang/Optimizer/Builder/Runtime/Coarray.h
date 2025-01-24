@@ -94,6 +94,17 @@ void genSyncImagesStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value imageSet, mlir::Value stat,
                             mlir::Value errmsg);
 
+/// Generate call to runtime subroutine prif_lock
+void genLockStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                      mlir::Value imageNum, mlir::Value handle,
+                      mlir::Value acquiredLock, mlir::Value offset,
+                      mlir::Value stat, mlir::Value errmsg);
+/// Generate call to runtime subroutine prif_unlock
+void genUnlockStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                        mlir::Value imageNum, mlir::Value handle,
+                        mlir::Value offset, mlir::Value stat,
+                        mlir::Value errmsg);
+
 /// Generate Call to runtime prif_fail_image
 void genFailImageStatement(fir::FirOpBuilder &builder, mlir::Location loc);
 
