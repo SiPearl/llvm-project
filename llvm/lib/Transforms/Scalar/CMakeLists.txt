@@ -62,6 +62,7 @@ add_llvm_component_library(LLVMScalarOpts
   NewGVN.cpp
   PartiallyInlineLibCalls.cpp
   PlaceSafepoints.cpp
+  PrifLoweringPass.cpp
   Reassociate.cpp
   Reg2Mem.cpp
   RewriteStatepointsForGC.cpp

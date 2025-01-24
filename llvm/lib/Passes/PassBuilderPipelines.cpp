@@ -121,6 +121,7 @@
 #include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/Transforms/Scalar/MergedLoadStoreMotion.h"
 #include "llvm/Transforms/Scalar/NewGVN.h"
+#include "llvm/Transforms/Scalar/PrifLoweringPass.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SCCP.h"
 #include "llvm/Transforms/Scalar/SROA.h"
@@ -1638,6 +1639,10 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
 
   if (isLTOPreLink(Phase))
     addRequiredLTOPreLinkPasses(MPM);
+
+  // Add PRIF Lowering pass
+  MPM.addPass(PrifLoweringPass());
+
   return MPM;
 }
 
@@ -2246,6 +2251,9 @@ PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
     addRequiredLTOPreLinkPasses(MPM);
 
   MPM.addPass(createModuleToFunctionPassAdaptor(AnnotationRemarksPass()));
+
+  // Add PRIF Lowering pass
+  MPM.addPass(PrifLoweringPass());
 
   return MPM;
 }
