@@ -91,6 +91,10 @@ mlir::Value genUCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value handle, size_t corank,
                          mlir::Value dim = {});
 
+/// Generate Call to runtime prif_coshape
+mlir::Value genCoshape(fir::FirOpBuilder &builder, mlir::Location loc,
+                       mlir::Value handle, size_t corank);
+
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value stat, mlir::Value errmsg);

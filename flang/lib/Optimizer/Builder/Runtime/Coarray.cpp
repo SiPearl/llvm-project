@@ -235,6 +235,24 @@ mlir::Value fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
   return result;
 }
 
+/// Generate Call to runtime prif_coshape
+mlir::Value fir::runtime::genCoshape(fir::FirOpBuilder &builder,
+                                     mlir::Location loc, mlir::Value handle,
+                                     size_t corank) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type resultType = fir::SequenceType::get(
+      static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
+  mlir::Value result =
+      builder.createBox(loc, builder.createTemporary(loc, resultType));
+
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("coshape"), ftype);
+  llvm::SmallVector<mlir::Value> localArgs = {handle, result};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return result;
+}
+
 /// Generate call to runtime subroutine prif_sync_all
 void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,

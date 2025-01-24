@@ -218,6 +218,10 @@ static constexpr IntrinsicHandler handlers[]{
     {"command_argument_count", &I::genCommandArgumentCount},
     {"conjg", &I::genConjg},
     {"cosd", &I::genCosd},
+    {"coshape",
+     &I::genCoshape,
+     {{{"coarray", asCoarrayBox}, {"kind", asValue}}},
+     false},
     {"count",
      &I::genCount,
      {{{"mask", asAddr}, {"dim", asValue}, {"kind", asValue}}},
@@ -3252,6 +3256,23 @@ mlir::Value IntrinsicLibrary::genCosd(mlir::Type resultType,
   mlir::Value factor = builder.createConvert(loc, args[0].getType(), dfactor);
   mlir::Value arg = builder.create<mlir::arith::MulFOp>(loc, args[0], factor);
   return getRuntimeCallGenerator("cos", ftype)(builder, loc, {arg});
+}
+
+// COSHAPE
+fir::ExtendedValue
+IntrinsicLibrary::genCoshape(mlir::Type resultType,
+                             llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2);
+
+  // Handle the coarray handle
+  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  mlir::Value result =
+      fir::runtime::genCoshape(builder, loc, handle, args[0].corank());
+  resultType.dump();
+  result.getType().dump();
+  return result;
 }
 
 // COUNT
