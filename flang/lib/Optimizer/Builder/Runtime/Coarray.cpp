@@ -440,3 +440,18 @@ void fir::runtime::genChangeTeamStatement(fir::FirOpBuilder &builder,
   llvm::SmallVector<mlir::Value> localArgs = {team, stat, none, errMsg};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
+
+/// Generate call to runtime subroutine prif_end_team
+void fir::runtime::genEndTeamStatement(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value stat,
+                                       mlir::Value errMsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("end_team"), ftype);
+
+  mlir::Value none = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  llvm::SmallVector<mlir::Value> localArgs = {stat, none, errMsg};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
