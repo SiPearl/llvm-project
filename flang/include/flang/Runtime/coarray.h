@@ -48,6 +48,7 @@ void RTNAME(copy1DArrayToI64Array)(
 
 DECLARE_UNIMPLEMENTED_PRIF(init, void *)
 DECLARE_UNIMPLEMENTED_PRIF(stop, void *, void*, void*)
+DECLARE_UNIMPLEMENTED_PRIF(fail_image, void)
 DECLARE_UNIMPLEMENTED_PRIF(this_image_no_coarray, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(this_image_with_coarray, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(this_image_with_dim, void *, void *, void *, void *)

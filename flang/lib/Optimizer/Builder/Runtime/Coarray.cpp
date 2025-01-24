@@ -225,6 +225,16 @@ void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
+/// Generate Call to runtime prif_fail_image
+void fir::runtime::genFailImageStatement(fir::FirOpBuilder &builder,
+                                         mlir::Location loc) {
+  mlir::FunctionType ftype =
+      mlir::FunctionType::get(builder.getContext(), {}, {});
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("fail_image"), ftype);
+  builder.create<fir::CallOp>(loc, funcOp);
+}
+
 /// Generate call to collective subroutines except co_reduce_
 /// A must be lowered as a box
 void genCollectiveSubroutine(fir::FirOpBuilder &builder, mlir::Location loc,

@@ -17,6 +17,7 @@
 FORTRAN_EXTERN_C_BEGIN
 
 // Program-initiated image stop
+NORETURN void RTNAME(CloseAllExternalUnits)(const char *why DEFAULT_VALUE(""));
 NORETURN void RTNAME(StopStatement)(int code DEFAULT_VALUE(EXIT_SUCCESS),
     bool isErrorStop DEFAULT_VALUE(false), bool quiet DEFAULT_VALUE(false));
 NORETURN void RTNAME(StopStatementText)(const char *, size_t,

@@ -65,6 +65,10 @@ static void CloseAllExternalUnits(const char *why) {
   Fortran::runtime::io::ExternalFileUnit::CloseAll(handler);
 }
 
+[[noreturn]] void RTNAME(CloseAllExternalUnits)(const char *why) {
+  CloseAllExternalUnits(why);
+}
+
 [[noreturn]] void RTNAME(StopStatement)(
     int code, bool isErrorStop, bool quiet) {
   CloseAllExternalUnits("STOP statement");

@@ -92,6 +92,9 @@ void genSyncImagesStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value imageSet, mlir::Value stat,
                             mlir::Value errmsg);
 
+/// Generate Call to runtime prif_fail_image
+void genFailImageStatement(fir::FirOpBuilder &builder, mlir::Location loc);
+
 /// Generate call to runtime subroutine prif_co_broadcast
 void genCoBroadcast(fir::FirOpBuilder &builder, mlir::Location loc,
                     mlir::Value A, mlir::Value sourceImage, mlir::Value stat,
