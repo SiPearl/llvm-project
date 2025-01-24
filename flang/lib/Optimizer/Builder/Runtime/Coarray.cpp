@@ -225,6 +225,45 @@ void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
+/// Generate call to runtime subroutine prif_lock
+void fir::runtime::genLockStatement(fir::FirOpBuilder &builder,
+                                    mlir::Location loc, mlir::Value imageNum,
+                                    mlir::Value lockVarAddr,
+                                    mlir::Value acquiredLock,
+                                    mlir::Value offset, mlir::Value stat,
+                                    mlir::Value errmsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("lock"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Value handle = getCoarrayHandle(builder, loc, lockVarAddr);
+  llvm::SmallVector<mlir::Value> localArgs = {
+      imageNum, handle, acquiredLock, offset, stat, errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_unlock
+void fir::runtime::genUnlockStatement(fir::FirOpBuilder &builder,
+                                      mlir::Location loc, mlir::Value imageNum,
+                                      mlir::Value lockVarAddr,
+                                      mlir::Value offset, mlir::Value stat,
+                                      mlir::Value errmsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("unlock"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Value handle = getCoarrayHandle(builder, loc, lockVarAddr);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum, handle, offset,
+                                              stat,     errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
 /// Generate Call to runtime prif_fail_image
 void fir::runtime::genFailImageStatement(fir::FirOpBuilder &builder,
                                          mlir::Location loc) {

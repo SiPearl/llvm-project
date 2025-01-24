@@ -66,6 +66,10 @@ DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_team, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    lock, void *, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    unlock, void *, void *, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_broadcast, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_max, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(

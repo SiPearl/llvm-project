@@ -206,14 +206,97 @@ void Fortran::lower::genEventWaitStatement(
 
 void Fortran::lower::genLockStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::LockStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: LOCK runtime");
+    const Fortran::parser::LockStmt &stmt) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::StatementContext stmtCtx;
+
+  // Handle LOCK_VAR and REMOTE_IMAGE values
+  mlir::Value remoteImage;
+  auto lockExpr = Fortran::semantics::GetExpr(
+      std::get<Fortran::parser::LockVariable>(stmt.t));
+  mlir::Value lockVarAddr =
+      fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
+  if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
+    remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
+        builder, loc, coref.value(), lockVarAddr);
+  } else {
+    remoteImage = fir::runtime::getThisImage(builder, loc);
+  }
+  mlir::Value refRemoteImage =
+      builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(loc, remoteImage, refRemoteImage);
+
+  // TODO: Handle OFFSET value
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
+
+  // Handle ACQUIRED_LOCK, STAT and ERRMSG values
+  fir::ExtendedValue acquiredLockExpr;
+  mlir::Value acquiredLock;
+  const auto &lockStatList =
+      std::get<std::list<Fortran::parser::LockStmt::LockStat>>(stmt.t);
+  std::list<Fortran::parser::StatOrErrmsg> statOrErrList;
+  for (const Fortran::parser::LockStmt::LockStat &lockStat : lockStatList) {
+    std::visit(
+        Fortran::common::visitors{
+            [&](const Fortran::parser::StatOrErrmsg &statOrErr) {
+              // TODO: Handle STAT and ERRMSG
+            },
+            [&](const Fortran::parser::ScalarLogicalVariable &logicalVar) {
+              acquiredLockExpr = converter.genExprAddr(
+                  loc, Fortran::semantics::GetExpr(logicalVar), stmtCtx);
+              acquiredLock = fir::getBase(acquiredLockExpr);
+            },
+        },
+        lockStat.u);
+  }
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+  if (isStaticallyAbsent(acquiredLockExpr)) {
+    acquiredLock = builder.create<fir::AbsentOp>(
+        loc, fir::ReferenceType::get(builder.getI1Type()));
+  }
+
+  fir::runtime::genLockStatement(builder, loc, refRemoteImage, lockVarAddr,
+                                 acquiredLock, offset, statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genUnlockStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::UnlockStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: UNLOCK runtime");
+    const Fortran::parser::UnlockStmt &stmt) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::StatementContext stmtCtx;
+
+  // Handle STAT and ERRMSG values
+  const auto &statOrErrList =
+      std::get<std::list<Fortran::parser::StatOrErrmsg>>(stmt.t);
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+
+  // Handle LOCK_VAR and REMOTE_IMAGE values
+  mlir::Value remoteImage;
+  auto lockExpr = Fortran::semantics::GetExpr(
+      std::get<Fortran::parser::LockVariable>(stmt.t));
+  mlir::Value lockVarAddr =
+      fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
+  if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
+    remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
+        builder, loc, coref.value(), lockVarAddr);
+  } else {
+    remoteImage = fir::runtime::getThisImage(builder, loc);
+  }
+  mlir::Value refRemoteImage =
+      builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(loc, remoteImage, refRemoteImage);
+
+  // TODO: Handle OFFSET value
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
+
+  fir::runtime::genUnlockStatement(builder, loc, refRemoteImage, lockVarAddr,
+                                   offset, statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genSyncAllStatement(
