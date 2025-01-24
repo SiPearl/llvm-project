@@ -49,6 +49,16 @@ mlir::Value getNumImages(fir::FirOpBuilder &builder, mlir::Location loc);
 mlir::Value getNumImagesWithTeam(fir::FirOpBuilder &builder, mlir::Location loc,
                    mlir::Value team);
 
+/// Generate call to runtime subroutine prif_sync_all
+void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                         mlir::Value stat, mlir::Value errmsg);
+/// Generate call to runtime subroutine prif_sync_memory
+void genSyncMemoryStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value stat, mlir::Value errmsg);
+/// Generate call to runtime subroutine prif_sync_images
+void genSyncImagesStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value imageSet, mlir::Value stat,
+                            mlir::Value errmsg);
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
 

@@ -23,6 +23,8 @@ FORTRAN_EXTERN_C_BEGIN
 
 namespace Fortran::runtime {
 
+} // namespace Fortran::runtime
+
 // FIXME: Improving this part with a compiler flag later ?
 // Unimplemented prif runtime functions
 #define DECLARE_UNIMPLEMENTED_PRIF(func_name, ...)                      \
@@ -36,8 +38,11 @@ DECLARE_UNIMPLEMENTED_PRIF(stop, void *, void*, void*)
 DECLARE_UNIMPLEMENTED_PRIF(num_images, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team_number, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(sync_team, void *, void *, void *, void *)
 
-} // namespace Fortran::runtime
 FORTRAN_EXTERN_C_END
 
 #endif //FORTRAN_RUNTIME_PRIF_H_

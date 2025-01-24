@@ -49,3 +49,48 @@ mlir::Value fir::runtime::getNumImagesWithTeam(fir::FirOpBuilder &builder, mlir:
   return builder.create<fir::LoadOp>(loc, result);
 
 }
+
+/// Generate call to runtime subroutine prif_sync_all
+void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value stat,
+                                       mlir::Value errmsg) {
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("sync_all"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs = {stat, errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_sync_memory
+void fir::runtime::genSyncMemoryStatement(fir::FirOpBuilder &builder,
+                                          mlir::Location loc, mlir::Value stat,
+                                          mlir::Value errmsg) {
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("sync_memory"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs = {stat, errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_sync_images
+void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
+                                          mlir::Location loc,
+                                          mlir::Value imageSet,
+                                          mlir::Value stat,
+                                          mlir::Value errmsg) {
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("sync_images"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs = {imageSet, stat, errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
