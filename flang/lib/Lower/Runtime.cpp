@@ -50,6 +50,47 @@ static void genUnreachable(fir::FirOpBuilder &builder, mlir::Location loc) {
   builder.setInsertionPointToStart(newBlock);
 }
 
+/// Test if an ExtendedValue is absent. This is used to test if an intrinsic
+// argument are absent at compile time.
+static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
+  return !fir::getBase(exv);
+}
+
+/// Initializes values for STAT and ERRMSG
+static std::pair<mlir::Value, mlir::Value> getStatAndErrmsg(
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+    const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  Fortran::lower::StatementContext stmtCtx;
+  fir::ExtendedValue errMsgExpr, statExpr;
+
+  mlir::Value statAddr, errMsgAddr;
+  for (const Fortran::parser::StatOrErrmsg &statOrErr : statOrErrList) {
+    std::visit(Fortran::common::visitors{
+                   [&](const Fortran::parser::StatVariable &statVar) {
+                     statExpr = converter.genExprAddr(
+                         loc, Fortran::semantics::GetExpr(statVar), stmtCtx);
+                     statAddr = fir::getBase(statExpr);
+                   },
+                   [&](const Fortran::parser::MsgVariable &errMsgVar) {
+                     fir::ExtendedValue errMsgExpr = converter.genExprAddr(
+                         loc, Fortran::semantics::GetExpr(errMsgVar), stmtCtx);
+                     errMsgAddr = builder.createBox(loc, errMsgExpr);
+                   }},
+               statOrErr.u);
+  }
+
+  if (isStaticallyAbsent(statExpr)) {
+    statAddr = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  }
+  if (isStaticallyAbsent(errMsgExpr)) {
+    errMsgAddr = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  }
+  return {statAddr, errMsgAddr};
+}
+
 //===----------------------------------------------------------------------===//
 // Misc. Fortran statements that lower to runtime calls
 //===----------------------------------------------------------------------===//
@@ -172,20 +213,63 @@ void Fortran::lower::genUnlockStatement(
 
 void Fortran::lower::genSyncAllStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::SyncAllStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: SYNC ALL runtime");
+    const Fortran::parser::SyncAllStmt &stmt) {
+  mlir::Location loc = converter.getCurrentLocation();
+
+  // Handle STAT and ERRMSG values
+  const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList = stmt.v;
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  fir::runtime::genSyncAllStatement(builder, loc, statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genSyncImagesStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::SyncImagesStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: SYNC IMAGES runtime");
+    const Fortran::parser::SyncImagesStmt &stmt) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  // Handle STAT and ERRMSG values
+  const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList =
+      std::get<std::list<Fortran::parser::StatOrErrmsg>>(stmt.t);
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+
+  // SYNC_IMAGES(*) is passed as count == -1 while  SYNC IMAGES([]) hase count
+  // == 0. Note further that SYNC IMAGES(*) is not semantically equivalent to
+  // SYNC ALL.
+  Fortran::lower::StatementContext stmtCtx;
+  mlir::Value imageSet;
+  const Fortran::parser::SyncImagesStmt::ImageSet &imgSet =
+      std::get<Fortran::parser::SyncImagesStmt::ImageSet>(stmt.t);
+  std::visit(
+      Fortran::common::visitors{
+          [&](const Fortran::parser::IntExpr &intExpr) {
+            const SomeExpr *expr = Fortran::semantics::GetExpr(intExpr);
+            imageSet = fir::getBase(converter.genExprBox(loc, *expr, stmtCtx));
+          },
+          [&](const Fortran::parser::Star &) {
+            imageSet = builder.create<fir::AbsentOp>(
+                loc,
+                fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+          }},
+      imgSet.u);
+
+  fir::runtime::genSyncImagesStatement(builder, loc, imageSet, statAddr,
+                                       errMsgAddr);
 }
 
 void Fortran::lower::genSyncMemoryStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::SyncMemoryStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: SYNC MEMORY runtime");
+    const Fortran::parser::SyncMemoryStmt &stmt) {
+  mlir::Location loc = converter.getCurrentLocation();
+
+  // Handle STAT and ERRMSG values
+  const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList = stmt.v;
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  fir::runtime::genSyncMemoryStatement(builder, loc, statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genSyncTeamStatement(
