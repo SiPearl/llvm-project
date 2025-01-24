@@ -67,6 +67,16 @@ void fir::runtime::computeLastUcobound(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, func, args);
 }
 
+void fir::runtime::copy1DArrayToI64Array(fir::FirOpBuilder &builder,
+                                         mlir::Location loc, mlir::Value from,
+                                         mlir::Value to) {
+  mlir::func::FuncOp func =
+      fir::runtime::getRuntimeFunc<mkRTKey(copy1DArrayToI64Array)>(loc,
+                                                                   builder);
+  llvm::SmallVector<mlir::Value> args = {from, to};
+  builder.create<fir::CallOp>(loc, func, args);
+}
+
 /// Generate Call to runtime prif_num_images
 mlir::Value fir::runtime::getNumImages(fir::FirOpBuilder &builder, mlir::Location loc) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
@@ -119,7 +129,56 @@ mlir::Value fir::runtime::getThisImage(fir::FirOpBuilder &builder,
 mlir::Value fir::runtime::getThisImageWithCoarray(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Type resultType,
     mlir::Value coarrayHandle, mlir::Value team, mlir::Value dim) {
-  TODO(loc, "intrinsic THIS_IMAGE with coarray in argument.");
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  llvm::SmallVector<mlir::Value> args;
+  mlir::FunctionType ftype;
+  mlir::func::FuncOp funcOp;
+  mlir::Value result;
+  if (!isStaticallyAbsent(dim)) {
+    result = builder.create<fir::AllocaOp>(loc, resultType);
+    ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("this_image_with_dim"), ftype);
+    args.insert(args.end(), {coarrayHandle, dim});
+  } else {
+    // Need to embox the array
+    result = builder.createBox(loc, builder.createTemporary(loc, resultType));
+    ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(
+        loc, PRIFNAME_SUB("this_image_with_coarray"), ftype);
+    args.push_back(coarrayHandle);
+  }
+
+  args.insert(args.end(), {team, result});
+  builder.create<fir::CallOp>(loc, funcOp, args);
+  return builder.create<fir::LoadOp>(loc, result);
+}
+
+/// Generate call to runtime prif_this_image_index and assumed that sub is
+/// an array of i64 elements
+mlir::Value fir::runtime::getImageIndex(fir::FirOpBuilder &builder,
+                                        mlir::Location loc, mlir::Value handle,
+                                        mlir::Value sub, mlir::Value team) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
+
+  mlir::func::FuncOp funcOp;
+  llvm::SmallVector<mlir::Value> localArgs = {handle, sub};
+  if (isStaticallyAbsent(team)) {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, PRIFNAME_SUB("image_index"), ftype);
+    localArgs.emplace_back(result);
+  } else {
+    std::string imageIndexName =
+        fir::unwrapPassByRefType(team.getType()).isInteger()
+            ? PRIFNAME_SUB("image_index_with_team")
+            : PRIFNAME_SUB("image_index_with_team_number");
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, imageIndexName, ftype);
+    localArgs.insert(localArgs.end(), {team, result});
+  }
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return builder.create<fir::LoadOp>(loc, result);
 }
 
 /// Generate call to runtime subroutine prif_sync_all

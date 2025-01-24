@@ -315,6 +315,8 @@ struct IntrinsicLibrary {
   mlir::Value genIeeeUnordered(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIeeeValue(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genIeor(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genImageIndex(mlir::Type,
+                                   llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genIndex(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genIor(mlir::Type, llvm::ArrayRef<mlir::Value>);
   fir::ExtendedValue genIparity(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);

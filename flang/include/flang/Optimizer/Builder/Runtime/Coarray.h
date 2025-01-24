@@ -54,6 +54,9 @@ mlir::Value getCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
 void computeLastUcobound(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value lcobounds, mlir::Value ucobounds);
 
+void copy1DArrayToI64Array(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value from, mlir::Value to);
+
 /// Generate Call to runtime prif_num_images
 mlir::Value getNumImages(fir::FirOpBuilder &builder, mlir::Location loc);
 
@@ -72,6 +75,11 @@ mlir::Value getThisImageWithCoarray(fir::FirOpBuilder &builder,
                                     mlir::Location loc, mlir::Type resultType,
                                     mlir::Value coarrayHandle, mlir::Value team,
                                     mlir::Value dim = {});
+
+/// Generate Call to runtime prif_this_image_index
+mlir::Value getImageIndex(fir::FirOpBuilder &builder, mlir::Location loc,
+                          mlir::Value handle, mlir::Value sub,
+                          mlir::Value team = {});
 
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,

@@ -426,6 +426,14 @@ static constexpr IntrinsicHandler handlers[]{
     {"ieee_unordered", &I::genIeeeUnordered},
     {"ieee_value", &I::genIeeeValue},
     {"ieor", &I::genIeor},
+    {"image_index",
+     &I::genImageIndex,
+     {{{"coarray", asCoarrayBox},
+       {"sub", asBox},
+       //{"sub", asAddr},
+       {"team", asAddr},
+       {"team_number", asAddr}}},
+     /*isElemental*/ false},
     {"index",
      &I::genIndex,
      {{{"string", asAddr},
@@ -5672,6 +5680,35 @@ IntrinsicLibrary::genIndex(mlir::Type resultType,
                                    backOpt, kindVal);
   // Read back the result from the mutable box.
   return readAndAddCleanUp(mutBox, resultType, "INDEX");
+}
+
+// IMAGE_INDEX
+fir::ExtendedValue
+IntrinsicLibrary::genImageIndex(mlir::Type resultType,
+                                llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2 || args.size() == 3);
+
+  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+
+  mlir::Value team;
+  fir::ExtendedValue subExv = args[1];
+  mlir::Value sub = fir::getBase(subExv);
+  if (args.size() == 2) {
+    if (fir::getElementTypeOf(subExv) != builder.getI64Type()) {
+      // Copying SUB values into an array of int64_t
+      mlir::Type newType =
+          fir::SequenceType::get({args[1].rank()}, builder.getI64Type());
+      mlir::Value newSub =
+          builder.createBox(loc, builder.createTemporary(loc, newType));
+      fir::runtime::copy1DArrayToI64Array(builder, loc, sub, newSub);
+      sub = newSub;
+    }
+  } else {
+    team = fir::getBase(args[2]);
+  }
+  return fir::runtime::getImageIndex(builder, loc, handle, sub, team);
 }
 
 // IOR

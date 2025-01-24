@@ -34,6 +34,8 @@ Descriptor &RTNAME(getCoarrayHandle)(void *base_addr);
 void RTNAME(computeLastUcobound)(
     int num_images, Descriptor &lcobounds, Descriptor &ucobounds);
 
+void RTNAME(copy1DArrayToI64Array)(
+    const Descriptor &from, const Descriptor &to);
 } // namespace Fortran::runtime
 
 // FIXME: Improving this part with a compiler flag later ?
@@ -52,6 +54,11 @@ DECLARE_UNIMPLEMENTED_PRIF(this_image_with_dim, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team_number, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(image_index, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    image_index_with_team, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    image_index_with_team_number, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(allocate_coarray, void *, void *, void *, void *,
     void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
