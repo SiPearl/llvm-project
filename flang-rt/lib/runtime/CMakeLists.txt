@@ -22,6 +22,7 @@ set(supported_sources
   array-constructor.cpp
   assign.cpp
   buffer.cpp
+  coarray.cpp
   character.cpp
   connection.cpp
   copy.cpp
