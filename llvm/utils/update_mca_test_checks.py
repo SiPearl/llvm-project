@@ -12,6 +12,7 @@ import glob
 import os
 import sys
 import warnings
+import re
 
 from UpdateTestChecks import common
 
@@ -63,6 +64,10 @@ def _get_parser():
         metavar="<path>",
         default="llvm-mca",
         help="the binary to use to generate the test case " "(default: llvm-mca)",
+    )
+    parser.add_argument(
+        "--check-sched-info", action="store_true",
+        help="Check scheduling information in assembly comments"
     )
     parser.add_argument("tests", metavar="<test-path>", nargs="+")
     return parser
@@ -244,6 +249,62 @@ def _align_matching_blocks(all_blocks, farthest_indexes):
 
     return False
 
+def _check_sched_values(line,scheds):
+    """Reports warnings on scheduling values differences
+    between values reported by llvm-mca with -scheduling-info option
+    and values in comment on the end of assembly instruction line (//).
+    """
+
+    # Got zip of llvm output and values from comment
+    infos = ["MicroOps","Latency","Forward latency","Throughput"]
+    sched_info = zip(infos,scheds[0][1].split(),scheds[1][1].split())
+    err = []
+    for si in sched_info:
+        if float(si[1]) != float(si[2]):
+            err.append(
+                "\t=> {} LLVM value {} != reference value in comment {}\n".
+                format(si[0],si[1],si[2]))
+
+    if len(err) > 0: return ["{}\n{}".format(line,"".join(err))]
+    else: return []
+
+def _check_sched_info(raw_tool_output):
+    """Check scheduling info if passed in assembly comment after each
+    instructions.
+
+    Recognized form is:
+     1 2 2 4.00 - ABSv1i64 V1UnitV, abs   d15, d23 // ABS <V><d>, <V><n>
+                                 \\ ASIMD arith, basic  \\ 1 2  2  4.0 V1UnitV
+
+    Format:
+    [1] // [2] \\ [3] \\ [4]
+    [1]: <llvm-mca output> <asm instruction>
+    [2]: <Architecture description>
+    [3]: <Scheduling info reference>
+    [4]: <micro ops> <latency> <forward latency> <throughput> <units>
+
+    <llvm-mca output> with -scheduling-info option:
+    <micro ops> <latency> <forward latency> <throughput> - <llvm opcode> <units>
+
+    The goal is to check [4] regarding llvm-mca output with -scheduling-info [1]
+    option. It will allow to check scheduling info easily when
+    doing code review of scheduling info merge requests.
+    If found diff, have to fix the comments and double check with documentation.
+    """
+
+    scheduling_info = re.compile("(^\s+|\\\\\s+)([0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9.]+)")
+    comment = re.compile("\/\/")
+    err = []
+    for b in raw_tool_output.split("\n\n"):
+        for line in b.splitlines():
+            check_line=comment.search(line)
+            if check_line:
+                scheds = scheduling_info.findall(line)
+                if len(scheds) == 2:
+                    err = err + _check_sched_values(line,scheds)
+
+    if len(err) > 0:
+        raise Error("{}".format("".join(err)))
 
 def _get_block_infos(run_infos, test_path, args, common_prefix):  # noqa
     """For each run line, run the tool with the specified args and collect the
@@ -274,6 +335,7 @@ def _get_block_infos(run_infos, test_path, args, common_prefix):  # noqa
 
     all_blocks = {}
     max_block_len = 0
+    scheduling_info = re.compile("\-scheduling\-info")
 
     # A cache of the furthest-back position in any block list of the first
     # instance of each block, indexed by the block itself.
@@ -288,6 +350,11 @@ def _get_block_infos(run_infos, test_path, args, common_prefix):  # noqa
         raw_tool_output = "\n".join(
             line if line.strip() else "" for line in raw_tool_output.splitlines()
         )
+
+        # Check if -scheduling-info passed to llvm-mca to check comments if any
+        sched = scheduling_info.search(tool_args)
+        if args.check_sched_info and sched:
+            _check_sched_info(raw_tool_output)
 
         # Split blocks, stripping all trailing whitespace, but keeping preceding
         # whitespace except for newlines so that columns will line up visually.
