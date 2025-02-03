@@ -81,6 +81,10 @@ DECLARE_UNIMPLEMENTED_PRIF(
     get, void *, void *, void *, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(get_stridded, void *, void *, void *, void *, void *,
     void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    put, void *, void *, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(put_stridded, void *, void *, void *, void *, void *,
+    void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_broadcast, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_max, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(

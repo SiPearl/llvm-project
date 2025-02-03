@@ -113,6 +113,20 @@ void CoarrayGetStridded(fir::FirOpBuilder &builder, mlir::Location loc,
                         mlir::Value currentImageStride, mlir::Value elementSize,
                         mlir::Value extent);
 
+/// Generate call to runtime subroutine prif_put to assigns to elements of a
+/// coarray from a specified image when data to be assigned are contiguous in
+/// memory from both sides.
+void CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
+                mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
+                mlir::Value currentImageBuffer, mlir::Value sizeInBytes);
+/// Generate call to runtime subroutine prif_get_stridded
+void CoarrayPutStridded(fir::FirOpBuilder &builder, mlir::Location loc,
+                        mlir::Value imageNum, mlir::Value handle,
+                        mlir::Value offset, mlir::Value remoteStride,
+                        mlir::Value currentImageBuffer,
+                        mlir::Value currentImageStride, mlir::Value elementSize,
+                        mlir::Value extent);
+
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value stat, mlir::Value errmsg);

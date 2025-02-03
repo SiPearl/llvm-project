@@ -302,6 +302,38 @@ void fir::runtime::CoarrayGetStridded(
   TODO(loc, "Generating call to prif_get_stridded");
 }
 
+/// Generate call to runtime subroutine prif_put to assigns to elements of a
+/// coarray from a specified image when data to be assigned are contiguous in
+/// memory from both sides.
+void fir::runtime::CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
+                              mlir::Value imageNum, mlir::Value handle,
+                              mlir::Value offset,
+                              mlir::Value currentImageBuffer,
+                              mlir::Value sizeInBytes) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("put"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {
+      imageNum,    handle,  offset,  currentImageBuffer,
+      sizeInBytes, nullPtr, nullPtr, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_put to assigns to elements of a
+/// coarray from a specified image when data to be assigned are contiguous in
+/// memory from both sides.
+void fir::runtime::CoarrayPutStridded(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
+    mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
+    mlir::Value currentImageBuffer, mlir::Value currentImageStride,
+    mlir::Value elementSize, mlir::Value extent) {
+  TODO(loc, "Generating call to prif_put_stridded");
+}
+
 /// Generate call to runtime subroutine prif_sync_all
 void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,
