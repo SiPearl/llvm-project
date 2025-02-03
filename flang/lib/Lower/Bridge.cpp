@@ -641,11 +641,81 @@ public:
     return owningProc.labelEvaluationMap.lookup(label);
   }
 
+  /// Gen coarray expression from a CoarrayRef.
+  fir::ExtendedValue
+  genCoarrayExpr(const Fortran::evaluate::CoarrayRef &coarrayRef,
+                 Fortran::lower::StatementContext &context,
+                 mlir::Location loc) {
+    std::optional<mlir::DataLayout> dl = fir::support::getOrSetDataLayout(
+        builder->getModule(), /*allowDefaultLayout*/ true);
+    Fortran::semantics::SymbolRef sym = coarrayRef.GetFirstSymbol();
+    fir::ExtendedValue addr = getSymbolExtendedValue(sym, nullptr);
+    mlir::Value handle =
+        fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(addr));
+
+    // Image number computation
+    mlir::Type i32Ty = builder->getI32Type();
+    mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
+    auto index = Fortran::lower::getImageIndexFromCosubscripts(
+        *builder, loc, coarrayRef, handle);
+    builder->create<fir::StoreOp>(loc, index, imageNum);
+
+    // TODO : offset
+    mlir::Value offset = builder->createTemporary(loc, i32Ty);
+    builder->create<fir::StoreOp>(
+        loc, builder->createIntegerConstant(loc, i32Ty, 0), offset);
+
+    mlir::Type i64Ty = builder->getI64Type();
+    mlir::Type resultType = fir::getBaseTypeOf(addr);
+    if (coarrayRef.subscript().size()) {
+      TODO(loc, "Getting stridded coarray expression.");
+    } else {
+      mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
+      auto [size, align] = fir::getTypeSizeAndAlignmentOrCrash(
+          loc, fir::getBaseTypeOf(addr), *dl, builder->getKindMap());
+      auto sib = builder->createIntegerConstant(loc, i64Ty, size);
+      builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
+
+      mlir::Value dest = builder->createTemporary(loc, resultType);
+      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset,
+                               fir::getBase(dest), sizeInBytes);
+      return dest;
+    }
+  }
+
+  fir::ExtendedValue
+  genCoarrayExprAddr(const Fortran::evaluate::CoarrayRef &coarrayRef,
+                     Fortran::lower::StatementContext &context,
+                     mlir::Location loc) {
+    return genCoarrayExpr(coarrayRef, context, loc);
+  }
+
+  fir::ExtendedValue
+  genCoarrayExprValue(const Fortran::evaluate::CoarrayRef &coarrayRef,
+                      Fortran::lower::StatementContext &context,
+                      mlir::Location loc) {
+    fir::ExtendedValue addr = genCoarrayExpr(coarrayRef, context, loc);
+    fir::ExtendedValue value =
+        builder->create<fir::LoadOp>(loc, fir::getBase(addr));
+    return value;
+  }
+
+  fir::ExtendedValue
+  genCoarrayExprBox(const Fortran::evaluate::CoarrayRef &coarrayRef,
+                    Fortran::lower::StatementContext &context,
+                    mlir::Location loc) {
+    fir::ExtendedValue addr = genCoarrayExpr(coarrayRef, context, loc);
+    return builder->createBox(loc, addr);
+  }
+
   fir::ExtendedValue
   genExprAddr(const Fortran::lower::SomeExpr &expr,
               Fortran::lower::StatementContext &context,
               mlir::Location *locPtr = nullptr) override final {
     mlir::Location loc = locPtr ? *locPtr : toLocation();
+    auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(expr);
+    if (coarrayRef.has_value())
+      return genCoarrayExprAddr(coarrayRef.value(), context, loc);
     if (lowerToHighLevelFIR())
       return Fortran::lower::convertExprToAddress(loc, *this, expr,
                                                   localSymbols, context);
@@ -658,6 +728,9 @@ public:
                Fortran::lower::StatementContext &context,
                mlir::Location *locPtr = nullptr) override final {
     mlir::Location loc = locPtr ? *locPtr : toLocation();
+    auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(expr);
+    if (coarrayRef.has_value())
+      return genCoarrayExprValue(coarrayRef.value(), context, loc);
     if (lowerToHighLevelFIR())
       return Fortran::lower::convertExprToValue(loc, *this, expr, localSymbols,
                                                 context);
@@ -668,6 +741,9 @@ public:
   fir::ExtendedValue
   genExprBox(mlir::Location loc, const Fortran::lower::SomeExpr &expr,
              Fortran::lower::StatementContext &stmtCtx) override final {
+    auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(expr);
+    if (coarrayRef.has_value())
+      return genCoarrayExprBox(coarrayRef.value(), stmtCtx, loc);
     if (lowerToHighLevelFIR())
       return Fortran::lower::convertExprToBox(loc, *this, expr, localSymbols,
                                               stmtCtx);
@@ -4486,6 +4562,10 @@ private:
 
     // Helper to generate the code evaluating the right-hand side.
     auto evaluateRhs = [&](Fortran::lower::StatementContext &stmtCtx) {
+      auto rhsCoref = Fortran::evaluate::ExtractCoarrayRef(assign.rhs);
+      if (rhsCoref.has_value())
+        return hlfir::Entity{
+            fir::getBase(genCoarrayExprValue(rhsCoref.value(), stmtCtx, loc))};
       hlfir::Entity rhs = Fortran::lower::convertExprToHLFIR(
           loc, *this, assign.rhs, localSymbols, stmtCtx);
       // Load trivial scalar RHS to allow the loads to be hoisted outside of

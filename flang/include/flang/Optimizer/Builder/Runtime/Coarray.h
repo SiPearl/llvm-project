@@ -99,6 +99,20 @@ mlir::Value genUCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value genCoshape(fir::FirOpBuilder &builder, mlir::Location loc,
                        mlir::Value handle, size_t corank);
 
+/// Generate call to runtime subroutine prif_get to fetches data in a
+/// coarray from a specified image when data to be copied are contiguous in
+/// memory from both sides.
+void CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
+                mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
+                mlir::Value currentImageBuffer, mlir::Value sizeInBytes);
+/// Generate call to runtime subroutine prif_get_stridded
+void CoarrayGetStridded(fir::FirOpBuilder &builder, mlir::Location loc,
+                        mlir::Value imageNum, mlir::Value handle,
+                        mlir::Value offset, mlir::Value remoteStride,
+                        mlir::Value currentImageBuffer,
+                        mlir::Value currentImageStride, mlir::Value elementSize,
+                        mlir::Value extent);
+
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value stat, mlir::Value errmsg);

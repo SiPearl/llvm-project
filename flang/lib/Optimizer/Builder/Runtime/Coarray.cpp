@@ -272,6 +272,36 @@ mlir::Value fir::runtime::genCoshape(fir::FirOpBuilder &builder,
   return result;
 }
 
+/// Generate call to runtime subroutine prif_get to fetches data in a
+/// coarray from a specified image when data to be copied are contiguous in
+/// memory from both sides.
+void fir::runtime::CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
+                              mlir::Value imageNum, mlir::Value handle,
+                              mlir::Value offset,
+                              mlir::Value currentImageBuffer,
+                              mlir::Value sizeInBytes) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("get"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {
+      imageNum,    handle,  offset,  currentImageBuffer,
+      sizeInBytes, nullPtr, nullPtr, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_get_stridded
+void fir::runtime::CoarrayGetStridded(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
+    mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
+    mlir::Value currentImageBuffer, mlir::Value currentImageStride,
+    mlir::Value elementSize, mlir::Value extent) {
+  TODO(loc, "Generating call to prif_get_stridded");
+}
+
 /// Generate call to runtime subroutine prif_sync_all
 void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,
