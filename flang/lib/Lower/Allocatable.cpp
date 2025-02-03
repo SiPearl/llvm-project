@@ -868,6 +868,15 @@ genDeallocate(fir::FirOpBuilder &builder,
       !box.isDerived() && !box.isPolymorphic() && !box.hasAssumedRank() &&
       !box.isUnlimitedPolymorphic() && !errorManager.hasStatSpec() &&
       !useAllocateRuntime && !box.isPointer();
+  // Deallocate coarrays
+  if (symbol && Fortran::evaluate::IsCoarray(*symbol)) {
+    mlir::Value ret = Fortran::lower::genDeallocateCoarray(
+        converter, loc, box.getAddr(), errorManager.errMsgAddr);
+    if (symbol)
+      postDeallocationAction(converter, builder, *symbol);
+    errorManager.assignStat(builder, loc, ret);
+    return ret;
+  }
   // Deallocate intrinsic types inline.
   if (inlineDeallocation &&
       ((isCudaSymbol && isCudaDeviceContext) || !isCudaSymbol)) {

@@ -485,6 +485,32 @@ mlir::Value Fortran::lower::genAllocateCoarray(
   return allocMem;
 }
 
+mlir::Value Fortran::lower::genDeallocateCoarray(
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+    mlir::Value coarrayAddr, mlir::Value errMsgAddr) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("deallocate_coarray"), ftype);
+
+  // PRIF define prif_deallocate_coarray where the coarray_handles arg is an
+  // array of handles, but this function if called by genDeallocate in
+  // flang/lib/Lower/Allocatable.cpp and this function treat only one entity
+  mlir::Value coarrayHandle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  mlir::Value stat = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), stat);
+  auto nullPtr = builder.createNullConstant(loc, ptrTy);
+  llvm::SmallVector<mlir::Value> localArgs = {coarrayHandle, stat, nullPtr,
+                                              errMsgAddr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  // TODO: Calling freeMemOp on the coarray_handle
+  // freeCoarrayHandle(builder, loc, coarrayAddr);
+  return builder.create<fir::LoadOp>(loc, stat);
+}
+
 //===----------------------------------------------------------------------===//
 // COARRAY expressions
 //===----------------------------------------------------------------------===//

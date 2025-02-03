@@ -68,6 +68,7 @@ DECLARE_UNIMPLEMENTED_PRIF(ucobound_no_dim, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(ucobound_with_dim, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(allocate_coarray, void *, void *, void *, void *,
     void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(deallocate_coarray, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)
