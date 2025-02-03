@@ -3436,7 +3436,37 @@ private:
   }
 
   void genFIR(const Fortran::parser::ChangeTeamConstruct &construct) {
-    TODO(toLocation(), "coarray: ChangeTeamConstruct");
+    Fortran::lower::StatementContext stmtCtx;
+    pushActiveConstruct(getEval(), stmtCtx);
+
+    const Fortran::parser::ChangeTeamStmt &changeTeamStmt =
+        std::get<Fortran::parser::Statement<Fortran::parser::ChangeTeamStmt>>(
+            construct.t)
+            .statement;
+    const Fortran::parser::EndChangeTeamStmt &endTeamStmt =
+        std::get<
+            Fortran::parser::Statement<Fortran::parser::EndChangeTeamStmt>>(
+            construct.t)
+            .statement;
+
+    for (Fortran::lower::pft::Evaluation &e :
+         getEval().getNestedEvaluations()) {
+      if (e.getIf<Fortran::parser::ChangeTeamStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        genFIR(e);
+      } else if (e.getIf<Fortran::parser::EndChangeTeamStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        auto expr = Fortran::semantics::GetExpr(
+            std::get<Fortran::parser::TeamValue>(changeTeamStmt.t));
+        mlir::Value team = fir::getBase(genExprValue(*expr, stmtCtx));
+        genFIR(e);
+      } else {
+        genFIR(e);
+      }
+    }
+    popActiveConstruct();
   }
   void genFIR(const Fortran::parser::ChangeTeamStmt &stmt) {
     genChangeTeamStmt(*this, getEval(), stmt);

@@ -191,8 +191,13 @@ void Fortran::lower::genFormTeamStatement(
   // Handle TEAM-NUMBER
   const auto *teamNumberExpr = Fortran::semantics::GetExpr(
       std::get<Fortran::parser::ScalarIntExpr>(stmt.t));
-  teamNumber =
-      fir::getBase(converter.genExprAddr(loc, *teamNumberExpr, stmtCtx));
+  teamNumber = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc,
+      builder.createConvert(
+          loc, builder.getI64Type(),
+          fir::getBase(converter.genExprValue(loc, *teamNumberExpr, stmtCtx))),
+      teamNumber);
 
   // Handle TEAM-VARIABLE
   const auto *teamExpr = Fortran::semantics::GetExpr(
