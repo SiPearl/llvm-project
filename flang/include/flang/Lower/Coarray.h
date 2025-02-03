@@ -86,6 +86,13 @@ mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                                mlir::Location loc, const semantics::Symbol &sym,
                                mlir::Type allocType);
 
+mlir::Value genDeallocateCoarray(Fortran::lower::AbstractConverter &converter,
+                                 mlir::Location loc, fir::MutableBoxValue box,
+                                 mlir::Value errMsgAddr);
+mlir::Value genDeallocateCoarray(Fortran::lower::AbstractConverter &converter,
+                                 mlir::Location loc, mlir::Value coarrayAddr,
+                                 mlir::Value errMsgAddr);
+
 //===----------------------------------------------------------------------===//
 // COARRAY expressions
 //===----------------------------------------------------------------------===//
