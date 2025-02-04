@@ -1141,8 +1141,8 @@ private:
 
     // TODO: intents that require special care (e.g finalization)
 
-    if (obj.type.corank() > 0)
-      TODO(loc, "coarray: dummy argument coarray in procedure interface");
+    //if (obj.type.corank() > 0)
+    //  TODO(loc, "coarray: dummy argument coarray in procedure interface");
 
     // So far assume that if the argument cannot be passed by implicit interface
     // it must be by box. That may no be always true (e.g for simple optionals)

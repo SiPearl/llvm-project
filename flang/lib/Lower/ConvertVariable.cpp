@@ -2348,10 +2348,10 @@ void Fortran::lower::mapSymbolAttributes(
   auto arg = symMap.lookupSymbol(sym).getAddr();
   mlir::Value addr = preAlloc;
 
-  if (Fortran::evaluate::IsCoarray(sym))
-    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym,
-                                              fir::getBaseTypeOf(addr));
-  else if (arg)
+  if (Fortran::evaluate::IsCoarray(sym)) {
+    mlir::Type baseType = fir::unwrapRefType(addr.getType());
+    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym, baseType);
+  } else if (arg)
     if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(arg.getType())) {
       // Contiguous assumed shape that can be tracked without a fir.box.
       mlir::Type refTy = builder.getRefType(boxTy.getEleTy());

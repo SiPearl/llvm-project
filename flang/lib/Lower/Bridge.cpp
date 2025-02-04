@@ -3739,7 +3739,24 @@ private:
   }
 
   void genFIR(const Fortran::parser::ChangeTeamConstruct &construct) {
-    TODO(toLocation(), "coarray: ChangeTeamConstruct");
+    Fortran::lower::StatementContext stmtCtx;
+    pushActiveConstruct(getEval(), stmtCtx);
+
+    for (Fortran::lower::pft::Evaluation &e :
+         getEval().getNestedEvaluations()) {
+      if (e.getIf<Fortran::parser::ChangeTeamStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        genFIR(e);
+      } else if (e.getIf<Fortran::parser::EndChangeTeamStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        genFIR(e);
+      } else {
+        genFIR(e);
+      }
+    }
+    popActiveConstruct();
   }
   void genFIR(const Fortran::parser::ChangeTeamStmt &stmt) {
     genChangeTeamStmt(*this, getEval(), stmt);
@@ -5100,9 +5117,6 @@ private:
     const Fortran::semantics::Symbol &sym = dataRef.GetLastSymbol();
     std::vector<Fortran::evaluate::Subscript> subscript;
     if (const auto *ref{
-            std::get_if<Fortran::evaluate::CoarrayRef>(&dataRef.u)}) {
-      subscript = ref->subscript();
-    } else if (const auto *rhsRef{
                    std::get_if<Fortran::evaluate::ArrayRef>(&dataRef.u)}) {
       subscript = ref->subscript();
     }
@@ -5117,10 +5131,8 @@ private:
       return bounds[i];
     };
 
-    mlir::Type i32Ty = builder->getI32Type();
     mlir::Type i64Ty = builder->getI64Type();
     mlir::Type idxTy = builder->getIndexType();
-    mlir::Value one = builder->createIntegerConstant(loc, i64Ty, 1);
     mlir::Type arrayType = fir::SequenceType::get(
         {static_cast<fir::SequenceType::Extent>(subscript.size())}, i64Ty);
     mlir::Type addrType = builder->getRefType(i64Ty);
