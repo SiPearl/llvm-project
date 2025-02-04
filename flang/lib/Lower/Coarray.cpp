@@ -53,14 +53,13 @@ void Fortran::lower::genChangeTeamConstruct(
     Fortran::lower::AbstractConverter &converter,
     Fortran::lower::pft::Evaluation &,
     const Fortran::parser::ChangeTeamConstruct &) {
-  TODO(converter.getCurrentLocation(), "coarray: CHANGE TEAM construct");
+  // TODO(converter.getCurrentLocation(), "coarray: CHANGE TEAM construct");
 }
 
 void Fortran::lower::genChangeTeamStmt(
     Fortran::lower::AbstractConverter &converter,
     Fortran::lower::pft::Evaluation &,
     const Fortran::parser::ChangeTeamStmt &stmt) {
-  // TODO(converter.getCurrentLocation(), "coarray: CHANGE TEAM statement");
   mlir::Location loc = converter.getCurrentLocation();
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
@@ -191,8 +190,13 @@ void Fortran::lower::genFormTeamStatement(
   // Handle TEAM-NUMBER
   const auto *teamNumberExpr = Fortran::semantics::GetExpr(
       std::get<Fortran::parser::ScalarIntExpr>(stmt.t));
-  teamNumber =
-      fir::getBase(converter.genExprAddr(loc, *teamNumberExpr, stmtCtx));
+  teamNumber = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc,
+      builder.createConvert(
+          loc, builder.getI64Type(),
+          fir::getBase(converter.genExprValue(loc, *teamNumberExpr, stmtCtx))),
+      teamNumber);
 
   // Handle TEAM-VARIABLE
   const auto *teamExpr = Fortran::semantics::GetExpr(
