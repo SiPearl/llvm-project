@@ -8384,16 +8384,22 @@ IntrinsicLibrary::genThisImage(mlir::Type resultType,
     mlir::Type thisImageType;
     if (!dimIsAbsent) {
       dim = fir::getBase(args[3]);
+      thisImageType = builder.getI64Type();
+    } else {
       thisImageType = fir::SequenceType::get(
           {static_cast<fir::SequenceType::Extent>(args[0].corank())},
           builder.getI64Type());
-    } else {
-      thisImageType = builder.getI64Type();
     }
-    return fir::runtime::getThisImageWithCoarray(builder, loc, thisImageType,
-                                                 handle, team, dim);
+    llvm::SmallVector<mlir::Value, 1> extents{builder.createIntegerConstant(
+        loc, builder.getIndexType(), args[0].corank())};
+    mlir::Value res = fir::runtime::getThisImageWithCoarray(
+        builder, loc, thisImageType, handle, team, dim);
+    if (!dimIsAbsent)
+      return builder.createConvert(loc, resultType, res);
+    return fir::ArrayBoxValue{res, extents};
   }
-  return fir::runtime::getThisImage(builder, loc, team);
+  mlir::Value res = fir::runtime::getThisImage(builder, loc, team);
+  return builder.createConvert(loc, resultType, res);
 }
 
 // TRAILZ
