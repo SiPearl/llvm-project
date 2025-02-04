@@ -155,7 +155,7 @@ mlir::Value fir::runtime::getThisImageWithCoarray(
 
   args.insert(args.end(), {team, result});
   builder.create<fir::CallOp>(loc, funcOp, args);
-  return builder.create<fir::LoadOp>(loc, result);
+  return result;
 }
 
 /// Generate Call to runtime prif_image_status
@@ -209,26 +209,29 @@ mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value handle,
                                        size_t corank, mlir::Value dim) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
-  mlir::Type resultType = fir::SequenceType::get(
-      static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
-  mlir::Value result =
-      builder.createBox(loc, builder.createTemporary(loc, resultType));
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
   if (isStaticallyAbsent(dim)) {
+    mlir::Type resultType = fir::SequenceType::get(
+        static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
+    mlir::Value result =
+        builder.createBox(loc, builder.createTemporary(loc, resultType));
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
     funcOp =
         builder.createFunction(loc, PRIFNAME_SUB("lcobound_no_dim"), ftype);
     localArgs.emplace_back(result);
+    builder.create<fir::CallOp>(loc, funcOp, localArgs);
+    return result;
   } else {
+    mlir::Value result = builder.createTemporary(loc, builder.getI64Type());
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
     funcOp =
         builder.createFunction(loc, PRIFNAME_SUB("lcobound_with_dim"), ftype);
     localArgs.insert(localArgs.end(), {dim, result});
+    builder.create<fir::CallOp>(loc, funcOp, localArgs);
+    return builder.create<fir::LoadOp>(loc, result);
   }
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
-  return result;
 }
 
 /// Generate Call to runtime prif_ucobound_{with|no}_dim
@@ -236,26 +239,29 @@ mlir::Value fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value handle,
                                        size_t corank, mlir::Value dim) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
-  mlir::Type resultType = fir::SequenceType::get(
-      static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
-  mlir::Value result =
-      builder.createBox(loc, builder.createTemporary(loc, resultType));
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
   if (isStaticallyAbsent(dim)) {
+    mlir::Type resultType = fir::SequenceType::get(
+        static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
+    mlir::Value result =
+        builder.createBox(loc, builder.createTemporary(loc, resultType));
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
     funcOp =
         builder.createFunction(loc, PRIFNAME_SUB("ucobound_no_dim"), ftype);
     localArgs.emplace_back(result);
+    builder.create<fir::CallOp>(loc, funcOp, localArgs);
+    return result;
   } else {
+    mlir::Value result = builder.createTemporary(loc, builder.getI64Type());
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
     funcOp =
         builder.createFunction(loc, PRIFNAME_SUB("ucobound_with_dim"), ftype);
     localArgs.insert(localArgs.end(), {dim, result});
+    builder.create<fir::CallOp>(loc, funcOp, localArgs);
+    return builder.create<fir::LoadOp>(loc, result);
   }
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
-  return result;
 }
 
 /// Generate Call to runtime prif_coshape
