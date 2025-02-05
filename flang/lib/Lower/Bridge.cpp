@@ -673,7 +673,7 @@ public:
     mlir::Type i32Ty = builder->getI32Type();
     mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
     auto index = Fortran::lower::getImageIndexFromCosubscripts(
-        *builder, loc, coarrayRef, handle);
+        *this, loc, coarrayRef, handle);
     builder->create<fir::StoreOp>(loc, index, imageNum);
 
     // TODO : offset
@@ -5308,7 +5308,7 @@ private:
     mlir::Type i32Ty = builder->getI32Type();
     imageNum = builder->createTemporary(loc, i32Ty);
     auto num = Fortran::lower::getImageIndexFromCosubscripts(
-        *builder, loc, coarrayRef, handle);
+        *this, loc, coarrayRef, handle);
     builder->create<fir::StoreOp>(loc, num, imageNum);
 
     // TODO: offset

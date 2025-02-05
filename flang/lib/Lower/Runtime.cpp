@@ -219,7 +219,7 @@ void Fortran::lower::genLockStatement(
       fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
   if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
     remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
-        builder, loc, coref.value(), lockVarAddr);
+        converter, loc, coref.value(), lockVarAddr);
   } else {
     remoteImage = fir::runtime::getThisImage(builder, loc);
   }
@@ -284,7 +284,7 @@ void Fortran::lower::genUnlockStatement(
       fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
   if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
     remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
-        builder, loc, coref.value(), lockVarAddr);
+        converter, loc, coref.value(), lockVarAddr);
   } else {
     remoteImage = fir::runtime::getThisImage(builder, loc);
   }

@@ -327,8 +327,11 @@ Fortran::lower::genCoarrayCoBounds(Fortran::lower::AbstractConverter &converter,
 /// From cosubscript, generate call to runtime function prif_image_index
 /// associated to an addr
 mlir::Value Fortran::lower::getImageIndexFromCosubscripts(
-    fir::FirOpBuilder &builder, mlir::Location loc,
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::evaluate::CoarrayRef &expr, mlir::Value handle) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  Fortran::lower::StatementContext stmtCtx;
+
   // Creation of the cosubscripts array
   mlir::Type i64Ty = builder.getI64Type();
   unsigned corank = expr.cosubscript().size();
@@ -344,7 +347,8 @@ mlir::Value Fortran::lower::getImageIndexFromCosubscripts(
       idx = builder.createIntegerConstant(loc, i64Ty, image.value());
     else {
       auto s = ignoreEvConvert(expr.cosubscript()[dim]);
-      TODO(loc, "getting image_index with a non constant cosubscript.");
+      idx = builder.createConvert(
+          loc, i64Ty, fir::getBase(converter.genExprValue(loc, s, stmtCtx)));
     }
 
     auto index = builder.createIntegerConstant(loc, indexType, dim);
