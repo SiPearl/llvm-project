@@ -69,10 +69,9 @@ genCoSubscripts(AbstractConverter &converter, mlir::Location loc,
 
 /// From cosubscript, generate call to runtime function prif_image_index
 /// associated to an addr
-mlir::Value
-getImageIndexFromCosubscripts(fir::FirOpBuilder &builder, mlir::Location loc,
-                              const Fortran::evaluate::CoarrayRef &expr,
-                              mlir::Value coarrayAddr);
+mlir::Value getImageIndexFromCosubscripts(
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+    const Fortran::evaluate::CoarrayRef &expr, mlir::Value coarrayAddr);
 
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
