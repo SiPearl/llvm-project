@@ -274,6 +274,7 @@ struct IntrinsicLibrary {
   void genExecuteCommandLine(mlir::ArrayRef<fir::ExtendedValue> args);
   fir::ExtendedValue genEtime(std::optional<mlir::Type>,
                               mlir::ArrayRef<fir::ExtendedValue> args);
+  void genEventQuery(llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genExponent(mlir::Type, llvm::ArrayRef<mlir::Value>);
   fir::ExtendedValue genExtendsTypeOf(mlir::Type,
                                       llvm::ArrayRef<fir::ExtendedValue>);

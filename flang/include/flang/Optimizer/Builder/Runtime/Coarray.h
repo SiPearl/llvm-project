@@ -240,5 +240,10 @@ void genEventWaitStatement(fir::FirOpBuilder &builder, mlir::Location loc,
 void genNotifyWaitStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value notifyVarPtr, mlir::Value untilCount,
                             mlir::Value stat, mlir::Value errmsg);
+
+/// Generate call to runtime subroutine prif_event_query
+void genEventQuery(fir::FirOpBuilder &builder, mlir::Location loc,
+                   mlir::Value eventVarPtr, mlir::Value count,
+                   mlir::Value stat);
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
