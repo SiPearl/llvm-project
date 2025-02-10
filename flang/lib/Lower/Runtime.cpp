@@ -194,8 +194,39 @@ void Fortran::lower::genNotifyWaitStatement(
 
 void Fortran::lower::genEventPostStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::EventPostStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: EVENT POST runtime");
+    const Fortran::parser::EventPostStmt &stmt) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  Fortran::lower::StatementContext stmtCtx;
+
+  // Handle STAT and ERRMSG values
+  const auto &statOrErrList =
+      std::get<std::list<Fortran::parser::StatOrErrmsg>>(stmt.t);
+  auto [statAddr, errMsgAddr] = getStatAndErrmsg(converter, loc, statOrErrList);
+
+  // Handle EVENT-VAR and IMAGE_NUMBER
+  auto eventExpr = Fortran::semantics::GetExpr(
+      std::get<Fortran::parser::EventVariable>(stmt.t));
+  mlir::Value eventAddr =
+      fir::getBase(converter.genExprAddr(loc, eventExpr, stmtCtx));
+  mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, eventAddr);
+  mlir::Value image;
+  if (auto coref{evaluate::ExtractCoarrayRef(eventExpr)}) {
+    image = Fortran::lower::getImageIndexFromCosubscripts(
+        converter, loc, coref.value(), eventAddr);
+  } else {
+    image = fir::runtime::getThisImage(builder, loc);
+  }
+  mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(loc, image, imageNum);
+
+  // TODO: Handle OFFSET value
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
+
+  fir::runtime::genEventPostStatement(builder, loc, imageNum, handle, offset,
+                                      statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genEventWaitStatement(

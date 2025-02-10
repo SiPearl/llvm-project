@@ -719,3 +719,21 @@ void fir::runtime::genAtomicRef(fir::FirOpBuilder &builder, mlir::Location loc,
                                               stat};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
+
+/// Generate call to runtime subroutine prif_event_post
+void fir::runtime::genEventPostStatement(fir::FirOpBuilder &builder,
+                                         mlir::Location loc,
+                                         mlir::Value imageNum,
+                                         mlir::Value handle, mlir::Value offset,
+                                         mlir::Value stat, mlir::Value errmsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("event_post"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum, handle, offset,
+                                              stat,     errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}

@@ -124,6 +124,11 @@ DECLARE_UNIMPLEMENTED_PRIF(get_team, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(team_number, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(change_team, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(end_team, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    event_post, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(event_query, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(event_wait, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(notify_wait, void *, void *, void *, void *, void *)
 
 FORTRAN_EXTERN_C_END
 

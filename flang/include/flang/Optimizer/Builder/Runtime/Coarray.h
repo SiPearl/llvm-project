@@ -225,5 +225,10 @@ void genAtomicRef(fir::FirOpBuilder &builder, mlir::Location loc,
                   mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
                   mlir::Value value, mlir::Value stat);
 
+/// Generate call to runtime subroutine prif_event_post
+void genEventPostStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value imageNum, mlir::Value handle,
+                           mlir::Value offset, mlir::Value stat,
+                           mlir::Value errmsg);
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
