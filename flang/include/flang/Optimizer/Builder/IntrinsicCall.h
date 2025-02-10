@@ -211,6 +211,12 @@ struct IntrinsicLibrary {
   fir::ExtendedValue genAssociated(mlir::Type,
                                    llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genAtand(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  void genAtomicCas(llvm::ArrayRef<fir::ExtendedValue> args);
+  void genAtomicDefine(llvm::ArrayRef<fir::ExtendedValue> args);
+  template <int op, bool is_fetch>
+  void genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args);
+  void genAtomicRef(llvm::ArrayRef<fir::ExtendedValue> args);
+
   fir::ExtendedValue genBesselJn(mlir::Type,
                                  llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genBesselYn(mlir::Type,

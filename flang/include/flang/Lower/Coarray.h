@@ -73,6 +73,10 @@ mlir::Value getImageIndexFromCosubscripts(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::evaluate::CoarrayRef &expr, mlir::Value coarrayAddr);
 
+mlir::Value getImageIndexFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
+                                 fir::ExtendedValue box,
+                                 mlir::Value handle = {});
+
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
 //===----------------------------------------------------------------------===//

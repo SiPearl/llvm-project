@@ -287,6 +287,78 @@ static constexpr IntrinsicHandler handlers[]{
     {"atan2pi", &I::genAtanpi},
     {"atand", &I::genAtand},
     {"atanpi", &I::genAtanpi},
+    {"atomic_add",
+     &I::genAtomicOp<fir::runtime::ATOMIC_ADD, false>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_and",
+     &I::genAtomicOp<fir::runtime::ATOMIC_AND, false>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_cas",
+     &I::genAtomicCas,
+     {{{"atom", asCoarrayBox},
+       {"compare", asAddr},
+       {"old", asAddr},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_define",
+     &I::genAtomicDefine,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_fetch_add",
+     &I::genAtomicOp<fir::runtime::ATOMIC_ADD, true>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"old", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_fetch_and",
+     &I::genAtomicOp<fir::runtime::ATOMIC_AND, true>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"old", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_fetch_or",
+     &I::genAtomicOp<fir::runtime::ATOMIC_OR, true>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"old", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_fetch_xor",
+     &I::genAtomicOp<fir::runtime::ATOMIC_XOR, true>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"old", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_or",
+     &I::genAtomicOp<fir::runtime::ATOMIC_OR, false>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_ref",
+     &I::genAtomicRef,
+     {{{"value", asAddr},
+       {"atom", asCoarrayBox},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
+    {"atomic_xor",
+     &I::genAtomicOp<fir::runtime::ATOMIC_XOR, false>,
+     {{{"atom", asCoarrayBox},
+       {"value", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"atomicaddd", &I::genAtomicAdd, {{{"a", asAddr}, {"v", asValue}}}, false},
     {"atomicaddf", &I::genAtomicAdd, {{{"a", asAddr}, {"v", asValue}}}, false},
     {"atomicaddi", &I::genAtomicAdd, {{{"a", asAddr}, {"v", asValue}}}, false},
@@ -3079,6 +3151,70 @@ IntrinsicLibrary::genAtomicXor(mlir::Type resultType,
   return genAtomBinOp(builder, loc, mlir::LLVM::AtomicBinOp::_xor, arg0, arg1);
 }
 
+static mlir::Value getAddrFromBox(fir::FirOpBuilder &builder,
+                                  mlir::Location loc, fir::ExtendedValue arg,
+                                  bool isFunc) {
+  mlir::Value argValue = fir::getBase(arg);
+  mlir::Value addr{nullptr};
+  if (isFunc) {
+    auto funcTy = mlir::cast<fir::BoxProcType>(argValue.getType()).getEleTy();
+    addr = builder.create<fir::BoxAddrOp>(loc, funcTy, argValue);
+  } else {
+    const auto *box = arg.getBoxOf<fir::BoxValue>();
+    addr = builder.create<fir::BoxAddrOp>(loc, box->getMemTy(),
+                                          fir::getBase(*box));
+  }
+  return addr;
+}
+
+// ATOMIC_CAS
+void IntrinsicLibrary::genAtomicCas(llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 5);
+  TODO(loc, "atomic_cas intrinsic");
+}
+
+// ATOMIC_DEFINE
+void IntrinsicLibrary::genAtomicDefine(
+    llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 3);
+  TODO(loc, "atomic_define intrinsic");
+}
+
+// ATOMIC_OP
+template <int op, bool is_fetch>
+void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(!is_fetch ? (args.size() == 3) : (args.size() == 4));
+  // Handle optional STAT argument
+  fir::ExtendedValue statExv = args.size() == 3 ? args[2] : args[3];
+  mlir::Value stat = isStaticallyAbsent(statExv)
+                         ? builder.create<fir::AbsentOp>(
+                               loc, builder.getRefType(builder.getI32Type()))
+                         : fir::getBase(statExv);
+  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
+  mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(
+      loc, fir::runtime::getImageIndexFromBox(builder, loc, args[0], handle),
+      imageNum);
+  // TODO: Handle OFFSET
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), offset);
+  mlir::Value value = fir::getBase(args[1]);
+  ;
+  mlir::Value old;
+  if (args.size() == 4)
+    old = fir::getBase(args[2]);
+  fir::runtime::genAtomicOp(builder, loc, imageNum, handle, offset, value, old,
+                            stat, op, is_fetch);
+}
+
+// ATOMIC_REF
+void IntrinsicLibrary::genAtomicRef(llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 3);
+  TODO(loc, "atomic_ref intrinsic");
+}
+
 // ASSOCIATED
 fir::ExtendedValue
 IntrinsicLibrary::genAssociated(mlir::Type resultType,
@@ -3359,22 +3495,6 @@ mlir::Value IntrinsicLibrary::genBtest(mlir::Type resultType,
   mlir::Value one = builder.createIntegerConstant(loc, signlessType, 1);
   mlir::Value bit = builder.create<mlir::arith::AndIOp>(loc, shifted, one);
   return builder.createConvert(loc, resultType, bit);
-}
-
-static mlir::Value getAddrFromBox(fir::FirOpBuilder &builder,
-                                  mlir::Location loc, fir::ExtendedValue arg,
-                                  bool isFunc) {
-  mlir::Value argValue = fir::getBase(arg);
-  mlir::Value addr{nullptr};
-  if (isFunc) {
-    auto funcTy = mlir::cast<fir::BoxProcType>(argValue.getType()).getEleTy();
-    addr = builder.create<fir::BoxAddrOp>(loc, funcTy, argValue);
-  } else {
-    const auto *box = arg.getBoxOf<fir::BoxValue>();
-    addr = builder.create<fir::BoxAddrOp>(loc, box->getMemTy(),
-                                          fir::getBase(*box));
-  }
-  return addr;
 }
 
 static fir::ExtendedValue

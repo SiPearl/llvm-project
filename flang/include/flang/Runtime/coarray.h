@@ -94,6 +94,30 @@ DECLARE_UNIMPLEMENTED_PRIF(co_min, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(
     co_min_character, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(co_sum, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(atomic_add, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(atomic_and, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(atomic_or, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(atomic_xor, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_fetch_add, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_fetch_and, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_fetch_or, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_fetch_xor, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_cas_int, void *, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_cas_logical, void *, void *, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_define_int, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_define_logical, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_ref_int, void *, void *, void *, void *, void *)
+DECLARE_UNIMPLEMENTED_PRIF(
+    atomic_ref_logical, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(
     form_team, void *, void *, void *, void *, void *, void *)
 DECLARE_UNIMPLEMENTED_PRIF(get_team, void *, void *)
