@@ -204,6 +204,42 @@ mlir::Value fir::runtime::getImageIndex(fir::FirOpBuilder &builder,
   return builder.create<fir::LoadOp>(loc, result);
 }
 
+mlir::Value fir::runtime::getImageIndexFromBox(fir::FirOpBuilder &builder,
+                                               mlir::Location loc,
+                                               fir::ExtendedValue b,
+                                               mlir::Value handle) {
+
+  if (const auto *box = b.getBoxOf<fir::BoxValue>()) {
+    const auto boxCosubs = box->getCosubscripts();
+    if (!boxCosubs.size())
+      return fir::runtime::getThisImage(builder, loc);
+    // Creation of the cosubscripts array
+    mlir::Type i64Ty = builder.getI64Type();
+    mlir::Type arrayType = fir::SequenceType::get(
+        {static_cast<fir::SequenceType::Extent>(box->corank())}, i64Ty);
+    mlir::Value cosubscripts = builder.createTemporary(loc, arrayType);
+
+    mlir::Type indexType = builder.getIndexType();
+    mlir::Type addrType = builder.getRefType(i64Ty);
+    for (unsigned dim = 0; dim < box->corank(); ++dim) {
+      auto index = builder.createIntegerConstant(loc, indexType, dim);
+      auto addr =
+          builder.create<fir::CoordinateOp>(loc, addrType, cosubscripts, index);
+      builder.create<fir::StoreOp>(loc, boxCosubs[dim], addr);
+    }
+    cosubscripts = builder.createBox(loc, cosubscripts);
+
+    if (isStaticallyAbsent(handle)) {
+      mlir::Value coarrayAddr = builder.create<fir::BoxAddrOp>(
+          loc, box->getMemTy(), fir::getBase(*box));
+      handle = fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+    }
+    // Computation of the image_index
+    return fir::runtime::getImageIndex(builder, loc, handle, cosubscripts);
+  }
+  return {};
+}
+
 /// Generate Call to runtime prif_lcobound_{with|no}_dim
 mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value handle,
@@ -577,4 +613,54 @@ mlir::Value fir::runtime::genTeamNumber(fir::FirOpBuilder &builder,
   llvm::SmallVector<mlir::Value> localArgs = {team, result};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
   return builder.create<fir::LoadOp>(loc, result);
+}
+
+/// Generate call to runtime subroutine prif_atomic_[fetch_]{add, and, or, xor}
+/// "value": Need to be lowered into a BoxValue.
+void fir::runtime::genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
+                               mlir::Value imageNum, mlir::Value handle,
+                               mlir::Value offset, mlir::Value value,
+                               mlir::Value old, mlir::Value stat, int opKind,
+                               bool isFetch) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      isFetch ? PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy)
+              : PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp;
+  switch (opKind) {
+  case ATOMIC_ADD:
+    funcOp = builder.createFunction(loc,
+                                    isFetch ? PRIFNAME_SUB("atomic_fetch_add")
+                                            : PRIFNAME_SUB("atomic_add"),
+                                    ftype);
+    break;
+  case ATOMIC_AND:
+    funcOp = builder.createFunction(loc,
+                                    isFetch ? PRIFNAME_SUB("atomic_fetch_and")
+                                            : PRIFNAME_SUB("atomic_and"),
+                                    ftype);
+    break;
+  case ATOMIC_OR:
+    funcOp = builder.createFunction(loc,
+                                    isFetch ? PRIFNAME_SUB("atomic_fetch_or")
+                                            : PRIFNAME_SUB("atomic_or"),
+                                    ftype);
+    break;
+  case ATOMIC_XOR:
+    funcOp = builder.createFunction(loc,
+                                    isFetch ? PRIFNAME_SUB("atomic_fetch_xor")
+                                            : PRIFNAME_SUB("atomic_xor"),
+                                    ftype);
+    break;
+  default:
+    llvm::errs() << "Unsupported atomic operation\n.";
+  }
+
+  llvm::SmallVector<mlir::Value> localArgs;
+  if (isFetch)
+    localArgs.insert(localArgs.end(),
+                     {imageNum, handle, offset, value, old, stat});
+  else
+    localArgs.insert(localArgs.end(), {imageNum, handle, offset, value, stat});
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }

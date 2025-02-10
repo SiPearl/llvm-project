@@ -328,6 +328,8 @@ public:
 
   llvm::ArrayRef<mlir::Value> getCoshape() const { return coshape; }
 
+  llvm::ArrayRef<mlir::Value> getCosubscripts() const { return cosubscripts; }
+
   unsigned corank() const { return coshape.size(); }
 
 protected:

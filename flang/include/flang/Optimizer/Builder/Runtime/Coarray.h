@@ -43,6 +43,13 @@ namespace fir::runtime {
     return oss.str();                                                          \
   }()
 
+typedef enum atomic_op_t {
+  ATOMIC_ADD = 1,
+  ATOMIC_AND = 2,
+  ATOMIC_OR = 3,
+  ATOMIC_XOR = 4
+} atomic_op_t;
+
 /// Generate call to runtime function that store prif_coarray_handle with addr
 void saveCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
                        mlir::Value addr, mlir::Value handle);
@@ -86,6 +93,9 @@ mlir::Value getImageStatus(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value getImageIndex(fir::FirOpBuilder &builder, mlir::Location loc,
                           mlir::Value handle, mlir::Value sub,
                           mlir::Value team = {});
+
+mlir::Value getImageIndexFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
+                                 fir::ExtendedValue b, mlir::Value handle);
 
 /// Generate Call to runtime prif_lcobound_{with|no}_dim
 mlir::Value genLCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
@@ -194,5 +204,9 @@ mlir::Value genGetTeam(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value genTeamNumber(fir::FirOpBuilder &builder, mlir::Location loc,
                           mlir::Value team);
 
+void genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
+                 mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
+                 mlir::Value value, mlir::Value old, mlir::Value stat,
+                 int opKind, bool isFetch = false);
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
