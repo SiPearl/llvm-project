@@ -231,8 +231,64 @@ void Fortran::lower::genEventPostStatement(
 
 void Fortran::lower::genEventWaitStatement(
     Fortran::lower::AbstractConverter &converter,
-    const Fortran::parser::EventWaitStmt &) {
-  TODO(converter.getCurrentLocation(), "coarray: EVENT WAIT runtime");
+    const Fortran::parser::EventWaitStmt &stmt) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::StatementContext stmtCtx;
+
+  // Handle STAT ,ERRMSG and UNTIL_COUNT
+  mlir::Value statAddr, errMsgAddr, untilCount;
+  const auto &eventSpecList =
+      std::get<std::list<Fortran::parser::EventWaitSpec>>(stmt.t);
+  for (const Fortran::parser::EventWaitSpec &eventSpec : eventSpecList) {
+    std::visit(
+        Fortran::common::visitors{
+            [&](const Fortran::parser::StatOrErrmsg &statOrErr) {
+              std::visit(
+                  Fortran::common::visitors{
+                      [&](const Fortran::parser::StatVariable &statVar) {
+                        statAddr = fir::getBase(converter.genExprAddr(
+                            loc, Fortran::semantics::GetExpr(statVar),
+                            stmtCtx));
+                      },
+                      [&](const Fortran::parser::MsgVariable &errMsgVar) {
+                        errMsgAddr = fir::getBase(converter.genExprAddr(
+                            loc, Fortran::semantics::GetExpr(errMsgVar),
+                            stmtCtx));
+                      },
+                  },
+                  statOrErr.u);
+            },
+            [&](const Fortran::parser::ScalarIntExpr &untilCountVar) {
+              untilCount = fir::getBase(converter.genExprAddr(
+                  loc, Fortran::semantics::GetExpr(untilCountVar), stmtCtx));
+            },
+        },
+        eventSpec.u);
+  }
+  if (isStaticallyAbsent(untilCount))
+    untilCount =
+        builder.create<fir::AbsentOp>(loc, builder.getI64Type()).getResult();
+  if (isStaticallyAbsent(statAddr))
+    statAddr =
+        builder.create<fir::AbsentOp>(loc, builder.getI32Type()).getResult();
+  if (isStaticallyAbsent(errMsgAddr)) {
+    errMsgAddr =
+        builder
+            .create<fir::AbsentOp>(loc, fir::BoxType::get(mlir::NoneType::get(
+                                            builder.getContext())))
+            .getResult();
+  }
+
+  // Handle EVENT-VAR
+  mlir::Value eventVarAddr = fir::getBase(converter.genExprAddr(
+      loc,
+      Fortran::semantics::GetExpr(
+          std::get<Fortran::parser::EventVariable>(stmt.t)),
+      stmtCtx));
+
+  fir::runtime::genEventWaitStatement(builder, loc, eventVarAddr, untilCount,
+                                      statAddr, errMsgAddr);
 }
 
 void Fortran::lower::genLockStatement(
