@@ -754,3 +754,18 @@ void fir::runtime::genEventWaitStatement(fir::FirOpBuilder &builder,
                                               nullPtr, errmsg};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
+
+/// Generate call to runtime subroutine prif_notify_wait
+void fir::runtime::genNotifyWaitStatement(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value notifyVarPtr,
+    mlir::Value untilCount, mlir::Value stat, mlir::Value errmsg) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("notify_wait"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {notifyVarPtr, untilCount, stat,
+                                              nullPtr, errmsg};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
