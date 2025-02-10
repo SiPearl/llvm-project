@@ -149,6 +149,10 @@ void genSyncMemoryStatement(fir::FirOpBuilder &builder, mlir::Location loc,
 void genSyncImagesStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value imageSet, mlir::Value stat,
                             mlir::Value errmsg);
+/// Generate call to runtime subroutine prif_sync_team
+void genSyncTeamStatement(fir::FirOpBuilder &builder, mlir::Location loc,
+                          mlir::Value team, mlir::Value stat,
+                          mlir::Value errmsg);
 
 /// Generate call to runtime subroutine prif_lock
 void genLockStatement(fir::FirOpBuilder &builder, mlir::Location loc,

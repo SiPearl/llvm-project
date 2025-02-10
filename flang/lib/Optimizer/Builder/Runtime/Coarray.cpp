@@ -462,6 +462,20 @@ void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
+/// Generate call to runtime subroutine prif_sync_team
+void fir::runtime::genSyncTeamStatement(fir::FirOpBuilder &builder,
+                                        mlir::Location loc, mlir::Value team,
+                                        mlir::Value stat, mlir::Value errmsg) {
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("sync_team"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs = {team, stat, errmsg, nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
 /// Generate call to runtime subroutine prif_lock
 void fir::runtime::genLockStatement(fir::FirOpBuilder &builder,
                                     mlir::Location loc, mlir::Value imageNum,
