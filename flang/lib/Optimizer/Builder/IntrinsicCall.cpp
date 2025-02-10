@@ -545,6 +545,12 @@ static constexpr IntrinsicHandler handlers[]{
      &I::genEtime,
      {{{"values", asBox}, {"time", asBox}}},
      /*isElemental=*/false},
+    {"event_query",
+     &I::genEventQuery,
+     {{{"event", asAddr},
+       {"count", asAddr},
+       {"stat", asAddr, handleDynamicOptional}}},
+     /*isElemental=*/false},
     {"execute_command_line",
      &I::genExecuteCommandLine,
      {{{"command", asBox},
@@ -4446,6 +4452,23 @@ IntrinsicLibrary::genEtime(std::optional<mlir::Type> resultType,
     return {};
   }
   return {};
+}
+
+// EVENT_QUERY
+void IntrinsicLibrary::genEventQuery(llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 3);
+
+  mlir::Value eventVarPtr = fir::getBase(args[0]);
+  mlir::Value count = fir::getBase(args[1]);
+  mlir::Value stat =
+      isStaticallyAbsent(args[2])
+          ? builder
+                .create<fir::AbsentOp>(
+                    loc, builder.getRefType(builder.getDefaultIntegerType()))
+                .getResult()
+          : fir::getBase(args[2]);
+
+  fir::runtime::genEventQuery(builder, loc, eventVarPtr, count, stat);
 }
 
 // EXIT
