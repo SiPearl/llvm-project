@@ -345,7 +345,26 @@ void fir::runtime::CoarrayGetStridded(
     mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
     mlir::Value currentImageBuffer, mlir::Value currentImageStride,
     mlir::Value elementSize, mlir::Value extent) {
-  TODO(loc, "Generating call to prif_get_stridded");
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                    ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("get_stridded"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum,
+                                              handle,
+                                              offset,
+                                              remoteStride,
+                                              currentImageBuffer,
+                                              currentImageStride,
+                                              elementSize,
+                                              extent,
+                                              nullPtr,
+                                              nullPtr,
+                                              nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
 /// Generate call to runtime subroutine prif_put to assigns to elements of a
@@ -377,7 +396,26 @@ void fir::runtime::CoarrayPutStridded(
     mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
     mlir::Value currentImageBuffer, mlir::Value currentImageStride,
     mlir::Value elementSize, mlir::Value extent) {
-  TODO(loc, "Generating call to prif_put_stridded");
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                    ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("put_stridded"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum,
+                                              handle,
+                                              offset,
+                                              remoteStride,
+                                              currentImageBuffer,
+                                              currentImageStride,
+                                              elementSize,
+                                              extent,
+                                              nullPtr,
+                                              nullPtr,
+                                              nullPtr};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
 /// Generate call to runtime subroutine prif_sync_all
