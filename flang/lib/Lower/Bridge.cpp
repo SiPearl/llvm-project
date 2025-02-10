@@ -647,7 +647,7 @@ public:
   genCoarrayExpr(const Fortran::evaluate::CoarrayRef &coarrayRef,
                  Fortran::lower::StatementContext &context,
                  mlir::Location loc) {
-    std::optional<mlir::DataLayout> dl = fir::support::getOrSetDataLayout(
+    std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
     Fortran::semantics::SymbolRef sym = coarrayRef.GetFirstSymbol();
     fir::ExtendedValue addr = getSymbolExtendedValue(sym, nullptr);

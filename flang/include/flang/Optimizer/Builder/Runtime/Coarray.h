@@ -204,9 +204,26 @@ mlir::Value genGetTeam(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value genTeamNumber(fir::FirOpBuilder &builder, mlir::Location loc,
                           mlir::Value team);
 
+/// Generate call to runtime subroutine prif_atomic_cas_{int|logical}
+void genAtomicCas(fir::FirOpBuilder &builder, mlir::Location loc,
+                  mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
+                  mlir::Value old, mlir::Value compare, mlir::Value newV,
+                  mlir::Value stat);
+
+/// Generate call to runtime subroutine prif_atomic_define_{int|logical}
+void genAtomicDefine(fir::FirOpBuilder &builder, mlir::Location loc,
+                     mlir::Value imageNum, mlir::Value handle,
+                     mlir::Value offset, mlir::Value value, mlir::Value stat);
+
 void genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
                  mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
                  mlir::Value value, mlir::Value old, mlir::Value stat,
                  int opKind, bool isFetch = false);
+
+/// Generate call to runtime subroutine prif_atomic_ref_{int|logical}
+void genAtomicRef(fir::FirOpBuilder &builder, mlir::Location loc,
+                  mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
+                  mlir::Value value, mlir::Value stat);
+
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H

@@ -300,7 +300,7 @@ static constexpr IntrinsicHandler handlers[]{
        {"stat", asAddr, handleDynamicOptional}}},
      /*isElemental=*/false},
     {"atomic_cas",
-     &I::genAtomicCas,
+     &I::genAtomicCasCoarray,
      {{{"atom", asCoarrayBox},
        {"compare", asAddr},
        {"old", asAddr},
@@ -3168,16 +3168,56 @@ static mlir::Value getAddrFromBox(fir::FirOpBuilder &builder,
 }
 
 // ATOMIC_CAS
-void IntrinsicLibrary::genAtomicCas(llvm::ArrayRef<fir::ExtendedValue> args) {
+void IntrinsicLibrary::genAtomicCasCoarray(llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 5);
-  TODO(loc, "atomic_cas intrinsic");
+  // Handle coarray_handle and IMAGE_NUM
+  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
+  mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(
+      loc, fir::runtime::getImageIndexFromBox(builder, loc, args[0], handle),
+      imageNum);
+
+  // Handle optional STAT argument
+  mlir::Value stat = isStaticallyAbsent(args[4])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, builder.getRefType(builder.getI32Type()))
+                         : fir::getBase(args[4]);
+  // TODO: Handle OFFSET
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), offset);
+  mlir::Value compare = fir::getBase(args[1]);
+  mlir::Value old = fir::getBase(args[2]);
+  mlir::Value value = fir::getBase(args[3]);
+  fir::runtime::genAtomicCas(builder, loc, imageNum, handle, offset, old,
+                             compare, value, stat);
 }
 
 // ATOMIC_DEFINE
 void IntrinsicLibrary::genAtomicDefine(
     llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 3);
-  TODO(loc, "atomic_define intrinsic");
+  // Handle coarray_handle and IMAGE_NUM
+  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
+  mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(
+      loc, fir::runtime::getImageIndexFromBox(builder, loc, args[0], handle),
+      imageNum);
+
+  // Handle optional STAT argument
+  mlir::Value stat = isStaticallyAbsent(args[2])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, builder.getRefType(builder.getI32Type()))
+                         : fir::getBase(args[2]);
+  // TODO: Handle OFFSET
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), offset);
+  mlir::Value value = fir::getBase(args[1]);
+  fir::runtime::genAtomicDefine(builder, loc, imageNum, handle, offset, value,
+                                stat);
 }
 
 // ATOMIC_OP
@@ -3201,7 +3241,6 @@ void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
   builder.create<fir::StoreOp>(
       loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), offset);
   mlir::Value value = fir::getBase(args[1]);
-  ;
   mlir::Value old;
   if (args.size() == 4)
     old = fir::getBase(args[2]);
@@ -3212,7 +3251,26 @@ void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
 // ATOMIC_REF
 void IntrinsicLibrary::genAtomicRef(llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 3);
-  TODO(loc, "atomic_ref intrinsic");
+  // Handle coarray_handle and IMAGE_NUM
+  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
+  mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
+  builder.create<fir::StoreOp>(
+      loc, fir::runtime::getImageIndexFromBox(builder, loc, args[0], handle),
+      imageNum);
+
+  // Handle optional STAT argument
+  mlir::Value stat = isStaticallyAbsent(args[2])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, builder.getRefType(builder.getI32Type()))
+                         : fir::getBase(args[2]);
+  // TODO: Handle OFFSET
+  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, builder.getI32Type(), 0), offset);
+  mlir::Value value = fir::getBase(args[1]);
+  fir::runtime::genAtomicRef(builder, loc, imageNum, handle, offset, value,
+                             stat);
 }
 
 // ASSOCIATED

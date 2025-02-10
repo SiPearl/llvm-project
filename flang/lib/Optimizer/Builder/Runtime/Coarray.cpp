@@ -615,6 +615,43 @@ mlir::Value fir::runtime::genTeamNumber(fir::FirOpBuilder &builder,
   return builder.create<fir::LoadOp>(loc, result);
 }
 
+/// Generate call to runtime subroutine prif_atomic_cas_{int|logical}
+void fir::runtime::genAtomicCas(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value imageNum, mlir::Value handle,
+                                mlir::Value offset, mlir::Value old,
+                                mlir::Value compare, mlir::Value newV,
+                                mlir::Value stat) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  bool isLogicalType = fir::getBaseTypeOf(newV).isInteger(1);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc,
+                             isLogicalType ? PRIFNAME_SUB("atomic_cas_logical")
+                                           : PRIFNAME_SUB("atomic_cas_int"),
+                             ftype);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum, handle, offset, old,
+                                              compare,  newV,   stat};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_atomic_define_{int|logical}
+void fir::runtime::genAtomicDefine(fir::FirOpBuilder &builder,
+                                   mlir::Location loc, mlir::Value imageNum,
+                                   mlir::Value handle, mlir::Value offset,
+                                   mlir::Value value, mlir::Value stat) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  bool isLogicalType = fir::getBaseTypeOf(value).isInteger(1);
+  mlir::func::FuncOp funcOp = builder.createFunction(
+      loc,
+      isLogicalType ? PRIFNAME_SUB("atomic_define_logical")
+                    : PRIFNAME_SUB("atomic_define_int"),
+      ftype);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum, handle, offset, value,
+                                              stat};
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
 /// Generate call to runtime subroutine prif_atomic_[fetch_]{add, and, or, xor}
 /// "value": Need to be lowered into a BoxValue.
 void fir::runtime::genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
@@ -662,5 +699,23 @@ void fir::runtime::genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
                      {imageNum, handle, offset, value, old, stat});
   else
     localArgs.insert(localArgs.end(), {imageNum, handle, offset, value, stat});
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_atomic_ref_{int|logical}
+void fir::runtime::genAtomicRef(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value imageNum, mlir::Value handle,
+                                mlir::Value offset, mlir::Value value,
+                                mlir::Value stat) {
+  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  bool isLogicalType = fir::getBaseTypeOf(value).isInteger(1);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc,
+                             isLogicalType ? PRIFNAME_SUB("atomic_ref_logical")
+                                           : PRIFNAME_SUB("atomic_ref_int"),
+                             ftype);
+  llvm::SmallVector<mlir::Value> localArgs = {imageNum, handle, offset, value,
+                                              stat};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
