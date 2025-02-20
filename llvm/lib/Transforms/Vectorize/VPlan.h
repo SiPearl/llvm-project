@@ -1967,7 +1967,7 @@ public:
   VPBasicBlock *getIncomingBlock(unsigned I);
 
   /// Returns the \p I th incoming VPValue.
-  VPValue *getIncomingValue(unsigned I) { return getOperand(I); }
+  VPValue *getIncomingValue(unsigned I) const { return getOperand(I); }
 };
 
 /// A recipe for handling first-order recurrence phis. The start value is the
