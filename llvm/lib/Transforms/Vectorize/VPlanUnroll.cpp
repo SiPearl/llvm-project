@@ -224,6 +224,11 @@ void UnrollState::unrollHeaderPHIByUF(VPHeaderPHIRecipe *R,
   if (isa<VPFirstOrderRecurrencePHIRecipe>(R))
     return;
 
+  if (isa<VPScalarPHIRecipe>(R)) {
+    addUniformForAllParts(R);
+    return;
+  }
+
   // Generate step vectors for each unrolled part.
   if (auto *IV = dyn_cast<VPWidenIntOrFpInductionRecipe>(R)) {
     unrollWidenInductionByUF(IV, InsertPtForPhi);
@@ -245,7 +250,7 @@ void UnrollState::unrollHeaderPHIByUF(VPHeaderPHIRecipe *R,
     } else if (RdxPhi) {
       Copy->addOperand(getConstantVPV(Part));
     } else {
-      assert(isa<VPActiveLaneMaskPHIRecipe>(R) &&
+      assert((isa<VPActiveLaneMaskPHIRecipe>(R) || isa<VPScalarPHIRecipe>(R)) &&
              "unexpected header phi recipe not needing unrolled part");
     }
   }
@@ -384,6 +389,21 @@ void UnrollState::unrollBlock(VPBlockBase *VPB) {
       continue;
     }
 
+    // Handle inner-loop/region header phis. The backedge values will be set
+    // later. Phis not in a loop header can be unrolled like any other recipes,
+    // RPO makes sure the predecessors are all visited first.
+    VPRegionBlock *Region = R.getParent()->getParent();
+    if (auto *P = dyn_cast<VPWidenPHIRecipe>(&R);
+        P && Region->getEntryBasicBlock() == P->getParent()) {
+      auto InsertPt = std::next(R.getIterator());
+      for (unsigned Part = 1; Part != UF; ++Part) {
+        VPWidenPHIRecipe *Copy = P->clone();
+        Copy->insertBefore(*R.getParent(), InsertPt);
+        addRecipeForPart(&R, Copy, Part);
+      }
+      continue;
+    }
+
     unrollRecipeByUF(R);
   }
 }
@@ -441,6 +461,22 @@ void VPlanTransforms::unrollByUF(VPlan &Plan, unsigned UF, LLVMContext &Ctx) {
     Unroller.remapOperands(&H, Part);
     Part++;
   }
+
+  // Remap operands of cloned inner-loop header phis to update backedge values,
+  // a problem unique to outer-loop vectorization.
+  ReversePostOrderTraversal<VPBlockDeepTraversalWrapper<VPBlockBase *>>
+      DeepRPOT(Plan.getEntry());
+  for (VPRegionBlock *Region :
+       VPBlockUtils::blocksOnly<VPRegionBlock>(DeepRPOT))
+    for (VPRecipeBase &R : Region->getEntryBasicBlock()->phis())
+      if (auto *Phi = dyn_cast<VPWidenPHIRecipe>(&R)) {
+        if (Unroller.contains(Phi->getVPSingleValue())) {
+          Part = 1;
+          continue;
+        }
+        Unroller.remapOperands(&R, Part);
+        Part++;
+      }
 
   VPlanTransforms::removeDeadRecipes(Plan);
 }

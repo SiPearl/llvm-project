@@ -2204,14 +2204,6 @@ static bool isExplicitVecOuterLoop(Loop *OuterLp,
     return false;
   }
 
-  if (Hints.getInterleave() > 1) {
-    // TODO: Interleave support is future work.
-    LLVM_DEBUG(dbgs() << "LV: Not vectorizing: Interleave is not supported for "
-                         "outer loops.\n");
-    Hints.emitRemarkWithHints();
-    return false;
-  }
-
   return true;
 }
 
@@ -10099,6 +10091,12 @@ static bool processLoopInVPlanNativePath(
 
   CM.collectElementTypesForWidening();
 
+  // The VPlan-native path does not have a cost model, so the only way to get
+  // a unroll factor is to query the loop vectorization hints.
+  unsigned UF = Hints.getInterleave();
+  if (!UF)
+    UF = 1;
+
   // Plan how to best vectorize, return the best VF and its cost.
   const VectorizationFactor VF = LVP.planInVPlanNativePath(UserVF);
 
@@ -10116,10 +10114,10 @@ static bool processLoopInVPlanNativePath(
     GeneratedRTChecks Checks(PSE, DT, LI, TTI, F->getDataLayout(),
                              AddBranchWeights, CM.CostKind);
     InnerLoopVectorizer LB(L, PSE, LI, DT, TLI, TTI, AC, ORE, VF.Width,
-                           VF.Width, 1, LVL, &CM, BFI, PSI, Checks, BestPlan);
+                           VF.Width, UF, LVL, &CM, BFI, PSI, Checks, BestPlan);
     LLVM_DEBUG(dbgs() << "Vectorizing outer loop in \""
                       << L->getHeader()->getParent()->getName() << "\"\n");
-    LVP.executePlan(VF.Width, 1, BestPlan, LB, DT, false);
+    LVP.executePlan(VF.Width, UF, BestPlan, LB, DT, false);
   }
 
   reportVectorization(ORE, L, VF, 1);
