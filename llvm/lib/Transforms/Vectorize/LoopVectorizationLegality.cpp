@@ -571,6 +571,11 @@ bool LoopVectorizationLegality::isUniform(Value *V, ElementCount VF) const {
   if (VF.isScalar())
     return true;
 
+  // The SCEVAddRecForUniformityRewriter does not support accesses to addresses
+  // invariant w.r.t. the vectorized loop but with recurrences of inner loops.
+  if (!TheLoop->isInnermost())
+    return false;
+
   // Since we rely on SCEV for uniformity, if the type is not SCEVable, it is
   // never considered uniform.
   auto *SE = PSE.getSE();
@@ -1209,8 +1214,12 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
     });
   }
 
-  if (!LAI->canVectorizeMemory())
-    return canVectorizeIndirectUnsafeDependences();
+  if (!LAI->canVectorizeMemory()) {
+    if (canVectorizeIndirectUnsafeDependences())
+      return true;
+
+    return false;
+  }
 
   if (LAI->hasLoadStoreDependenceInvolvingLoopInvariantAddress()) {
     reportVectorizationFailure("We don't allow storing to uniform addresses",
@@ -1405,7 +1414,31 @@ bool LoopVectorizationLegality::blockNeedsPredication(BasicBlock *BB) const {
         "Uncountable exiting block must be a direct predecessor of latch");
     return BB == Latch;
   }
-  return LoopAccessInfo::blockNeedsPredication(BB, TheLoop, DT);
+
+  if (LoopAccessInfo::blockNeedsPredication(BB, TheLoop, DT))
+    return true;
+
+  // Blocks in inner loops need predication if the inner loop trip-count
+  // is not invariant to the vectorized loop.
+  if (!TheLoop->isInnermost()) {
+    Loop *BBLoop = LI->getLoopFor(BB);
+    if (BBLoop != TheLoop) {
+      if (auto Iter = InnerLoopsNeedingPredication.find(BBLoop);
+          Iter != InnerLoopsNeedingPredication.end())
+        return Iter->second;
+
+      for (Loop *L = BBLoop; L != TheLoop; L = L->getParentLoop())
+        if (!isUniformLoop(L, TheLoop)) {
+          InnerLoopsNeedingPredication[BBLoop] = true;
+          return true;
+        }
+
+      InnerLoopsNeedingPredication[BBLoop] = false;
+      return false;
+    }
+  }
+
+  return false;
 }
 
 bool LoopVectorizationLegality::blockCanBePredicated(
@@ -1539,9 +1572,6 @@ bool LoopVectorizationLegality::canVectorizeWithIfConvert() {
 // Helper function to canVectorizeLoopNestCFG.
 bool LoopVectorizationLegality::canVectorizeLoopCFG(Loop *Lp,
                                                     bool UseVPlanNativePath) {
-  assert((UseVPlanNativePath || Lp->isInnermost()) &&
-         "VPlan-native path is not enabled.");
-
   // TODO: ORE should be improved to show more accurate information when an
   // outer loop can't be vectorized because a nested loop is not understood or
   // legal. Something like: "outer_loop_location: loop not vectorized:
@@ -1573,6 +1603,23 @@ bool LoopVectorizationLegality::canVectorizeLoopCFG(Loop *Lp,
       Result = false;
     else
       return false;
+  }
+
+  if (Lp != TheLoop && !UseVPlanNativePath) {
+    // Inner loops must be in loop-simplify form with the latch block being
+    // also the only exiting block and a dedicated exit.
+    BasicBlock *Exiting = Lp->getExitingBlock();
+    if (!Lp->isLoopSimplifyForm() || !Exiting ||
+        Exiting != Lp->getLoopLatch() || !Lp->isLCSSAForm(*DT)) {
+      reportVectorizationFailure(
+          "The inner loops must exit through their latch",
+          "loop control flow is not understood by vectorizer",
+          "CFGNotUnderstood", ORE, TheLoop);
+      if (DoExtraAnalysis)
+        Result = false;
+      else
+        return false;
+    }
   }
 
   return Result;
@@ -1777,9 +1824,7 @@ bool LoopVectorizationLegality::canVectorize(bool UseVPlanNativePath) {
 
   // Specific checks for outer loops. We skip the remaining legal checks at this
   // point because they don't support outer loops.
-  if (!TheLoop->isInnermost()) {
-    assert(UseVPlanNativePath && "VPlan-native path is not enabled.");
-
+  if (!TheLoop->isInnermost() && UseVPlanNativePath) {
     if (!canVectorizeOuterLoop()) {
       reportVectorizationFailure("Unsupported outer loop",
                                  "UnsupportedOuterLoop", ORE, TheLoop);
@@ -1792,7 +1837,6 @@ bool LoopVectorizationLegality::canVectorize(bool UseVPlanNativePath) {
     return Result;
   }
 
-  assert(TheLoop->isInnermost() && "Inner loop expected.");
   // Check if we can if-convert non-single-bb loops.
   unsigned NumBlocks = TheLoop->getNumBlocks();
   if (NumBlocks != 1 && !canVectorizeWithIfConvert()) {
@@ -1813,7 +1857,7 @@ bool LoopVectorizationLegality::canVectorize(bool UseVPlanNativePath) {
   }
 
   if (isa<SCEVCouldNotCompute>(PSE.getBackedgeTakenCount())) {
-    if (TheLoop->getExitingBlock()) {
+    if (TheLoop->getExitingBlock() || !TheLoop->isInnermost()) {
       reportVectorizationFailure("Cannot vectorize uncountable loop",
                                  "UnsupportedUncountableLoop", ORE, TheLoop);
       if (DoExtraAnalysis)
