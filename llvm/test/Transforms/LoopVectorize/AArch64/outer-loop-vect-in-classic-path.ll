@@ -32,16 +32,14 @@ define void @foo(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC1-NEXT:    [[ACTIVE_LANE_MASK1:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH9]] ]
 ; CHECK-IC1-NEXT:    br label %[[INNER_LOOP1:.*]]
 ; CHECK-IC1:       [[INNER_LOOP1]]:
-; CHECK-IC1-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT12:%.*]], %[[INNER_LOOP1]] ]
+; CHECK-IC1-NEXT:    [[J2:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP12:%.*]], %[[INNER_LOOP1]] ]
 ; CHECK-IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP11:%.*]], %[[INNER_LOOP1]] ]
 ; CHECK-IC1-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK1]], %[[VECTOR_BODY]] ], [ [[TMP16:%.*]], %[[INNER_LOOP1]] ]
 ; CHECK-IC1-NEXT:    [[VEC_PHI4:%.*]] = phi <vscale x 4 x float> [ shufflevector (<vscale x 4 x float> insertelement (<vscale x 4 x float> poison, float poison, i64 0), <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer), %[[VECTOR_BODY]] ], [ [[TMP18:%.*]], %[[INNER_LOOP1]] ]
-; CHECK-IC1-NEXT:    [[TMP20:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC1-NEXT:    [[TMP5:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP20]]
+; CHECK-IC1-NEXT:    [[TMP5:%.*]] = getelementptr inbounds nuw float, ptr [[B]], i64 [[J2]]
 ; CHECK-IC1-NEXT:    [[TMP6:%.*]] = load float, ptr [[TMP5]], align 4
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 4 x float> poison, float [[TMP6]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 4 x float> [[BROADCAST_SPLATINSERT]], <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC1-NEXT:    [[J2:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
 ; CHECK-IC1-NEXT:    [[TMP7:%.*]] = mul i64 [[J2]], [[M]]
 ; CHECK-IC1-NEXT:    [[TMP8:%.*]] = getelementptr float, ptr [[C]], i64 [[TMP7]]
 ; CHECK-IC1-NEXT:    [[TMP9:%.*]] = getelementptr float, ptr [[TMP8]], i64 [[INDEX]]
@@ -49,10 +47,7 @@ define void @foo(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC1-NEXT:    [[TMP10:%.*]] = fmul <vscale x 4 x float> [[BROADCAST_SPLAT]], [[WIDE_MASKED_LOAD]]
 ; CHECK-IC1-NEXT:    [[TMP11]] = fadd <vscale x 4 x float> [[VEC_PHI]], [[TMP10]]
 ; CHECK-IC1-NEXT:    [[TMP18]] = select <vscale x 4 x i1> [[ACTIVE_LANE_MASK]], <vscale x 4 x float> [[TMP11]], <vscale x 4 x float> [[VEC_PHI4]]
-; CHECK-IC1-NEXT:    [[TMP21:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC1-NEXT:    [[TMP12:%.*]] = add nuw nsw i64 [[TMP21]], 1
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT11:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP12]], i64 0
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT12]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT11]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC1-NEXT:    [[TMP12]] = add nuw nsw i64 [[J2]], 1
 ; CHECK-IC1-NEXT:    [[TMP13:%.*]] = icmp eq i64 [[TMP12]], [[M]]
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT5:%.*]] = insertelement <vscale x 4 x i1> poison, i1 [[TMP13]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT6:%.*]] = shufflevector <vscale x 4 x i1> [[BROADCAST_SPLATINSERT5]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer
@@ -84,30 +79,24 @@ define void @foo(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK_ENTRY1:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 [[TMP6]], i64 [[N]])
 ; CHECK-IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; CHECK-IC2:       [[VECTOR_BODY]]:
-; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH22:.*]] ]
-; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK1:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH22]] ]
-; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK3:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT12:%.*]], %[[LOOP_LATCH22]] ]
+; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH21:.*]] ]
+; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK1:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH21]] ]
+; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK3:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT12:%.*]], %[[LOOP_LATCH21]] ]
 ; CHECK-IC2-NEXT:    br label %[[INNER_LOOP3:.*]]
 ; CHECK-IC2:       [[INNER_LOOP3]]:
-; CHECK-IC2-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT27:%.*]], %[[INNER_LOOP3]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI4:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT29:%.*]], %[[INNER_LOOP3]] ]
+; CHECK-IC2-NEXT:    [[J4:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP18:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP16:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI5:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP17:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK1]], %[[VECTOR_BODY]] ], [ [[TMP33:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK2:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK3]], %[[VECTOR_BODY]] ], [ [[TMP27:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI8:%.*]] = phi <vscale x 4 x float> [ shufflevector (<vscale x 4 x float> insertelement (<vscale x 4 x float> poison, float poison, i64 0), <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer), %[[VECTOR_BODY]] ], [ [[TMP34:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI9:%.*]] = phi <vscale x 4 x float> [ shufflevector (<vscale x 4 x float> insertelement (<vscale x 4 x float> poison, float poison, i64 0), <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer), %[[VECTOR_BODY]] ], [ [[TMP35:%.*]], %[[INNER_LOOP3]] ]
-; CHECK-IC2-NEXT:    [[TMP40:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC2-NEXT:    [[TMP7:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP40]]
-; CHECK-IC2-NEXT:    [[TMP41:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI4]], i64 0
-; CHECK-IC2-NEXT:    [[TMP42:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP41]]
+; CHECK-IC2-NEXT:    [[TMP7:%.*]] = getelementptr inbounds nuw float, ptr [[B]], i64 [[J4]]
 ; CHECK-IC2-NEXT:    [[TMP8:%.*]] = load float, ptr [[TMP7]], align 4
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 4 x float> poison, float [[TMP8]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 4 x float> [[BROADCAST_SPLATINSERT]], <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP43:%.*]] = load float, ptr [[TMP42]], align 4
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT7:%.*]] = insertelement <vscale x 4 x float> poison, float [[TMP43]], i64 0
+; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT7:%.*]] = insertelement <vscale x 4 x float> poison, float [[TMP8]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT8:%.*]] = shufflevector <vscale x 4 x float> [[BROADCAST_SPLATINSERT7]], <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[J4:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
 ; CHECK-IC2-NEXT:    [[TMP9:%.*]] = mul i64 [[J4]], [[M]]
 ; CHECK-IC2-NEXT:    [[TMP10:%.*]] = getelementptr float, ptr [[C]], i64 [[TMP9]]
 ; CHECK-IC2-NEXT:    [[TMP11:%.*]] = getelementptr float, ptr [[TMP10]], i64 [[INDEX]]
@@ -122,14 +111,8 @@ define void @foo(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC2-NEXT:    [[TMP17]] = fadd <vscale x 4 x float> [[VEC_PHI5]], [[TMP15]]
 ; CHECK-IC2-NEXT:    [[TMP34]] = select <vscale x 4 x i1> [[ACTIVE_LANE_MASK]], <vscale x 4 x float> [[TMP16]], <vscale x 4 x float> [[VEC_PHI8]]
 ; CHECK-IC2-NEXT:    [[TMP35]] = select <vscale x 4 x i1> [[ACTIVE_LANE_MASK2]], <vscale x 4 x float> [[TMP17]], <vscale x 4 x float> [[VEC_PHI9]]
-; CHECK-IC2-NEXT:    [[TMP44:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC2-NEXT:    [[TMP18:%.*]] = add nuw nsw i64 [[TMP44]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT26:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP18]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT27]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT26]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP45:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI4]], i64 0
-; CHECK-IC2-NEXT:    [[TMP36:%.*]] = add nuw nsw i64 [[TMP45]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT28:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP36]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT29]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT28]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC2-NEXT:    [[TMP18]] = add nuw nsw i64 [[J4]], 1
+; CHECK-IC2-NEXT:    [[TMP36:%.*]] = add nuw nsw i64 [[J4]], 1
 ; CHECK-IC2-NEXT:    [[TMP19:%.*]] = icmp eq i64 [[TMP18]], [[M]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT13:%.*]] = insertelement <vscale x 4 x i1> poison, i1 [[TMP19]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT14:%.*]] = shufflevector <vscale x 4 x i1> [[BROADCAST_SPLATINSERT13]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer
@@ -147,8 +130,8 @@ define void @foo(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC2-NEXT:    [[TMP30:%.*]] = or <vscale x 4 x i1> [[BROADCAST_SPLATINSERT17]], [[BROADCAST_SPLATINSERT19]]
 ; CHECK-IC2-NEXT:    [[TMP31:%.*]] = shufflevector <vscale x 4 x i1> [[TMP30]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP32:%.*]] = extractelement <vscale x 4 x i1> [[TMP31]], i64 0
-; CHECK-IC2-NEXT:    br i1 [[TMP32]], label %[[INNER_LOOP3]], label %[[LOOP_LATCH22]]
-; CHECK-IC2:       [[LOOP_LATCH22]]:
+; CHECK-IC2-NEXT:    br i1 [[TMP32]], label %[[INNER_LOOP3]], label %[[LOOP_LATCH21]]
+; CHECK-IC2:       [[LOOP_LATCH21]]:
 ; CHECK-IC2-NEXT:    [[TMP20:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
 ; CHECK-IC2-NEXT:    [[TMP21:%.*]] = call i64 @llvm.vscale.i64()
 ; CHECK-IC2-NEXT:    [[DOTIDX13:%.*]] = shl i64 [[TMP21]], 4
@@ -227,24 +210,19 @@ define void @bar(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH3]] ]
 ; CHECK-IC1-NEXT:    br label %[[INNER_LOOP1:.*]]
 ; CHECK-IC1:       [[INNER_LOOP1]]:
-; CHECK-IC1-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT6:%.*]], %[[INNER_LOOP1]] ]
+; CHECK-IC1-NEXT:    [[TMP6:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP21:%.*]], %[[INNER_LOOP1]] ]
 ; CHECK-IC1-NEXT:    [[VEC_PHI3:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP13:%.*]], %[[INNER_LOOP1]] ]
-; CHECK-IC1-NEXT:    [[TMP6:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
 ; CHECK-IC1-NEXT:    [[TMP7:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP6]]
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 4 x ptr> poison, ptr [[TMP7]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 4 x ptr> [[BROADCAST_SPLATINSERT]], <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC1-NEXT:    [[WIDE_MASKED_GATHER:%.*]] = call <vscale x 4 x float> @llvm.masked.gather.nxv4f32.nxv4p0(<vscale x 4 x ptr> [[BROADCAST_SPLAT]], i32 4, <vscale x 4 x i1> [[VEC_PHI]], <vscale x 4 x float> poison)
-; CHECK-IC1-NEXT:    [[TMP8:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC1-NEXT:    [[TMP9:%.*]] = mul i64 [[TMP8]], [[M]]
+; CHECK-IC1-NEXT:    [[TMP9:%.*]] = mul i64 [[TMP6]], [[M]]
 ; CHECK-IC1-NEXT:    [[TMP10:%.*]] = getelementptr float, ptr [[C]], i64 [[TMP9]]
 ; CHECK-IC1-NEXT:    [[TMP11:%.*]] = getelementptr float, ptr [[TMP10]], i64 [[INDEX]]
 ; CHECK-IC1-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr [[TMP11]], i32 4, <vscale x 4 x i1> [[VEC_PHI]], <vscale x 4 x float> poison)
 ; CHECK-IC1-NEXT:    [[TMP12:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_GATHER]], [[WIDE_MASKED_LOAD]]
 ; CHECK-IC1-NEXT:    [[TMP13]] = fadd <vscale x 4 x float> [[VEC_PHI3]], [[TMP12]]
-; CHECK-IC1-NEXT:    [[TMP15:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC1-NEXT:    [[TMP21:%.*]] = add i64 [[TMP15]], 1
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT5:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP21]], i64 0
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT6]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT5]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC1-NEXT:    [[TMP21]] = add i64 [[TMP6]], 1
 ; CHECK-IC1-NEXT:    [[TMP14:%.*]] = icmp eq i64 [[TMP21]], [[INDEX]]
 ; CHECK-IC1-NEXT:    br i1 [[TMP14]], label %[[LOOP_LATCH3]], label %[[INNER_LOOP1]]
 ; CHECK-IC1:       [[LOOP_LATCH3]]:
@@ -271,27 +249,23 @@ define void @bar(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK_ENTRY1:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 [[TMP7]], i64 [[N]])
 ; CHECK-IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; CHECK-IC2:       [[VECTOR_BODY]]:
-; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH11:.*]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH11]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI4:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT22:%.*]], %[[LOOP_LATCH11]] ]
+; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH10:.*]] ]
+; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH10]] ]
+; CHECK-IC2-NEXT:    [[VEC_PHI4:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT22:%.*]], %[[LOOP_LATCH10]] ]
 ; CHECK-IC2-NEXT:    br label %[[INNER_LOOP3:.*]]
 ; CHECK-IC2:       [[INNER_LOOP3]]:
-; CHECK-IC2-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT16:%.*]], %[[INNER_LOOP3]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI5:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT18:%.*]], %[[INNER_LOOP3]] ]
+; CHECK-IC2-NEXT:    [[TMP9:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP44:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI7:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP21:%.*]], %[[INNER_LOOP3]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI8:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP22:%.*]], %[[INNER_LOOP3]] ]
-; CHECK-IC2-NEXT:    [[TMP9:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
 ; CHECK-IC2-NEXT:    [[TMP10:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP9]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT9:%.*]] = insertelement <vscale x 4 x ptr> poison, ptr [[TMP10]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT10:%.*]] = shufflevector <vscale x 4 x ptr> [[BROADCAST_SPLATINSERT9]], <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP13:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI5]], i64 0
-; CHECK-IC2-NEXT:    [[TMP12:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP13]]
+; CHECK-IC2-NEXT:    [[TMP12:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP9]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT11:%.*]] = insertelement <vscale x 4 x ptr> poison, ptr [[TMP12]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT12:%.*]] = shufflevector <vscale x 4 x ptr> [[BROADCAST_SPLATINSERT11]], <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC2-NEXT:    [[WIDE_MASKED_GATHER:%.*]] = call <vscale x 4 x float> @llvm.masked.gather.nxv4f32.nxv4p0(<vscale x 4 x ptr> [[BROADCAST_SPLAT10]], i32 4, <vscale x 4 x i1> [[VEC_PHI]], <vscale x 4 x float> poison)
 ; CHECK-IC2-NEXT:    [[WIDE_MASKED_GATHER13:%.*]] = call <vscale x 4 x float> @llvm.masked.gather.nxv4f32.nxv4p0(<vscale x 4 x ptr> [[BROADCAST_SPLAT12]], i32 4, <vscale x 4 x i1> [[VEC_PHI4]], <vscale x 4 x float> poison)
-; CHECK-IC2-NEXT:    [[TMP11:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC2-NEXT:    [[TMP14:%.*]] = mul i64 [[TMP11]], [[M]]
+; CHECK-IC2-NEXT:    [[TMP14:%.*]] = mul i64 [[TMP9]], [[M]]
 ; CHECK-IC2-NEXT:    [[TMP15:%.*]] = getelementptr float, ptr [[C]], i64 [[TMP14]]
 ; CHECK-IC2-NEXT:    [[TMP16:%.*]] = getelementptr float, ptr [[TMP15]], i64 [[INDEX]]
 ; CHECK-IC2-NEXT:    [[TMP17:%.*]] = call i64 @llvm.vscale.i64()
@@ -303,17 +277,10 @@ define void @bar(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B, ptr readonly %
 ; CHECK-IC2-NEXT:    [[TMP20:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_GATHER13]], [[WIDE_MASKED_LOAD14]]
 ; CHECK-IC2-NEXT:    [[TMP21]] = fadd <vscale x 4 x float> [[VEC_PHI7]], [[TMP19]]
 ; CHECK-IC2-NEXT:    [[TMP22]] = fadd <vscale x 4 x float> [[VEC_PHI8]], [[TMP20]]
-; CHECK-IC2-NEXT:    [[TMP25:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI1]], i64 0
-; CHECK-IC2-NEXT:    [[TMP44:%.*]] = add i64 [[TMP25]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT15:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP44]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT16]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT15]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP26:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI5]], i64 0
-; CHECK-IC2-NEXT:    [[TMP24:%.*]] = add i64 [[TMP26]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT17:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP24]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT18]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT17]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC2-NEXT:    [[TMP44]] = add i64 [[TMP9]], 1
 ; CHECK-IC2-NEXT:    [[TMP23:%.*]] = icmp eq i64 [[TMP44]], [[INDEX]]
-; CHECK-IC2-NEXT:    br i1 [[TMP23]], label %[[LOOP_LATCH11]], label %[[INNER_LOOP3]]
-; CHECK-IC2:       [[LOOP_LATCH11]]:
+; CHECK-IC2-NEXT:    br i1 [[TMP23]], label %[[LOOP_LATCH10]], label %[[INNER_LOOP3]]
+; CHECK-IC2:       [[LOOP_LATCH10]]:
 ; CHECK-IC2-NEXT:    [[TMP36:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
 ; CHECK-IC2-NEXT:    [[TMP37:%.*]] = call i64 @llvm.vscale.i64()
 ; CHECK-IC2-NEXT:    [[DOTIDX23:%.*]] = shl i64 [[TMP37]], 4
@@ -404,18 +371,14 @@ define void @baz(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC1-NEXT:    [[TMP7:%.*]] = select <vscale x 2 x i1> [[ACTIVE_LANE_MASK]], <vscale x 2 x i1> [[TMP6]], <vscale x 2 x i1> zeroinitializer
 ; CHECK-IC1-NEXT:    br label %[[INNER_LOOP1:.*]]
 ; CHECK-IC1:       [[INNER_LOOP1]]:
-; CHECK-IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT6:%.*]], %[[INNER_LOOP1]] ]
+; CHECK-IC1-NEXT:    [[J2:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP11:%.*]], %[[INNER_LOOP1]] ]
 ; CHECK-IC1-NEXT:    [[VEC_PHI3:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP9:%.*]], %[[INNER_LOOP1]] ]
-; CHECK-IC1-NEXT:    [[TMP10:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC1-NEXT:    [[TMP8:%.*]] = getelementptr inbounds i64, ptr [[B]], i64 [[TMP10]]
+; CHECK-IC1-NEXT:    [[TMP8:%.*]] = getelementptr inbounds nuw i64, ptr [[B]], i64 [[J2]]
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 2 x ptr> poison, ptr [[TMP8]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 2 x ptr> [[BROADCAST_SPLATINSERT]], <vscale x 2 x ptr> poison, <vscale x 2 x i32> zeroinitializer
 ; CHECK-IC1-NEXT:    [[WIDE_MASKED_GATHER:%.*]] = call <vscale x 2 x i64> @llvm.masked.gather.nxv2i64.nxv2p0(<vscale x 2 x ptr> [[BROADCAST_SPLAT]], i32 8, <vscale x 2 x i1> [[TMP7]], <vscale x 2 x i64> poison)
 ; CHECK-IC1-NEXT:    [[TMP9]] = sub <vscale x 2 x i64> [[VEC_PHI3]], [[WIDE_MASKED_GATHER]]
-; CHECK-IC1-NEXT:    [[J2:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC1-NEXT:    [[TMP11:%.*]] = add nuw nsw i64 [[J2]], 1
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT5:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TMP11]], i64 0
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT6]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT5]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
+; CHECK-IC1-NEXT:    [[TMP11]] = add nuw nsw i64 [[J2]], 1
 ; CHECK-IC1-NEXT:    [[TMP13:%.*]] = extractelement <vscale x 2 x i64> [[TMP9]], i64 0
 ; CHECK-IC1-NEXT:    [[TMP12:%.*]] = icmp slt i64 [[TMP13]], 1
 ; CHECK-IC1-NEXT:    br i1 [[TMP12]], label %[[LOOP_LATCH_LOOPEXIT3]], label %[[INNER_LOOP1]]
@@ -443,9 +406,9 @@ define void @baz(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK_ENTRY1:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 [[TMP6]], i64 [[N]])
 ; CHECK-IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; CHECK-IC2:       [[VECTOR_BODY]]:
-; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH_LOOPEXIT11:.*]] ]
-; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 2 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH_LOOPEXIT11]] ]
-; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK2:%.*]] = phi <vscale x 2 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT20:%.*]], %[[LOOP_LATCH_LOOPEXIT11]] ]
+; CHECK-IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[ENTRY]] ], [ [[INDEX_NEXT:%.*]], %[[LOOP_LATCH_LOOPEXIT10:.*]] ]
+; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 2 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[LOOP_LATCH_LOOPEXIT10]] ]
+; CHECK-IC2-NEXT:    [[ACTIVE_LANE_MASK2:%.*]] = phi <vscale x 2 x i1> [ [[ACTIVE_LANE_MASK_ENTRY1]], %[[ENTRY]] ], [ [[ACTIVE_LANE_MASK_NEXT20:%.*]], %[[LOOP_LATCH_LOOPEXIT10]] ]
 ; CHECK-IC2-NEXT:    [[TMP7:%.*]] = getelementptr inbounds i64, ptr [[A]], i64 [[INDEX]]
 ; CHECK-IC2-NEXT:    [[TMP8:%.*]] = call i64 @llvm.vscale.i64()
 ; CHECK-IC2-NEXT:    [[DOTIDX:%.*]] = shl i64 [[TMP8]], 4
@@ -458,34 +421,24 @@ define void @baz(i64 %N, i64 %M, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC2-NEXT:    [[TMP13:%.*]] = select <vscale x 2 x i1> [[ACTIVE_LANE_MASK2]], <vscale x 2 x i1> [[TMP11]], <vscale x 2 x i1> zeroinitializer
 ; CHECK-IC2-NEXT:    br label %[[INNER_LOOP4:.*]]
 ; CHECK-IC2:       [[INNER_LOOP4]]:
-; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT17:%.*]], %[[INNER_LOOP4]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI5:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT19:%.*]], %[[INNER_LOOP4]] ]
+; CHECK-IC2-NEXT:    [[TMP22:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP23:%.*]], %[[INNER_LOOP4]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI7:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP16:%.*]], %[[INNER_LOOP4]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI8:%.*]] = phi <vscale x 2 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[TMP17:%.*]], %[[INNER_LOOP4]] ]
-; CHECK-IC2-NEXT:    [[TMP18:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC2-NEXT:    [[TMP14:%.*]] = getelementptr inbounds i64, ptr [[B]], i64 [[TMP18]]
+; CHECK-IC2-NEXT:    [[TMP14:%.*]] = getelementptr inbounds nuw i64, ptr [[B]], i64 [[TMP22]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 2 x ptr> poison, ptr [[TMP14]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 2 x ptr> [[BROADCAST_SPLATINSERT]], <vscale x 2 x ptr> poison, <vscale x 2 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP24:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI5]], i64 0
-; CHECK-IC2-NEXT:    [[TMP15:%.*]] = getelementptr inbounds i64, ptr [[B]], i64 [[TMP24]]
+; CHECK-IC2-NEXT:    [[TMP15:%.*]] = getelementptr inbounds nuw i64, ptr [[B]], i64 [[TMP22]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT9:%.*]] = insertelement <vscale x 2 x ptr> poison, ptr [[TMP15]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT10:%.*]] = shufflevector <vscale x 2 x ptr> [[BROADCAST_SPLATINSERT9]], <vscale x 2 x ptr> poison, <vscale x 2 x i32> zeroinitializer
 ; CHECK-IC2-NEXT:    [[WIDE_MASKED_GATHER:%.*]] = call <vscale x 2 x i64> @llvm.masked.gather.nxv2i64.nxv2p0(<vscale x 2 x ptr> [[BROADCAST_SPLAT]], i32 8, <vscale x 2 x i1> [[TMP12]], <vscale x 2 x i64> poison)
 ; CHECK-IC2-NEXT:    [[WIDE_MASKED_GATHER11:%.*]] = call <vscale x 2 x i64> @llvm.masked.gather.nxv2i64.nxv2p0(<vscale x 2 x ptr> [[BROADCAST_SPLAT10]], i32 8, <vscale x 2 x i1> [[TMP13]], <vscale x 2 x i64> poison)
 ; CHECK-IC2-NEXT:    [[TMP16]] = sub <vscale x 2 x i64> [[VEC_PHI7]], [[WIDE_MASKED_GATHER]]
 ; CHECK-IC2-NEXT:    [[TMP17]] = sub <vscale x 2 x i64> [[VEC_PHI8]], [[WIDE_MASKED_GATHER11]]
-; CHECK-IC2-NEXT:    [[J6:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC2-NEXT:    [[TMP20:%.*]] = add nuw nsw i64 [[J6]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT16:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TMP20]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT17]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT16]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP22:%.*]] = extractelement <vscale x 2 x i64> [[VEC_PHI5]], i64 0
-; CHECK-IC2-NEXT:    [[TMP23:%.*]] = add nuw nsw i64 [[TMP22]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT18:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TMP23]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT19]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT18]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
+; CHECK-IC2-NEXT:    [[TMP23]] = add nuw nsw i64 [[TMP22]], 1
 ; CHECK-IC2-NEXT:    [[TMP19:%.*]] = extractelement <vscale x 2 x i64> [[TMP16]], i64 0
 ; CHECK-IC2-NEXT:    [[TMP21:%.*]] = icmp slt i64 [[TMP19]], 1
-; CHECK-IC2-NEXT:    br i1 [[TMP21]], label %[[LOOP_LATCH_LOOPEXIT11]], label %[[INNER_LOOP4]]
-; CHECK-IC2:       [[LOOP_LATCH_LOOPEXIT11]]:
+; CHECK-IC2-NEXT:    br i1 [[TMP21]], label %[[LOOP_LATCH_LOOPEXIT10]], label %[[INNER_LOOP4]]
+; CHECK-IC2:       [[LOOP_LATCH_LOOPEXIT10]]:
 ; CHECK-IC2-NEXT:    [[PREDPHI:%.*]] = select <vscale x 2 x i1> [[TMP12]], <vscale x 2 x i64> [[TMP16]], <vscale x 2 x i64> [[WIDE_MASKED_LOAD]]
 ; CHECK-IC2-NEXT:    [[PREDPHI19:%.*]] = select <vscale x 2 x i1> [[TMP13]], <vscale x 2 x i64> [[TMP17]], <vscale x 2 x i64> [[WIDE_MASKED_LOAD3]]
 ; CHECK-IC2-NEXT:    [[TMP30:%.*]] = call i64 @llvm.vscale.i64()
@@ -565,24 +518,24 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT2:%.*]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT1]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC1-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; CHECK-IC1:       [[VECTOR_BODY]]:
-; CHECK-IC1-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT17:.*]] ]
-; CHECK-IC1-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[VECTOR_PH]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT17]] ]
-; CHECK-IC1-NEXT:    [[VEC_IND:%.*]] = phi <vscale x 4 x i64> [ [[TMP7]], %[[VECTOR_PH]] ], [ [[VEC_IND_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT17]] ]
+; CHECK-IC1-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT18:.*]] ]
+; CHECK-IC1-NEXT:    [[ACTIVE_LANE_MASK:%.*]] = phi <vscale x 4 x i1> [ [[ACTIVE_LANE_MASK_ENTRY]], %[[VECTOR_PH]] ], [ [[ACTIVE_LANE_MASK_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT18]] ]
+; CHECK-IC1-NEXT:    [[VEC_IND:%.*]] = phi <vscale x 4 x i64> [ [[TMP7]], %[[VECTOR_PH]] ], [ [[VEC_IND_NEXT:%.*]], %[[OUTER_LATCH_LOOPEXIT18]] ]
 ; CHECK-IC1-NEXT:    [[TMP8:%.*]] = getelementptr float, ptr [[A]], i64 [[INDEX]]
 ; CHECK-IC1-NEXT:    [[TMP9:%.*]] = mul <vscale x 4 x i64> [[VEC_IND]], [[BROADCAST_SPLAT2]]
 ; CHECK-IC1-NEXT:    [[TMP10:%.*]] = getelementptr float, ptr [[B]], <vscale x 4 x i64> [[TMP9]]
 ; CHECK-IC1-NEXT:    [[TMP12:%.*]] = select <vscale x 4 x i1> [[ACTIVE_LANE_MASK]], <vscale x 4 x i1> [[TMP11]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC1-NEXT:    br label %[[MIDDLE_LOOP3:.*]]
 ; CHECK-IC1:       [[MIDDLE_LOOP3]]:
-; CHECK-IC1-NEXT:    [[VEC_PHI2:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT19:%.*]], %[[MIDDLE_LATCH_LOOPEXIT12:.*]] ]
-; CHECK-IC1-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i1> [ [[TMP12]], %[[VECTOR_BODY]] ], [ [[TMP27:%.*]], %[[MIDDLE_LATCH_LOOPEXIT12]] ]
+; CHECK-IC1-NEXT:    [[J4:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP21:%.*]], %[[MIDDLE_LATCH_LOOPEXIT13:.*]] ]
+; CHECK-IC1-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i1> [ [[TMP12]], %[[VECTOR_BODY]] ], [ [[TMP27:%.*]], %[[MIDDLE_LATCH_LOOPEXIT13]] ]
 ; CHECK-IC1-NEXT:    [[TMP13:%.*]] = icmp ne <vscale x 4 x i64> [[BROADCAST_SPLAT2]], zeroinitializer
 ; CHECK-IC1-NEXT:    [[TMP24:%.*]] = select <vscale x 4 x i1> [[VEC_PHI1]], <vscale x 4 x i1> [[TMP13]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC1-NEXT:    br label %[[INNER_LOOP5:.*]]
 ; CHECK-IC1:       [[INNER_LOOP5]]:
 ; CHECK-IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[MIDDLE_LOOP3]] ], [ [[BROADCAST_SPLAT10:%.*]], %[[INNER_LOOP5]] ]
+; CHECK-IC1-NEXT:    [[K6:%.*]] = phi i64 [ 0, %[[MIDDLE_LOOP3]] ], [ [[TMP19:%.*]], %[[INNER_LOOP5]] ]
 ; CHECK-IC1-NEXT:    [[TMP14:%.*]] = phi <vscale x 4 x i1> [ [[TMP24]], %[[MIDDLE_LOOP3]] ], [ [[TMP25:%.*]], %[[INNER_LOOP5]] ]
-; CHECK-IC1-NEXT:    [[K6:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI]], i64 0
 ; CHECK-IC1-NEXT:    [[TMP15:%.*]] = mul i64 [[K6]], [[N]]
 ; CHECK-IC1-NEXT:    [[TMP16:%.*]] = getelementptr float, ptr [[TMP8]], i64 [[TMP15]]
 ; CHECK-IC1-NEXT:    [[TMP17:%.*]] = getelementptr float, <vscale x 4 x ptr> [[TMP10]], <vscale x 4 x i64> [[VEC_PHI]]
@@ -590,8 +543,7 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC1-NEXT:    [[WIDE_MASKED_GATHER:%.*]] = call <vscale x 4 x float> @llvm.masked.gather.nxv4f32.nxv4p0(<vscale x 4 x ptr> [[TMP17]], i32 4, <vscale x 4 x i1> [[TMP14]], <vscale x 4 x float> poison)
 ; CHECK-IC1-NEXT:    [[TMP18:%.*]] = fadd <vscale x 4 x float> [[WIDE_MASKED_LOAD]], [[WIDE_MASKED_GATHER]]
 ; CHECK-IC1-NEXT:    call void @llvm.masked.store.nxv4f32.p0(<vscale x 4 x float> [[TMP18]], ptr [[TMP16]], i32 4, <vscale x 4 x i1> [[TMP14]])
-; CHECK-IC1-NEXT:    [[TMP31:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC1-NEXT:    [[TMP19:%.*]] = add i64 [[TMP31]], 1
+; CHECK-IC1-NEXT:    [[TMP19]] = add i64 [[K6]], 1
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT9:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP19]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT10]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT9]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC1-NEXT:    [[TMP20:%.*]] = icmp eq i64 [[TMP19]], [[L]]
@@ -600,20 +552,17 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC1-NEXT:    [[TMP29:%.*]] = xor <vscale x 4 x i1> [[BROADCAST_SPLAT11]], splat (i1 true)
 ; CHECK-IC1-NEXT:    [[TMP25]] = select <vscale x 4 x i1> [[TMP14]], <vscale x 4 x i1> [[TMP29]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC1-NEXT:    [[TMP30:%.*]] = call i1 @llvm.vector.reduce.or.nxv4i1(<vscale x 4 x i1> [[TMP25]])
-; CHECK-IC1-NEXT:    br i1 [[TMP30]], label %[[INNER_LOOP5]], label %[[MIDDLE_LATCH_LOOPEXIT12]]
-; CHECK-IC1:       [[MIDDLE_LATCH_LOOPEXIT12]]:
-; CHECK-IC1-NEXT:    [[J4:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI2]], i64 0
-; CHECK-IC1-NEXT:    [[TMP21:%.*]] = add nuw nsw i64 [[J4]], 1
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT18:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP21]], i64 0
-; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT19]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT18]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC1-NEXT:    br i1 [[TMP30]], label %[[INNER_LOOP5]], label %[[MIDDLE_LATCH_LOOPEXIT13]]
+; CHECK-IC1:       [[MIDDLE_LATCH_LOOPEXIT13]]:
+; CHECK-IC1-NEXT:    [[TMP21]] = add nuw nsw i64 [[J4]], 1
 ; CHECK-IC1-NEXT:    [[TMP22:%.*]] = icmp eq i64 [[TMP21]], [[M]]
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLATINSERT14:%.*]] = insertelement <vscale x 4 x i1> poison, i1 [[TMP22]], i64 0
 ; CHECK-IC1-NEXT:    [[BROADCAST_SPLAT15:%.*]] = shufflevector <vscale x 4 x i1> [[BROADCAST_SPLATINSERT14]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC1-NEXT:    [[TMP26:%.*]] = xor <vscale x 4 x i1> [[BROADCAST_SPLAT15]], splat (i1 true)
 ; CHECK-IC1-NEXT:    [[TMP27]] = select <vscale x 4 x i1> [[VEC_PHI1]], <vscale x 4 x i1> [[TMP26]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC1-NEXT:    [[TMP28:%.*]] = call i1 @llvm.vector.reduce.or.nxv4i1(<vscale x 4 x i1> [[TMP27]])
-; CHECK-IC1-NEXT:    br i1 [[TMP28]], label %[[MIDDLE_LOOP3]], label %[[OUTER_LATCH_LOOPEXIT17]]
-; CHECK-IC1:       [[OUTER_LATCH_LOOPEXIT17]]:
+; CHECK-IC1-NEXT:    br i1 [[TMP28]], label %[[MIDDLE_LOOP3]], label %[[OUTER_LATCH_LOOPEXIT18]]
+; CHECK-IC1:       [[OUTER_LATCH_LOOPEXIT18]]:
 ; CHECK-IC1-NEXT:    [[INDEX_NEXT]] = add i64 [[INDEX]], [[TMP1]]
 ; CHECK-IC1-NEXT:    [[ACTIVE_LANE_MASK_NEXT]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 [[INDEX]], i64 [[TMP4]])
 ; CHECK-IC1-NEXT:    [[VEC_IND_NEXT]] = add <vscale x 4 x i64> [[VEC_IND]], [[DOTSPLAT]]
@@ -663,21 +612,20 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC2-NEXT:    [[TMP46:%.*]] = select <vscale x 4 x i1> [[ACTIVE_LANE_MASK2]], <vscale x 4 x i1> [[TMP16]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC2-NEXT:    br label %[[MIDDLE_LOOP7:.*]]
 ; CHECK-IC2:       [[MIDDLE_LOOP7]]:
-; CHECK-IC2-NEXT:    [[VEC_PHI2:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT38:%.*]], %[[MIDDLE_LATCH_LOOPEXIT26:.*]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI8:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[VECTOR_BODY]] ], [ [[BROADCAST_SPLAT40:%.*]], %[[MIDDLE_LATCH_LOOPEXIT26]] ]
+; CHECK-IC2-NEXT:    [[J8:%.*]] = phi i64 [ 0, %[[VECTOR_BODY]] ], [ [[TMP37:%.*]], %[[MIDDLE_LATCH_LOOPEXIT26:.*]] ]
 ; CHECK-IC2-NEXT:    [[VEC_PHI1:%.*]] = phi <vscale x 4 x i1> [ [[TMP18]], %[[VECTOR_BODY]] ], [ [[TMP52:%.*]], %[[MIDDLE_LATCH_LOOPEXIT26]] ]
 ; CHECK-IC2-NEXT:    [[TMP19:%.*]] = phi <vscale x 4 x i1> [ [[TMP46]], %[[VECTOR_BODY]] ], [ [[TMP53:%.*]], %[[MIDDLE_LATCH_LOOPEXIT26]] ]
 ; CHECK-IC2-NEXT:    [[TMP20:%.*]] = icmp ne <vscale x 4 x i64> [[BROADCAST_SPLAT6]], zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP21:%.*]] = icmp ne <vscale x 4 x i64> [[BROADCAST_SPLAT6]], zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP48:%.*]] = select <vscale x 4 x i1> [[VEC_PHI1]], <vscale x 4 x i1> [[TMP20]], <vscale x 4 x i1> zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP23:%.*]] = select <vscale x 4 x i1> [[TMP19]], <vscale x 4 x i1> [[TMP21]], <vscale x 4 x i1> zeroinitializer
-; CHECK-IC2-NEXT:    br label %[[INNER_LOOP11:.*]]
-; CHECK-IC2:       [[INNER_LOOP11]]:
-; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[MIDDLE_LOOP7]] ], [ [[BROADCAST_SPLAT18:%.*]], %[[INNER_LOOP11]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI10:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[MIDDLE_LOOP7]] ], [ [[BROADCAST_SPLAT20:%.*]], %[[INNER_LOOP11]] ]
-; CHECK-IC2-NEXT:    [[TMP22:%.*]] = phi <vscale x 4 x i1> [ [[TMP48]], %[[MIDDLE_LOOP7]] ], [ [[TMP59:%.*]], %[[INNER_LOOP11]] ]
-; CHECK-IC2-NEXT:    [[VEC_PHI15:%.*]] = phi <vscale x 4 x i1> [ [[TMP23]], %[[MIDDLE_LOOP7]] ], [ [[TMP60:%.*]], %[[INNER_LOOP11]] ]
-; CHECK-IC2-NEXT:    [[K11:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI]], i64 0
+; CHECK-IC2-NEXT:    br label %[[INNER_LOOP10:.*]]
+; CHECK-IC2:       [[INNER_LOOP10]]:
+; CHECK-IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[MIDDLE_LOOP7]] ], [ [[BROADCAST_SPLAT18:%.*]], %[[INNER_LOOP10]] ]
+; CHECK-IC2-NEXT:    [[VEC_PHI10:%.*]] = phi <vscale x 4 x i64> [ zeroinitializer, %[[MIDDLE_LOOP7]] ], [ [[BROADCAST_SPLAT20:%.*]], %[[INNER_LOOP10]] ]
+; CHECK-IC2-NEXT:    [[K11:%.*]] = phi i64 [ 0, %[[MIDDLE_LOOP7]] ], [ [[TMP34:%.*]], %[[INNER_LOOP10]] ]
+; CHECK-IC2-NEXT:    [[TMP22:%.*]] = phi <vscale x 4 x i1> [ [[TMP48]], %[[MIDDLE_LOOP7]] ], [ [[TMP59:%.*]], %[[INNER_LOOP10]] ]
+; CHECK-IC2-NEXT:    [[VEC_PHI15:%.*]] = phi <vscale x 4 x i1> [ [[TMP23]], %[[MIDDLE_LOOP7]] ], [ [[TMP60:%.*]], %[[INNER_LOOP10]] ]
 ; CHECK-IC2-NEXT:    [[TMP24:%.*]] = mul i64 [[K11]], [[N]]
 ; CHECK-IC2-NEXT:    [[TMP25:%.*]] = getelementptr float, ptr [[TMP11]], i64 [[TMP24]]
 ; CHECK-IC2-NEXT:    [[TMP26:%.*]] = getelementptr float, <vscale x 4 x ptr> [[TMP14]], <vscale x 4 x i64> [[VEC_PHI]]
@@ -696,12 +644,10 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC2-NEXT:    [[TMP33:%.*]] = getelementptr i8, ptr [[TMP25]], i64 [[DOTIDX21]]
 ; CHECK-IC2-NEXT:    call void @llvm.masked.store.nxv4f32.p0(<vscale x 4 x float> [[TMP30]], ptr [[TMP25]], i32 4, <vscale x 4 x i1> [[TMP22]])
 ; CHECK-IC2-NEXT:    call void @llvm.masked.store.nxv4f32.p0(<vscale x 4 x float> [[TMP31]], ptr [[TMP33]], i32 4, <vscale x 4 x i1> [[VEC_PHI15]])
-; CHECK-IC2-NEXT:    [[TMP66:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI]], i64 0
-; CHECK-IC2-NEXT:    [[TMP34:%.*]] = add i64 [[TMP66]], 1
+; CHECK-IC2-NEXT:    [[TMP34]] = add i64 [[K11]], 1
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT17:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP34]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT18]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT17]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP67:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI10]], i64 0
-; CHECK-IC2-NEXT:    [[TMP35:%.*]] = add i64 [[TMP67]], 1
+; CHECK-IC2-NEXT:    [[TMP35:%.*]] = add i64 [[K11]], 1
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT19:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP35]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT20]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT19]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP36:%.*]] = icmp eq i64 [[TMP34]], [[L]]
@@ -721,16 +667,10 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr noalias %A, ptr readonly %B) {
 ; CHECK-IC2-NEXT:    [[TMP43:%.*]] = or <vscale x 4 x i1> [[BROADCAST_SPLATINSERT22]], [[BROADCAST_SPLATINSERT24]]
 ; CHECK-IC2-NEXT:    [[TMP44:%.*]] = shufflevector <vscale x 4 x i1> [[TMP43]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer
 ; CHECK-IC2-NEXT:    [[TMP45:%.*]] = extractelement <vscale x 4 x i1> [[TMP44]], i64 0
-; CHECK-IC2-NEXT:    br i1 [[TMP45]], label %[[INNER_LOOP11]], label %[[MIDDLE_LATCH_LOOPEXIT26]]
+; CHECK-IC2-NEXT:    br i1 [[TMP45]], label %[[INNER_LOOP10]], label %[[MIDDLE_LATCH_LOOPEXIT26]]
 ; CHECK-IC2:       [[MIDDLE_LATCH_LOOPEXIT26]]:
-; CHECK-IC2-NEXT:    [[J8:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI2]], i64 0
-; CHECK-IC2-NEXT:    [[TMP37:%.*]] = add nuw nsw i64 [[J8]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT37:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP37]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT38]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT37]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
-; CHECK-IC2-NEXT:    [[TMP68:%.*]] = extractelement <vscale x 4 x i64> [[VEC_PHI8]], i64 0
-; CHECK-IC2-NEXT:    [[TMP47:%.*]] = add nuw nsw i64 [[TMP68]], 1
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT39:%.*]] = insertelement <vscale x 4 x i64> poison, i64 [[TMP47]], i64 0
-; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT40]] = shufflevector <vscale x 4 x i64> [[BROADCAST_SPLATINSERT39]], <vscale x 4 x i64> poison, <vscale x 4 x i32> zeroinitializer
+; CHECK-IC2-NEXT:    [[TMP37]] = add nuw nsw i64 [[J8]], 1
+; CHECK-IC2-NEXT:    [[TMP47:%.*]] = add nuw nsw i64 [[J8]], 1
 ; CHECK-IC2-NEXT:    [[TMP38:%.*]] = icmp eq i64 [[TMP37]], [[M]]
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLATINSERT27:%.*]] = insertelement <vscale x 4 x i1> poison, i1 [[TMP38]], i64 0
 ; CHECK-IC2-NEXT:    [[BROADCAST_SPLAT28:%.*]] = shufflevector <vscale x 4 x i1> [[BROADCAST_SPLATINSERT27]], <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer

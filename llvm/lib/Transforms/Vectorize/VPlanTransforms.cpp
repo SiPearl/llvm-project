@@ -570,6 +570,52 @@ createScalarIVSteps(VPlan &Plan, InductionDescriptor::InductionKind Kind,
   return Builder.createScalarIVSteps(InductionOpcode, FPBinOp, BaseIV, Step);
 }
 
+// Create VPScalarPHIRecipe phis instead of widened ones for inner-loop
+// inductions with uses of the first lane only. This avoids unnecessary
+// extractelement operations.
+static void optimizeInnerLoopInductions(VPlan &Plan) {
+  auto HandlePhi = [](VPWidenPHIRecipe &Phi, VPRegionBlock &Region) {
+    VPValue *Start = Phi.getIncomingValueForBlock(
+        Region.getSinglePredecessor()->getExitingBasicBlock());
+    VPValue *Next = Phi.getIncomingValueForBlock(Region.getExitingBasicBlock());
+
+    // The final value (influenced by the loop trip-count) does not matter for
+    // this purpose, but start and step need to be uniform.
+    if (!vputils::isUniformAfterVectorization(Start) ||
+        !vputils::isUniformAfterVectorization(Next))
+      return;
+
+    SmallVector<VPRecipeBase *> FirstLaneUsers;
+    for (VPUser *U : Phi.users())
+      if (auto *R = dyn_cast<VPRecipeBase>(U); R->onlyFirstLaneUsed(&Phi))
+        FirstLaneUsers.push_back(R);
+    if (FirstLaneUsers.empty())
+      return;
+
+    auto *IRPhi = Phi.getUnderlyingValue();
+    auto *NewPhi =
+        new VPScalarPHIRecipe(Start, Next, Phi.getDebugLoc(), IRPhi->getName());
+    NewPhi->setUnderlyingValue(IRPhi);
+    NewPhi->insertAfter(&Phi);
+    for (VPRecipeBase *R : FirstLaneUsers)
+      for (unsigned I = 0, N = R->getNumOperands(); I < N; ++I)
+        if (R->getOperand(I) == &Phi)
+          R->setOperand(I, NewPhi);
+
+    if (Phi.getNumUsers() == 0)
+      Phi.eraseFromParent();
+  };
+
+  // Traverse the phis in entry blocks of inner-loop regions.
+  auto Iter = vp_depth_first_deep(Plan.getEntry());
+  for (VPRegionBlock *VPR : VPBlockUtils::blocksOnly<VPRegionBlock>(Iter))
+    if (!VPR->isReplicator() && VPR != Plan.getVectorLoopRegion())
+      for (VPRecipeBase &R :
+           make_early_inc_range(VPR->getEntryBasicBlock()->phis()))
+        if (auto *Phi = dyn_cast<VPWidenPHIRecipe>(&R))
+          HandlePhi(*Phi, *VPR);
+}
+
 static SmallVector<VPUser *> collectUsersRecursively(VPValue *V) {
   SetVector<VPUser *> Users(V->user_begin(), V->user_end());
   for (unsigned I = 0; I != Users.size(); ++I) {
@@ -1464,6 +1510,7 @@ void VPlanTransforms::optimize(VPlan &Plan) {
   runPass(simplifyRecipes, Plan, *Plan.getCanonicalIV()->getScalarType());
   runPass(removeDeadRecipes, Plan);
   runPass(legalizeAndOptimizeInductions, Plan);
+  runPass(optimizeInnerLoopInductions, Plan);
   runPass(removeRedundantExpandSCEVRecipes, Plan);
   runPass(simplifyRecipes, Plan, *Plan.getCanonicalIV()->getScalarType());
   runPass(removeDeadRecipes, Plan);

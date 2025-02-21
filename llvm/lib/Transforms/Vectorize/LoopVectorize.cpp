@@ -3059,6 +3059,17 @@ void InnerLoopVectorizer::fixNonInductionPHIs(VPTransformState &State) {
   auto Iter = vp_depth_first_deep(Plan.getEntry());
   for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(Iter)) {
     for (VPRecipeBase &P : VPBB->phis()) {
+      if (auto *ScalarPhi = dyn_cast<VPScalarPHIRecipe>(&P)) {
+        PHINode *NewPhi = cast<PHINode>(State.get(ScalarPhi, true));
+        if (NewPhi->getNumIncomingValues() == 2)
+          continue;
+
+        Builder.SetInsertPoint(NewPhi);
+        VPBasicBlock *Latch = VPBB->getParent()->getExitingBasicBlock();
+        NewPhi->addIncoming(State.get(ScalarPhi->getBackedgeValue(), true),
+                            State.CFG.VPBB2IRBB[Latch]);
+      }
+
       VPWidenPHIRecipe *VPPhi = dyn_cast<VPWidenPHIRecipe>(&P);
       if (!VPPhi)
         continue;
