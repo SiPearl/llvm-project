@@ -415,6 +415,11 @@ static cl::opt<bool> ExperimentalOLVStressTest(
     cl::desc("Stress-test the experimental outer-loop vectorization outside "
              "the VPlan-native path."));
 
+static cl::opt<bool> ExperimentalTryToKeepUnifromBranches(
+    "experimental-keep-uniform-branches", cl::init(false), cl::Hidden,
+    cl::desc("Enable experimental preservation of uniform branch conditions "
+             "when vectorizing."));
+
 // Likelyhood of bypassing the vectorized loop because assumptions about SCEV
 // variables not overflowing do not hold. See `emitSCEVChecks`.
 static constexpr uint32_t SCEVCheckBypassWeights[] = {1, 127};
@@ -2937,7 +2942,8 @@ LoopVectorizationCostModel::getVectorIntrinsicCost(CallInst *CI,
 
 void InnerLoopVectorizer::fixVectorizedLoop(VPTransformState &State) {
   // Fix widened non-induction PHIs by setting up the PHI operands.
-  if (EnableVPlanNativePath || ExperimentalOLVInClassicPath)
+  if (EnableVPlanNativePath || ExperimentalOLVInClassicPath ||
+      ExperimentalTryToKeepUnifromBranches)
     fixNonInductionPHIs(State);
 
   // After vectorization, the exit blocks of the original loop will have
@@ -7637,6 +7643,7 @@ VectorizationFactor LoopVectorizationPlanner::computeBestVF() {
       BestPlan.getVectorLoopRegion()->getSingleSuccessor() !=
           BestPlan.getMiddleBlock();
   assert((BestFactor.Width == LegacyVF.Width || PlanForEarlyExitLoop ||
+          ExperimentalTryToKeepUnifromBranches ||
           ExperimentalOLVInClassicPath ||
           planContainsAdditionalSimplifications(getPlanFor(BestFactor.Width),
                                                 CostCtx, OrigLoop) ||
@@ -9484,6 +9491,94 @@ static void exitInnerLoopRegion(VPlanHCFGBuilder &HCFGBuilder,
                                RecipeBuilder.getBlockInMask(IRPreheader));
 }
 
+static std::optional<std::tuple<VPBlockBase *, VPBlockBase *, VPBlockBase *>>
+canKeepBranchDuringIfConversion(const VPDominatorTree &DT, VPBasicBlock *VPBB,
+                                VPlanHCFGBuilder &HCFGBuilder) {
+  const VPRegionBlock *Region = VPBB->getParent();
+  auto FindSubregionExit =
+      [&](VPBasicBlock *Pred,
+          VPBlockBase *Entry) -> std::pair<VPBlockBase *, VPBlockBase *> {
+    // The branch preservation is restricted to cases where
+    // the SESEs are completely empty or have a dedicated entry and exit.
+    // Because of the way the VPlan is flattened, the entry could already
+    // have gotten predecessors removed, so check based on the IR.
+    if (HCFGBuilder.getIRBBForVPB(Entry)->hasNPredecessorsOrMore(2))
+      return {Pred, Entry};
+
+    // Build the biggest possible SESE with the entry Entry.
+    // As the DT is not updated during flattening, even if other edges
+    // entering the SESE would have already been removed, the fact
+    // that there used to be one will be detected.
+    VPBlockBase *Exiting = nullptr;
+    SmallSetVector<VPBlockBase *, 4> Worklist;
+    Worklist.insert(Entry);
+    for (unsigned I = 0; I < Worklist.size(); I++) {
+      auto *BB = Worklist[I];
+      assert(BB->getParent() == Region);
+      for (auto *Succ : BB->getSuccessors()) {
+        if (DT.dominates(Entry, Succ))
+          Worklist.insert(Succ);
+        else if (Exiting || BB->getNumSuccessors() != 1)
+          return {nullptr, nullptr};
+        else
+          Exiting = BB;
+      }
+    }
+
+    return {Exiting, Exiting->getSingleSuccessor()};
+  };
+
+  auto [LHSExiting, LHSSucc] =
+      FindSubregionExit(VPBB, VPBB->getSuccessors()[0]);
+  auto [RHSExiting, RHSSucc] =
+      FindSubregionExit(VPBB, VPBB->getSuccessors()[1]);
+  if (!LHSExiting || !RHSExiting || LHSSucc != RHSSucc ||
+      LHSSucc->getNumPredecessors() != 2)
+    return std::nullopt;
+
+  return std::tuple(LHSSucc, LHSExiting, RHSExiting);
+}
+
+static void reconnectVPlanCFGForPreservedBranch(
+    VPBasicBlock *BranchBB, std::pair<VPBlockBase *, VPBlockBase *> LeftSESE,
+    std::pair<VPBlockBase *, VPBlockBase *> RightSESE, VPBasicBlock *JoinBB,
+    VPRecipeBuilder &RecipeBuilder, VPlanHCFGBuilder &HCFGBuilder) {
+
+  // Disconnect the entries/exits of the regions from their RPO
+  // predecessors/successors, and then re-connect them.
+  for (auto [Entry, Exiting] : {LeftSESE, RightSESE}) {
+    if (auto *Pred = Entry->getSinglePredecessor())
+      VPBlockUtils::disconnectBlocks(Pred, Entry);
+    if (auto *Succ = Exiting->getSingleSuccessor())
+      VPBlockUtils::disconnectBlocks(Exiting, Succ);
+  }
+  for (auto [Entry, Exiting] : {LeftSESE, RightSESE})
+    if (Exiting == BranchBB) {
+      VPBlockUtils::connectBlocks(BranchBB, JoinBB);
+    } else {
+      VPBlockUtils::connectBlocks(BranchBB, Entry);
+      VPBlockUtils::connectBlocks(Exiting, JoinBB);
+    }
+
+  // The mask of the join block is that of the block with the branch.
+  RecipeBuilder.setBlockInMask(
+      HCFGBuilder.getIRBBForVPB(JoinBB),
+      RecipeBuilder.getBlockInMask(HCFGBuilder.getIRBBForVPB(BranchBB)));
+
+  // Make sure the phi nodes in JoinBB are not replaced by blends.
+  for (auto &R : JoinBB->phis()) {
+    auto *Phi = cast<VPWidenPHIRecipe>(&R);
+    auto *IRPhi = cast<PHINode>(Phi->getUnderlyingValue());
+    RecipeBuilder.setRecipe(IRPhi, Phi);
+    Phi->setOperand(
+        0, RecipeBuilder.getVPValueOrAddLiveIn(IRPhi->getIncomingValueForBlock(
+               HCFGBuilder.getIRBBForVPB(LeftSESE.second))));
+    Phi->setOperand(
+        1, RecipeBuilder.getVPValueOrAddLiveIn(IRPhi->getIncomingValueForBlock(
+               HCFGBuilder.getIRBBForVPB(RightSESE.second))));
+  }
+}
+
 VPlanPtr
 LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
 
@@ -9580,6 +9675,18 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
 
   auto *MiddleVPBB = Plan->getMiddleBlock();
 
+  // A map of the block where the sub-regions on the left and right side
+  // of a perservable uniform branch join back together.
+  DenseMap<VPBlockBase *,
+           std::tuple<VPBasicBlock *, std::pair<VPBlockBase *, VPBlockBase *>,
+                      std::pair<VPBlockBase *, VPBlockBase *>>>
+      PreservableUniformBranches;
+
+  // Purposefully not updated during construction:
+  VPDominatorTree VPDT;
+  if (ExperimentalTryToKeepUnifromBranches)
+    VPDT.recalculate(*Plan);
+
   // Scan the body of the loop in a topological order to visit each basic block
   // after having visited its predecessor basic blocks.
   ReversePostOrderTraversal<VPBlockDeepTraversalWrapper<VPBlockBase *>> RPOT(
@@ -9605,6 +9712,15 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
     }
 
     VPBasicBlock *VPBB = cast<VPBasicBlock>(VPBlock);
+
+    // Handle a block where a preservable uniform branch joins back together.
+    if (auto Iter = PreservableUniformBranches.find(VPBB);
+        Iter != PreservableUniformBranches.end()) {
+      auto [BranchBB, LeftSESE, RightSESE] = Iter->second;
+      reconnectVPlanCFGForPreservedBranch(BranchBB, LeftSESE, RightSESE, VPBB,
+                                          RecipeBuilder, HCFGBuilder);
+      PrevVPBB = nullptr;
+    }
 
     // Handle VPBBs down to the latch.
     if (VPBB == LoopRegion->getExiting()) {
@@ -9649,6 +9765,31 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
       // not use VPWidenPHIRecipe to model the phis.
       assert((isa<VPWidenPHIRecipe>(&R) || isa<VPInstruction>(&R)) &&
              UnderlyingValue && "unsupported recipe");
+
+      // Check if the branch can be kept, and if so, remember it for so that the
+      // CFG can be reconnected later and set the successor masks.
+      if (auto *Br = dyn_cast<VPInstruction>(&R);
+          Br && Br->getOpcode() == VPInstruction::BranchOnCond &&
+          ExperimentalTryToKeepUnifromBranches &&
+          Legal->isInvariant(Br->getUnderlyingInstr()->getOperand(0))) {
+        if (auto JoinInfo =
+                canKeepBranchDuringIfConversion(VPDT, VPBB, HCFGBuilder)) {
+          auto *IRBr = cast<BranchInst>(UnderlyingValue);
+          Br->setOperand(
+              0, RecipeBuilder.getVPValueOrAddLiveIn(IRBr->getCondition()));
+          VPValue *Mask = RecipeBuilder.getBlockInMask(IRBr->getParent());
+          RecipeBuilder.setBlockInMask(IRBr->getSuccessor(0), Mask);
+          RecipeBuilder.setBlockInMask(IRBr->getSuccessor(1), Mask);
+          auto [JoinBB, LHSExiting, RHSExiting] = JoinInfo.value();
+          PreservableUniformBranches[JoinBB] = {
+              VPBB,
+              {VPBB->getSuccessors()[0], LHSExiting},
+              {VPBB->getSuccessors()[1], RHSExiting}};
+          LLVM_DEBUG(dbgs() << "LV: Preserving uniform branch: "; Br->dump();
+                     dbgs() << ", joins at: " << JoinBB->getName() << "\n");
+          break;
+        }
+      }
 
       if (isa<VPInstruction>(&R) &&
           (cast<VPInstruction>(&R)->getOpcode() ==
