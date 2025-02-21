@@ -177,6 +177,8 @@ const char LLVMLoopVectorizeFollowupEpilogue[] =
 STATISTIC(LoopsVectorized, "Number of loops vectorized");
 STATISTIC(LoopsAnalyzed, "Number of loops analyzed for vectorization");
 STATISTIC(LoopsEpilogueVectorized, "Number of epilogues vectorized");
+STATISTIC(LoopsOuterLoopVectorized,
+          "Number of loops vectorized with inner loops");
 
 static cl::opt<bool> EnableEpilogueVectorization(
     "enable-epilogue-vectorization", cl::init(true), cl::Hidden,
@@ -407,6 +409,11 @@ static cl::opt<bool> ExperimentalOLVInClassicPath(
     "experimental-olv-in-classic-vect", cl::init(false), cl::Hidden,
     cl::desc("Enable experimental outer-loop vectorization outside the "
              "VPlan-native path."));
+
+static cl::opt<bool> ExperimentalOLVStressTest(
+    "experimental-olv-stress-test", cl::init(false), cl::Hidden,
+    cl::desc("Stress-test the experimental outer-loop vectorization outside "
+             "the VPlan-native path."));
 
 // Likelyhood of bypassing the vectorized loop because assumptions about SCEV
 // variables not overflowing do not hold. See `emitSCEVChecks`.
@@ -2212,30 +2219,30 @@ static bool isExplicitVecOuterLoop(Loop *OuterLp,
   return true;
 }
 
+// In case outer-loop vect. is enabled, inner loops of a candidate outer loop
+// are only added to the worklist when vectorization of the outer one failed.
 static void collectSupportedLoops(Loop &L, LoopInfo *LI,
                                   OptimizationRemarkEmitter *ORE,
-                                  SmallVectorImpl<Loop *> &V) {
-  // Collect inner loops and outer loops without irreducible control flow. For
-  // now, only collect outer loops that have explicit vectorization hints. If we
-  // are stress testing the VPlan H-CFG construction, we collect the outermost
-  // loop of every loop nest.
-  if (L.isInnermost() || VPlanBuildStressTest ||
+                                  SmallVectorImpl<Loop *> &V,
+                                  bool CFGKnownToBeReducible = false) {
+  if (L.isInnermost() || VPlanBuildStressTest || ExperimentalOLVStressTest ||
       ((EnableVPlanNativePath || ExperimentalOLVInClassicPath) &&
        isExplicitVecOuterLoop(&L, ORE))) {
-    LoopBlocksRPO RPOT(&L);
-    RPOT.perform(LI);
-    if (!containsIrreducibleCFG<const BasicBlock *>(RPOT, *LI)) {
+    if (!CFGKnownToBeReducible) {
+      LoopBlocksRPO RPOT(&L);
+      RPOT.perform(LI);
+      if (!containsIrreducibleCFG<const BasicBlock *>(RPOT, *LI)) {
+        V.push_back(&L);
+        return;
+      }
+    } else {
       V.push_back(&L);
-      // TODO: Collect inner loops inside marked outer loops in case
-      // vectorization fails for the outer loop. Do not invoke
-      // 'containsIrreducibleCFG' again for inner loops when the outer loop is
-      // already known to be reducible. We can use an inherited attribute for
-      // that.
       return;
     }
   }
+
   for (Loop *InnerL : L)
-    collectSupportedLoops(*InnerL, LI, ORE, V);
+    collectSupportedLoops(*InnerL, LI, ORE, V, CFGKnownToBeReducible);
 }
 
 //===----------------------------------------------------------------------===//
@@ -7574,7 +7581,9 @@ VectorizationFactor LoopVectorizationPlanner::computeBestVF() {
   VectorizationFactor ScalarFactor(ScalarVF, ScalarCost, ScalarCost);
   VectorizationFactor BestFactor = ScalarFactor;
 
-  bool ForceVectorization = Hints.getForce() == LoopVectorizeHints::FK_Enabled;
+  bool ForceVectorization =
+      Hints.getForce() == LoopVectorizeHints::FK_Enabled ||
+      ExperimentalOLVStressTest;
   if (ForceVectorization) {
     // Ignore scalar width, because the user explicitly wants vectorization.
     // Initialize cost to max so that VF = 2 is, at least, chosen during cost
@@ -7899,6 +7908,9 @@ DenseMap<const SCEV *, Value *> LoopVectorizationPlanner::executePlan(
       setBranchWeights(*MiddleTerm, Weights, /*IsExpected=*/false);
     }
   }
+
+  if (!VectorizingEpilogue && !OrigLoop->isInnermost())
+    LoopsOuterLoopVectorized += 1;
 
   return State.ExpandedSCEVs;
 }
@@ -10892,7 +10904,8 @@ bool LoopVectorizePass::processLoop(Loop *L) {
 
     // Check if it is profitable to vectorize with runtime checks.
     bool ForceVectorization =
-        Hints.getForce() == LoopVectorizeHints::FK_Enabled;
+        Hints.getForce() == LoopVectorizeHints::FK_Enabled ||
+        ExperimentalOLVStressTest;
     if (!ForceVectorization &&
         !areRuntimeChecksProfitable(Checks, VF, L, PSE, SEL,
                                     CM.getVScaleForTuning())) {
@@ -11151,7 +11164,21 @@ LoopVectorizeResult LoopVectorizePass::runImpl(Function &F) {
     // transform.
     Changed |= formLCSSARecursively(*L, *DT, LI, SE);
 
-    Changed |= CFGChanged |= processLoop(L);
+    bool Vectorized = processLoop(L);
+
+    // In case vectorization of a outer loop failed, add subloops to the
+    // worklist, so that they are visited. When stress-testing, re-vectorize the
+    // subloops even if they are now in the tail of a already vectorized loop.
+    // TODO: Ideally, the VPlans for outer and inner loops would be available
+    // at the same time, the VPlan costs would be normalized by their loop depth
+    // level, and a cost-model driven choice between outer- and inner loop vect.
+    // could be done.
+    if (!Vectorized || ExperimentalOLVStressTest)
+      for (Loop *SubLoop : L->getSubLoops())
+        collectSupportedLoops(*SubLoop, LI, ORE, Worklist,
+                              /*CFGKnownToBeReducible*/ true);
+
+    Changed |= CFGChanged |= Vectorized;
 
     if (Changed) {
       LAIs->clear();
