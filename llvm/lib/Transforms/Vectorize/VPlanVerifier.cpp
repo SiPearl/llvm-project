@@ -99,7 +99,7 @@ bool VPlanVerifier::verifyWidenPhiRecipe(const VPRegionBlock *R,
     if (const auto *R = IncVal->getDefiningRecipe();
         R && !VPDT.dominates(R->getParent(), IncBB)) {
       errs() << "Found VPWidenPHIRecipe where a incoming value does not "
-                "dominate a incoming block";
+                "dominate its use";
       return false;
     }
   }
