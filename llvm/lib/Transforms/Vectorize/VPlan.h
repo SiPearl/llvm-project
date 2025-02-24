@@ -2175,6 +2175,14 @@ public:
     return Idx == 0 ? getOperand(1) : getOperand(Idx * 2 + !isNormalized());
   }
 
+  VPValue *getIncomingValueForMask(VPValue *Mask) {
+    assert(!isNormalized());
+    for (unsigned I = 0, N = getNumIncomingValues(); I < N; ++I)
+      if (getMask(I) == Mask)
+        return getIncomingValue(I);
+    return nullptr;
+  }
+
   /// Generate the phi/select nodes.
   void execute(VPTransformState &State) override;
 

@@ -2250,3 +2250,79 @@ void VPlanTransforms::materializeLiveInBroadcasts(VPlan &Plan) {
     }
   }
 }
+
+void VPlanTransforms::introduceBOSCCBranch(VPlan &Plan, VPValue *Mask,
+                                           VPValue *ExitingEdgeMask,
+                                           VPBasicBlock *EntryVPBB,
+                                           VPBasicBlock *ExitingVPBB) {
+  // Note that PredVPBB is the predecessor in the VPlan construction order
+  // (RPO), and not necessarily the predecessor of EntryIRBB.
+  auto *PredVPBB = cast<VPBasicBlock>(EntryVPBB->getSinglePredecessor());
+  assert(PredVPBB->getNumSuccessors() == 1 &&
+         "Multiple BOSCC branches stating from same BB not supported");
+  VPBasicBlock::iterator IPos = PredVPBB->end();
+  SmallVector<VPValue *> WorkList = {Mask};
+  while (!WorkList.empty()) {
+    VPRecipeBase *R = WorkList.pop_back_val()->getDefiningRecipe();
+    if (!R || R->getParent() != EntryVPBB)
+      continue;
+
+    R->moveBefore(*PredVPBB, IPos);
+    IPos = R->getIterator();
+    for (VPValue *Op : R->operands())
+      WorkList.push_back(Op);
+  }
+
+  // Create a conditional branch that enters the region starting with
+  // EntryVPBB if any lane in the mask is active, and that jumps directly
+  // to the successor of the exiting block if not.
+  auto *Cond = new VPInstruction(VPInstruction::AnyOf, {Mask});
+  PredVPBB->appendRecipe(Cond);
+  auto *Br = new VPInstruction(VPInstruction::BranchOnCond, {Cond});
+  PredVPBB->appendRecipe(Br);
+  auto *SuccVPBB = cast<VPBasicBlock>(ExitingVPBB->getSingleSuccessor());
+  assert(SuccVPBB->getNumPredecessors() == 1 && "No dedicated join block");
+  // The exiting block of the conditionally-branched-over region is always
+  // the first predecessor and the branching block the second one. This is
+  // important for PHI creation.
+  VPBlockUtils::connectBlocks(PredVPBB, SuccVPBB);
+
+  // Now that a conditional branch has been introduced, phis will be needed
+  // in the SuccVPBB block (for any phis in the original IR, represented by
+  // VPBlendRecipes, and for masks defined inside the region but used outside).
+  // The blends can be found by finding all uses of the edge mask.
+  for (VPUser *U : ExitingEdgeMask->users())
+    if (auto *Blend = dyn_cast<VPBlendRecipe>(U)) {
+      VPValue *V = Blend->getIncomingValueForMask(ExitingEdgeMask);
+      if (!V)
+        // For the unprobable case that a mask is used as incoming value.
+        continue;
+
+      auto *IRPhi = cast<PHINode>(Blend->getUnderlyingValue());
+      auto *Phi = new VPWidenPHIRecipe(IRPhi);
+      Phi->addOperand(V);
+      auto *Poison = Plan.getOrAddLiveIn(PoisonValue::get(IRPhi->getType()));
+      Phi->addOperand(Poison);
+      Phi->insertBefore(*SuccVPBB, SuccVPBB->getFirstNonPhi());
+      for (unsigned I = 0; I < Blend->getNumOperands(); I += 2)
+        if (Blend->getOperand(I) == V)
+          Blend->setOperand(I, Phi);
+    }
+
+  // Finally, create a phi for the exiting edge mask itself, which will
+  // be all-false for the edge bypassing the BOSCC region. If the region
+  // is only a single block, the mask will be defined in the RPO predecessor
+  // already and there is no need.
+  if (auto *MaskDef = ExitingEdgeMask->getDefiningRecipe();
+      MaskDef && MaskDef->getParent() != PredVPBB) {
+    auto *Phi = new VPWidenPHIRecipe(nullptr);
+    Phi->insertBefore(*SuccVPBB, SuccVPBB->getFirstNonPhi());
+    ExitingEdgeMask->replaceAllUsesWith(Phi);
+    Phi->addOperand(ExitingEdgeMask);
+    auto &Ctx = Plan.getCanonicalIV()->getScalarType()->getContext();
+    auto *False = ConstantInt::getFalse(Ctx);
+    Phi->addOperand(Plan.getOrAddLiveIn(False));
+  }
+
+  assert(verifyVPlanIsValid(Plan));
+}

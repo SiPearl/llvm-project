@@ -176,6 +176,10 @@ struct VPlanTransforms {
 
   /// Add explicit broadcasts for live-ins used as vectors.
   static void materializeLiveInBroadcasts(VPlan &Plan);
+
+  static void introduceBOSCCBranch(VPlan &Plan, VPValue *EntryMask,
+                                   VPValue *ExitingEdgeMask,
+                                   VPBasicBlock *Entry, VPBasicBlock *Exiting);
 };
 
 } // namespace llvm

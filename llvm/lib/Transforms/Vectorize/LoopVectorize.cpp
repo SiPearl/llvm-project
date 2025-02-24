@@ -128,6 +128,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -419,6 +420,17 @@ static cl::opt<bool> ExperimentalTryToKeepUnifromBranches(
     "experimental-keep-uniform-branches", cl::init(false), cl::Hidden,
     cl::desc("Enable experimental preservation of uniform branch conditions "
              "when vectorizing."));
+
+static cl::opt<bool>
+    ExperimentalBOSCC("experimental-boscc", cl::init(false), cl::Hidden,
+                      cl::desc("Enable experimental branch-on-superword "
+                               "condition codes when vectorizing."));
+
+// The minimum probability that a mask for a subset of instruction in the loop
+// will be all-zero for the introduction of a BOSCC branch, adjusted
+// by the vectorization factor.
+static const BranchProbability BOSCCMinimumProbability =
+    BranchProbability(3, 4);
 
 // Likelyhood of bypassing the vectorized loop because assumptions about SCEV
 // variables not overflowing do not hold. See `emitSCEVChecks`.
@@ -2943,7 +2955,7 @@ LoopVectorizationCostModel::getVectorIntrinsicCost(CallInst *CI,
 void InnerLoopVectorizer::fixVectorizedLoop(VPTransformState &State) {
   // Fix widened non-induction PHIs by setting up the PHI operands.
   if (EnableVPlanNativePath || ExperimentalOLVInClassicPath ||
-      ExperimentalTryToKeepUnifromBranches)
+      ExperimentalTryToKeepUnifromBranches || ExperimentalBOSCC)
     fixNonInductionPHIs(State);
 
   // After vectorization, the exit blocks of the original loop will have
@@ -7644,7 +7656,7 @@ VectorizationFactor LoopVectorizationPlanner::computeBestVF() {
           BestPlan.getMiddleBlock();
   assert((BestFactor.Width == LegacyVF.Width || PlanForEarlyExitLoop ||
           ExperimentalTryToKeepUnifromBranches ||
-          ExperimentalOLVInClassicPath ||
+          ExperimentalOLVInClassicPath || ExperimentalBOSCC ||
           planContainsAdditionalSimplifications(getPlanFor(BestFactor.Width),
                                                 CostCtx, OrigLoop) ||
           planContainsAdditionalSimplifications(getPlanFor(LegacyVF.Width),
@@ -9682,9 +9694,17 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
                       std::pair<VPBlockBase *, VPBlockBase *>>>
       PreservableUniformBranches;
 
+  // A map of the block where the sub-regions on the left and right side
+  // of a non-uniform branch join back together. These are potential candiates
+  // for the BOSCC optimization.
+  DenseMap<VPBlockBase *,
+           std::tuple<VPBasicBlock *, std::pair<VPBlockBase *, VPBlockBase *>,
+                      std::pair<VPBlockBase *, VPBlockBase *>>>
+      PotentialBOSCCBranches;
+
   // Purposefully not updated during construction:
   VPDominatorTree VPDT;
-  if (ExperimentalTryToKeepUnifromBranches)
+  if (ExperimentalTryToKeepUnifromBranches || ExperimentalBOSCC)
     VPDT.recalculate(*Plan);
 
   // Scan the body of the loop in a topological order to visit each basic block
@@ -9770,17 +9790,26 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
       // CFG can be reconnected later and set the successor masks.
       if (auto *Br = dyn_cast<VPInstruction>(&R);
           Br && Br->getOpcode() == VPInstruction::BranchOnCond &&
-          ExperimentalTryToKeepUnifromBranches &&
-          Legal->isInvariant(Br->getUnderlyingInstr()->getOperand(0))) {
+          VPBB->getNumSuccessors() == 2 &&
+          (ExperimentalTryToKeepUnifromBranches || ExperimentalBOSCC)) {
         if (auto JoinInfo =
                 canKeepBranchDuringIfConversion(VPDT, VPBB, HCFGBuilder)) {
+          auto [JoinBB, LHSExiting, RHSExiting] = JoinInfo.value();
+          if (!Legal->isInvariant(Br->getUnderlyingInstr()->getOperand(0))) {
+            PotentialBOSCCBranches[JoinBB] = {
+                VPBB,
+                {VPBB->getSuccessors()[0], LHSExiting},
+                {VPBB->getSuccessors()[1], RHSExiting}};
+            R.eraseFromParent();
+            break;
+          }
+
           auto *IRBr = cast<BranchInst>(UnderlyingValue);
           Br->setOperand(
               0, RecipeBuilder.getVPValueOrAddLiveIn(IRBr->getCondition()));
           VPValue *Mask = RecipeBuilder.getBlockInMask(IRBr->getParent());
           RecipeBuilder.setBlockInMask(IRBr->getSuccessor(0), Mask);
           RecipeBuilder.setBlockInMask(IRBr->getSuccessor(1), Mask);
-          auto [JoinBB, LHSExiting, RHSExiting] = JoinInfo.value();
           PreservableUniformBranches[JoinBB] = {
               VPBB,
               {VPBB->getSuccessors()[0], LHSExiting},
@@ -9803,20 +9832,10 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
       // VPlan.
       Instruction *Instr = cast<Instruction>(UnderlyingValue);
       Builder.setInsertPoint(SingleDef);
-      SmallVector<VPValue *, 4> Operands;
       auto *Phi = dyn_cast<PHINode>(Instr);
       if (Phi && RecipeBuilder.hasRecipe(Phi))
         // Skip over LCSSA or inner-loop header phis.
         continue;
-
-      if (Phi && Phi->getParent() == HeaderBB) {
-        // The backedge value will be added in fixHeaderPhis later.
-        Operands.push_back(Plan->getOrAddLiveIn(
-            Phi->getIncomingValueForBlock(OrigLoop->getLoopPreheader())));
-      } else {
-        auto OpRange = RecipeBuilder.mapToVPValues(Instr->operands());
-        Operands = {OpRange.begin(), OpRange.end()};
-      }
 
       // The stores with invariant address inside the loop will be deleted, and
       // in the exit block, a uniform store recipe will be created for the final
@@ -9834,6 +9853,7 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
         continue;
       }
 
+      SmallVector<VPValue *, 4> Operands(R.operands());
       VPRecipeBase *Recipe =
           RecipeBuilder.tryToCreateWidenRecipe(Instr, Operands, Range);
       if (!Recipe)
@@ -9925,6 +9945,55 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
   VPlanTransforms::runPass(VPlanTransforms::createInterleaveGroups, *Plan,
                            InterleaveGroups, RecipeBuilder,
                            CM.isScalarEpilogueAllowed());
+
+  // Introduce BOSCC branches if enabled and estimated to be profitable.
+  // TODO: Add cost-model based on the cost of the instructions in the
+  // jumped-over region.
+  if (ExperimentalBOSCC && BFI && Range.Start != ElementCount::getFixed(1)) {
+    unsigned EstVFxUF =
+        getEstimatedRuntimeVF(Range.End, CM.getVScaleForTuning());
+    uint64_t HeaderFreq =
+        BFI->getBlockFreq(OrigLoop->getHeader()).getFrequency();
+    for (auto [JoinBB, PBI] : PotentialBOSCCBranches) {
+      auto [BranchBB, LHS, RHS] = PBI;
+      for (auto [Entry, Exiting] : {LHS, RHS}) {
+        // Don't create BOSCC branches for bypasses.
+        if (Exiting == BranchBB)
+          continue;
+
+        BasicBlock *IREntry = HCFGBuilder.getIRBBForVPB(Entry);
+        uint64_t EntryFreq = BFI->getBlockFreq(IREntry).getFrequency();
+        if (EntryFreq >= HeaderFreq)
+          continue;
+
+        auto BranchProp =
+            BranchProbability::getBranchProbability(EntryFreq, HeaderFreq);
+        auto Prop = BranchProbability::getOne() - BranchProp;
+        // Raise Prop to the power of EstVFxUF to get the probability for a
+        // all-zero mask (in which case the BOSCC branch is taken).
+        BranchProbability AllZeroProp = BranchProbability::getOne();
+        for (unsigned I = 0; I < EstVFxUF; ++I)
+          AllZeroProp *= Prop;
+
+        LLVM_DEBUG(dbgs() << "LV: BOSCC candidate: Edge %"
+                          << BranchBB->getName() << " -> %" << Entry->getName()
+                          << " has all-zero mask prob.: " << AllZeroProp
+                          << "\n");
+        if (!BranchProp.isZero() && !BranchProp.isUnknown() &&
+            AllZeroProp >= BOSCCMinimumProbability) {
+          VPValue *EntryMask = RecipeBuilder.getBlockInMask(IREntry);
+          VPValue *ExitingMask =
+              RecipeBuilder.getEdgeMask(HCFGBuilder.getIRBBForVPB(Exiting),
+                                        HCFGBuilder.getIRBBForVPB(JoinBB));
+
+          VPlanTransforms::introduceBOSCCBranch(
+              *Plan, EntryMask, ExitingMask, Entry->getEntryBasicBlock(),
+              Exiting->getExitingBasicBlock());
+          break;
+        }
+      }
+    }
+  }
 
   for (ElementCount VF : Range)
     Plan->addVF(VF);
@@ -10473,7 +10542,7 @@ static bool processLoopInVPlanNativePath(
   // TODO: CM is not used at this point inside the planner. Turn CM into an
   // optional argument if we don't need it in the future.
   LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, LVL, CM, IAI, PSE, Hints,
-                               ORE);
+                               ORE, BFI);
 
   // Get user vectorization factor.
   ElementCount UserVF = Hints.getWidth();
@@ -11015,7 +11084,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
                                 F, &Hints, IAI);
   // Use the planner for vectorization.
   LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, &LVL, CM, IAI, PSE, Hints,
-                               ORE);
+                               ORE, BFI);
 
   // Get user vectorization factor and interleave count.
   ElementCount UserVF = Hints.getWidth();
@@ -11354,7 +11423,7 @@ PreservedAnalyses LoopVectorizePass::run(Function &F,
   auto &MAMProxy = AM.getResult<ModuleAnalysisManagerFunctionProxy>(F);
   PSI = MAMProxy.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
   BFI = nullptr;
-  if (PSI && PSI->hasProfileSummary())
+  if ((PSI && PSI->hasProfileSummary()) || ExperimentalBOSCC)
     BFI = &AM.getResult<BlockFrequencyAnalysis>(F);
   LoopVectorizeResult Result = runImpl(F);
   if (!Result.MadeAnyChange)
