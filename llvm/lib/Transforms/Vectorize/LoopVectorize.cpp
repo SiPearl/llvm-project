@@ -432,6 +432,9 @@ static cl::opt<bool>
 static const BranchProbability BOSCCMinimumProbability =
     BranchProbability(3, 4);
 
+// The minimum cost of a a region a BOSCC branch would jump over.
+static const InstructionCost BOSCCMinimumCost = 3;
+
 // Likelyhood of bypassing the vectorized loop because assumptions about SCEV
 // variables not overflowing do not hold. See `emitSCEVChecks`.
 static constexpr uint32_t SCEVCheckBypassWeights[] = {1, 127};
@@ -9591,6 +9594,31 @@ static void reconnectVPlanCFGForPreservedBranch(
   }
 }
 
+static InstructionCost estimateSESERegionCost(const VPBlockBase *Entry,
+                                              const VPBlockBase *Exit,
+                                              VPCostContext &CostCtx,
+                                              ElementCount CostVF) {
+  InstructionCost Cost = 0;
+  SmallSetVector<const VPBlockBase *, 4> Worklist;
+  Worklist.insert(Entry);
+  for (unsigned I = 0; I < Worklist.size(); ++I) {
+    const VPBlockBase *Block = Worklist[I];
+    if (auto *Region = dyn_cast<VPRegionBlock>(Block)) {
+      Worklist.insert(Region->getEntry());
+      continue;
+    }
+    const auto *BB = cast<VPBasicBlock>(Block);
+    for (const auto &R : *BB)
+      Cost += R.cost(CostVF, CostCtx);
+
+    if (BB != Exit)
+      for (const auto *Succ : BB->getSuccessors())
+        Worklist.insert(Succ);
+  }
+
+  return Cost;
+}
+
 VPlanPtr
 LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
 
@@ -9975,10 +10003,14 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
         for (unsigned I = 0; I < EstVFxUF; ++I)
           AllZeroProp *= Prop;
 
+        VPCostContext CostCtx(TTI, *TLI, Plan->getCanonicalIV()->getScalarType(),
+                              CM, TargetTransformInfo::TCK_RecipThroughput);
+        InstructionCost Cost = estimateSESERegionCost(
+            Entry, Exiting, CostCtx, Range.End.divideCoefficientBy(2));
         LLVM_DEBUG(dbgs() << "LV: BOSCC candidate: Edge %"
                           << BranchBB->getName() << " -> %" << Entry->getName()
                           << " has all-zero mask prob.: " << AllZeroProp
-                          << "\n");
+                          << ", SESE cost: " << Cost << "\n");
         if (!BranchProp.isZero() && !BranchProp.isUnknown() &&
             AllZeroProp >= BOSCCMinimumProbability) {
           VPValue *EntryMask = RecipeBuilder.getBlockInMask(IREntry);

@@ -27,6 +27,7 @@
 #include "llvm/Analysis/IVDescriptors.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PatternMatch.h"
 
@@ -2325,4 +2326,330 @@ void VPlanTransforms::introduceBOSCCBranch(VPlan &Plan, VPValue *Mask,
   }
 
   assert(verifyVPlanIsValid(Plan));
+}
+
+// Given a loop with multiple exits (\p Exiting), change the CFG so that
+// there is a single exiting block, and return that block.
+static VPBasicBlock *createSingleExitLoop(VPlan &Plan, VPDominatorTree &DT,
+                                          VPBasicBlock *Header,
+                                          DenseSet<VPBlockBase *> Blocks,
+                                          ArrayRef<VPBlockBase *> Exiting,
+                                          VPBasicBlock *OrigLatch,
+                                          VPBlockBase *Exit) {
+  assert(is_contained(Exiting, OrigLatch));
+  SmallVector<VPBlockBase *> OrigExitPredecessors(Exit->predecessors());
+
+  // Create a new latch and make all early exits a branch into that new latch.
+  // Also create a PHI that will be used as the new exit condition.
+  auto &Ctx = Plan.getCanonicalIV()->getScalarType()->getContext();
+  VPBasicBlock *NewLatch = Plan.createVPBasicBlock(OrigLatch->getName());
+  auto *NewExitCond = new VPWidenPHIRecipe(nullptr);
+  SmallVector<cfg::Update<VPBlockBase *>> DTUs;
+  for (VPBlockBase *BB : Exiting) {
+    auto *Term = cast<VPInstruction>(cast<VPBasicBlock>(BB)->getTerminator());
+    if (Term->getOpcode() != VPInstruction::BranchOnCond)
+      return nullptr;
+
+    VPValue *PhiIncVal = Plan.getOrAddLiveIn(
+        ConstantInt::getBool(Ctx, BB->getSuccessors()[0] == Exit));
+    VPBlockUtils::replaceSuccessor(Exit, NewLatch, BB);
+    NewExitCond->addOperand(PhiIncVal);
+    DTUs.append({{VPDominatorTree::Insert, BB, NewLatch},
+                 {VPDominatorTree::Delete, BB, Exit}});
+  }
+  VPBlockUtils::connectBlocks(NewLatch, Exit);
+  VPBlockUtils::replacePredecessor(OrigLatch, NewLatch, Header);
+  DTUs.append({{VPDominatorTree::Insert, NewLatch, Exit},
+               {VPDominatorTree::Insert, NewLatch, Header},
+               {VPDominatorTree::Delete, OrigLatch, Header}});
+  DT.applyUpdates(DTUs);
+  assert(DT.verify(VPDominatorTree::VerificationLevel::Fast));
+  NewLatch->appendRecipe(NewExitCond);
+  NewLatch->appendRecipe(
+      new VPInstruction(VPInstruction::BranchOnCond, {NewExitCond}));
+
+  // Repair the loop-header phi's incoming values: If defined "after" a early
+  // exit, they might not dominate the latch anymore, so a second phi needs
+  // to be created in the new latch.
+  for (VPRecipeBase &R : Header->phis()) {
+    auto *Phi = cast<VPWidenPHIRecipe>(&R);
+    unsigned PhiBackedgeIdx = Phi->getIncomingBlock(0) != NewLatch;
+    auto *BackedgeDef =
+        Phi->getIncomingValue(PhiBackedgeIdx)->getDefiningRecipe();
+    if (!BackedgeDef || DT.dominates(BackedgeDef->getParent(), NewLatch))
+      continue;
+
+    auto *IRPhi = cast<PHINode>(Phi->getUnderlyingValue());
+    auto *NewPhi = new VPWidenPHIRecipe(IRPhi);
+    NewPhi->insertBefore(*NewLatch, NewLatch->getFirstNonPhi());
+    Phi->setOperand(PhiBackedgeIdx, NewPhi);
+    VPValue *Poison = Plan.getOrAddLiveIn(PoisonValue::get(IRPhi->getType()));
+    for (VPBlockBase *Pred : NewLatch->predecessors())
+      if (Pred == OrigLatch)
+        NewPhi->addOperand(BackedgeDef->getVPSingleValue());
+      else
+        NewPhi->addOperand(Poison);
+  }
+
+  // Repair the LCSSA phis in the exit block.
+  for (VPRecipeBase &R : cast<VPBasicBlock>(Exit)->phis()) {
+    auto *OrigPhi = cast<VPWidenPHIRecipe>(&R);
+    assert(OrigPhi->getNumOperands() == OrigExitPredecessors.size() &&
+           Exit->getNumPredecessors() == 1);
+
+    // Create a new phi in the new latch that will forward the values
+    // that previously exited the loop.
+    auto *IRPhi = cast<PHINode>(OrigPhi->getUnderlyingValue());
+    auto *NewLatchPhi = new VPWidenPHIRecipe(IRPhi);
+    NewLatchPhi->insertBefore(*NewLatch, NewLatch->getFirstNonPhi());
+    for (VPBlockBase *Pred : NewLatch->predecessors()) {
+      auto Idx = std::distance(OrigExitPredecessors.begin(),
+                               find(OrigExitPredecessors, Pred));
+      NewLatchPhi->addOperand(OrigPhi->getOperand(Idx));
+    }
+
+    // Replace the old LCSSA phi by a new one.
+    auto *NewLCSSAPhi = new VPWidenPHIRecipe(IRPhi);
+    NewLCSSAPhi->addOperand(NewLatchPhi);
+    OrigPhi->replaceAllUsesWith(NewLCSSAPhi);
+    OrigPhi->eraseFromParent();
+  }
+
+  return NewLatch;
+}
+
+// Given a VPlan that potentially contains inner loops (inside the assumed to
+// already exist main vector region), create VPRegionBlocks for these loops.
+static bool detectInnerLoopsAndAddRegions(VPlan &Plan) {
+  auto *VectorLoopRegion = Plan.getVectorLoopRegion();
+  assert(VectorLoopRegion && "Outer-most loop region should already exist");
+
+  VPDominatorTree DT;
+  DT.recalculate(Plan);
+
+  // A map of a loop header to a list of latches.
+  DenseMap<VPBasicBlock *, SmallVector<VPBasicBlock *>> Latches;
+  for (VPBasicBlock *BB : VPBlockUtils::blocksOnly<VPBasicBlock>(
+           vp_depth_first_deep(Plan.getEntry())))
+    // Look for edges from a block to one that dominates that block.
+    for (VPBasicBlock *Succ :
+         VPBlockUtils::blocksOnly<VPBasicBlock>(BB->successors()))
+      if (DT.dominates(Succ, BB))
+        Latches[Succ].push_back(BB);
+
+  // Visit all detected loop headers and create regions for those.
+  for (auto &[Header, Latches] : Latches) {
+    DenseSet<VPBlockBase *> Blocks;
+    SmallSetVector<VPBlockBase *, 1> ExitingBlocks;
+    SmallSetVector<VPBlockBase *, 1> ExitBlocks;
+    Blocks.insert(Header);
+
+    // Build the set of blocks in the loop by going up from the latches and
+    // adding all blocks dominated by the header. If a block found like this
+    // is not dominated by the header, it's predecessor is exiting.
+    SmallVector<VPBlockBase *> Worklist(Latches.begin(), Latches.end());
+    while (!Worklist.empty()) {
+      auto *BB = Worklist.pop_back_val();
+      if (!Blocks.insert(BB).second)
+        continue;
+
+      assert(DT.dominates(Header, BB));
+      for (VPBlockBase *Succ : BB->successors())
+        if (!DT.dominates(Header, Succ)) {
+          ExitBlocks.insert(Succ);
+          ExitingBlocks.insert(BB);
+        }
+
+      for (VPBlockBase *Pred : BB->predecessors())
+        Worklist.push_back(Pred);
+    }
+
+    if (Latches.size() != 1 || Header->getNumPredecessors() != 2 ||
+        ExitBlocks.size() != 1 || !is_contained(ExitingBlocks, Latches[0]) ||
+        ExitBlocks[0]->getNumPredecessors() != ExitingBlocks.size())
+      return false; // Expected inner loops exiting through a latch with
+                    // a single latch and a single (dedicated) exit block.
+
+    VPBasicBlock *Latch = Latches[0];
+    VPBlockBase *Exit = ExitBlocks[0];
+    if (ExitingBlocks.size() > 1) {
+      Latch = createSingleExitLoop(Plan, DT, Header, Blocks,
+                                   ExitingBlocks.getArrayRef(), Latch, Exit);
+      if (!Latch)
+        return false; // The transformation to a single exit did not work.
+    }
+
+    // Create the region and insert it into the VPlan.
+    bool ExitIfTrue = Header == Latch->getSuccessors()[1];
+    VPBlockBase::VPBlocksTy::iterator Preheader =
+        find_if(Header->predecessors(),
+                [&](VPBlockBase *Pred) { return !Blocks.contains(Pred); });
+    assert(Preheader != Header->predecessors().end());
+    bool PreheaderIsFirstPred = *Preheader == Header->getPredecessors()[0];
+    VPRegionBlock *Region =
+        Plan.createVPRegionBlock(Header->getName(), /*IsReplicator*/ false);
+    Region->setParent(Header->getParent());
+    VPBlockUtils::disconnectBlocks(*Preheader, Header);
+    VPBlockUtils::connectBlocks(*Preheader, Region);
+    VPBlockUtils::disconnectBlocks(Latch, Header);
+    VPBlockUtils::disconnectBlocks(Latch, Exit);
+    VPBlockUtils::connectBlocks(Region, Exit);
+    Region->setEntry(Header);
+    Region->setExiting(Latch);
+    for (VPBlockBase *B : Blocks)
+      B->setParent(Region);
+
+    // Ensure that the inner region is always exited when the condition is true.
+    if (!ExitIfTrue) {
+      auto *Br = cast<VPInstruction>(&Latch->back());
+      assert(Br->getOpcode() == VPInstruction::BranchOnCond);
+      auto *Not = new VPInstruction(VPInstruction::Not, {Br->getOperand(0)},
+                                    Br->getDebugLoc());
+      Not->insertBefore(Br);
+      Br->setOperand(0, Not);
+    }
+
+    // Make sure loop-header phis have the preheader as first operand and the
+    // backedge value as second operand.
+    if (!PreheaderIsFirstPred)
+      for (VPRecipeBase &Phi : Header->phis()) {
+        assert(isa<VPWidenPHIRecipe>(&Phi));
+        VPValue *Op0 = Phi.getOperand(0);
+        Phi.setOperand(0, Phi.getOperand(1));
+        Phi.setOperand(1, Op0);
+      }
+
+    // Update the dominator tree.
+    DT.applyUpdates({{VPDominatorTree::Insert, *Preheader, Region},
+                     {VPDominatorTree::Insert, Region, Header},
+                     {VPDominatorTree::Insert, Region, Exit},
+                     {VPDominatorTree::Delete, *Preheader, Header},
+                     {VPDominatorTree::Delete, Latch, Header},
+                     {VPDominatorTree::Delete, Latch, Exit}});
+  }
+
+  assert(DT.verify(VPDominatorTree::VerificationLevel::Fast));
+  return true;
+}
+
+// Given a block \p BB and two of its predecessors, make sure that there exists
+// a block with only those two predecessors and no other ones. If such a block
+// needs to be created return it (instead of BB) and connect it to the original
+// common successor. This can unlock BOSCC branches or preservation of uniform
+// branches.
+static VPBasicBlock *createDedicatedJoinBlock(
+    VPlan &Plan, VPDominatorTree &DT, VPBasicBlock *BB,
+    VPBasicBlock *LHSPred, VPBasicBlock *RHSPred) {
+  assert(BB->getNumPredecessors() >= 2 && LHSPred != RHSPred &&
+         is_contained(BB->predecessors(), LHSPred) &&
+         is_contained(BB->predecessors(), RHSPred) &&
+         "Different inputs expected");
+  if (BB->getNumPredecessors() == 2)
+    return BB;
+
+  auto *NewBB = Plan.createVPBasicBlock(
+      Twine(LHSPred->getName()) + ".joins." + RHSPred->getName());
+
+  // Modify the CFG and update the dominator tree.
+  SmallVector<VPBlockBase *> OrigBBPreds(BB->predecessors());
+  VPBlockUtils::replaceSuccessor(BB, NewBB, LHSPred);
+  VPBlockUtils::replaceSuccessor(BB, NewBB, RHSPred);
+  VPBlockUtils::connectBlocks(NewBB, BB);
+  DT.applyUpdates({{VPDominatorTree::Insert, LHSPred, NewBB},
+                   {VPDominatorTree::Insert, RHSPred, NewBB},
+                   {VPDominatorTree::Insert, NewBB, BB},
+                   {VPDominatorTree::Delete, LHSPred, BB},
+                   {VPDominatorTree::Delete, RHSPred, BB}});
+
+  // Fix phi nodes by creating new ones in NewBB and using
+  // those as operands in BB instead of the values from LHSPred/RHSPred.
+  for (VPRecipeBase &R : make_early_inc_range(BB->phis())) {
+    auto *OrigPhi = cast<VPWidenPHIRecipe>(&R);
+    auto *IRPhi = cast<PHINode>(OrigPhi->getUnderlyingValue());
+
+    // Create the phi node for NewBB.
+    auto *NewBBPhi = new VPWidenPHIRecipe(IRPhi);
+    auto LHSIdx = std::distance(OrigBBPreds.begin(), find(OrigBBPreds, LHSPred));
+    NewBBPhi->addOperand(OrigPhi->getOperand(LHSIdx));
+    auto RHSIdx = std::distance(OrigBBPreds.begin(), find(OrigBBPreds, RHSPred));
+    NewBBPhi->addOperand(OrigPhi->getOperand(RHSIdx));
+    NewBB->appendRecipe(NewBBPhi);
+
+    // Create a new phi node replacing OrigPhi.
+    auto *NewPhi = new VPWidenPHIRecipe(IRPhi);
+    NewPhi->insertAfter(OrigPhi);
+    for (VPBlockBase *Pred : BB->predecessors())
+      if (Pred == NewBB) {
+        NewPhi->addOperand(NewBBPhi);
+      } else {
+        auto Idx = std::distance(OrigBBPreds.begin(), find(OrigBBPreds, Pred));
+        NewPhi->addOperand(OrigPhi->getOperand(Idx));
+      }
+    OrigPhi->replaceAllUsesWith(NewPhi);
+    OrigPhi->eraseFromParent();
+  }
+
+  return NewBB;
+}
+
+static std::optional<std::tuple<VPBlockBase *, VPBlockBase *, VPBlockBase *>>
+canKeepBranchDuringIfConversion(const VPDominatorTree &DT, VPBasicBlock *VPBB) {
+  const VPRegionBlock *Region = VPBB->getParent();
+  auto FindSubregionExit =
+      [&](VPBasicBlock *Pred,
+          VPBlockBase *Entry) -> std::pair<VPBlockBase *, VPBlockBase *> {
+    // The branch preservation is restricted to cases where
+    // the SESEs are completely empty or have a dedicated entry and exit.
+    // Because of the way the VPlan is flattened, the entry could already
+    // have gotten predecessors removed, so check based on the IR.
+    if (Entry->getNumPredecessors() >= 2)
+      return {Pred, Entry};
+
+    // Build the biggest possible SESE with the entry Entry.
+    // As the DT is not updated during flattening, even if other edges
+    // entering the SESE would have already been removed, the fact
+    // that there used to be one will be detected.
+    VPBlockBase *Exiting = nullptr;
+    SmallSetVector<VPBlockBase *, 4> Worklist;
+    Worklist.insert(Entry);
+    for (unsigned I = 0; I < Worklist.size(); I++) {
+      auto *BB = Worklist[I];
+      assert(BB->getParent() == Region);
+      for (auto *Succ : BB->getSuccessors()) {
+        if (DT.dominates(Entry, Succ))
+          Worklist.insert(Succ);
+        else if (Exiting || BB->getNumSuccessors() != 1)
+          return {nullptr, nullptr};
+        else
+          Exiting = BB;
+      }
+    }
+
+    return {Exiting, Exiting->getSingleSuccessor()};
+  };
+
+  auto [LHSExiting, LHSSucc] =
+      FindSubregionExit(VPBB, VPBB->getSuccessors()[0]);
+  auto [RHSExiting, RHSSucc] =
+      FindSubregionExit(VPBB, VPBB->getSuccessors()[1]);
+  if (!LHSExiting || !RHSExiting || LHSSucc != RHSSucc)
+    return std::nullopt;
+
+  return std::tuple(LHSSucc, LHSExiting, RHSExiting);
+}
+
+std::optional<DenseMap<VPRecipeBase *, VPValue*>>
+VPlanTransforms::linarizeAndCollectMasks(
+    VPlan &Plan, VPValue *HeaderMask,
+    const std::function<bool(Value *)> &IsUniform,
+    const std::function<VPRecipeBase *(VPRecipeBase *R, VPValue *Mask)> &HandleRecipe) {
+  DenseMap<VPRecipeBase *, VPValue *> Masks;
+  DenseMap<std::pair<VPBlockBase *, VPBlockBase *>, VPValue *> EdgeMasks;
+  DenseMap<VPBlockBase *, VPValue *> BlockMasks;
+  if (!detectInnerLoopsAndAddRegions(Plan))
+    return std::nullopt;
+
+  // FIXME: Do stuff!!!
+
+  return Masks;
 }

@@ -12,8 +12,11 @@
 #include "VPlanDominatorTree.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/CFGDiff.h"
+#include "llvm/Support/GenericDomTree.h"
 #include "llvm/Support/GenericDomTreeConstruction.h"
 
 using namespace llvm;
@@ -316,6 +319,16 @@ void llvm::collectEphemeralRecipesForVPlan(
 
 template void DomTreeBuilder::Calculate<DominatorTreeBase<VPBlockBase, false>>(
     DominatorTreeBase<VPBlockBase, false> &DT);
+
+template bool DomTreeBuilder::Verify<DominatorTreeBase<VPBlockBase, false>>(
+    const DominatorTreeBase<VPBlockBase, false> &DT,
+    DominatorTreeBase<VPBlockBase, false>::VerificationLevel VL);
+
+template void
+DomTreeBuilder::ApplyUpdates<DominatorTreeBase<VPBlockBase, false>>(
+    DominatorTreeBase<VPBlockBase, false> &DT,
+    GraphDiff<VPBlockBase *, false> &PreViewCFG,
+    GraphDiff<VPBlockBase *, false> *PostViewCFG);
 
 bool VPDominatorTree::properlyDominates(const VPRecipeBase *A,
                                         const VPRecipeBase *B) {

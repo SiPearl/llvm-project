@@ -243,7 +243,7 @@ void VPRecipeBase::moveBefore(VPBasicBlock &BB,
   insertBefore(BB, I);
 }
 
-InstructionCost VPRecipeBase::cost(ElementCount VF, VPCostContext &Ctx) {
+InstructionCost VPRecipeBase::cost(ElementCount VF, VPCostContext &Ctx) const {
   // Get the underlying instruction for the recipe, if there is one. It is used
   // to
   //   * decide if cost computation should be skipped for this recipe,

@@ -89,6 +89,16 @@ public:
     NewPred->appendSuccessor(Succ);
   }
 
+  // Disconnect \p Pred and \p OldSucc and connect \p Pred and \p NewSucc
+  // instead, but in a way that the successor order or \p Pred does not
+  // change.
+  static void replaceSuccessor(VPBlockBase *OldSucc, VPBlockBase *NewSucc,
+                               VPBlockBase *Pred) {
+    Pred->replaceSuccessor(OldSucc, NewSucc);
+    OldSucc->removePredecessor(Pred);
+    NewSucc->appendPredecessor(Pred);
+  }
+
   /// Insert disconnected VPBlockBase \p NewBlock after \p BlockPtr. Add \p
   /// NewBlock as successor of \p BlockPtr and \p BlockPtr as predecessor of \p
   /// NewBlock, and propagate \p BlockPtr parent to \p NewBlock. \p BlockPtr's
