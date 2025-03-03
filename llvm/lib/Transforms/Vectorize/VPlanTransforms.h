@@ -184,11 +184,10 @@ struct VPlanTransforms {
   /// Given a "raw" unvectorized VPlan and the Mask to use for the header,
   /// linearize the control flow in the VPlan and return a map of every
   /// recipe to the mask it should be predicated with (if it needs predication).
-  static std::optional<DenseMap<VPRecipeBase *, VPValue *>>
+  static std::optional<DenseMap<VPBlockBase *, VPValue *>>
   linarizeAndCollectMasks(
       VPlan &Plan, VPValue *HeaderMask,
-      const std::function<bool(Value *)> &IsUniform,
-      const std::function<VPRecipeBase *(VPRecipeBase *R, VPValue *Mask)> &HandleRecipe);
+      const std::function<bool(const BranchInst &)> &IsUniform);
 };
 
 } // namespace llvm

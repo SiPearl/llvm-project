@@ -28,8 +28,11 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
@@ -2420,12 +2423,9 @@ static VPBasicBlock *createSingleExitLoop(VPlan &Plan, VPDominatorTree &DT,
 
 // Given a VPlan that potentially contains inner loops (inside the assumed to
 // already exist main vector region), create VPRegionBlocks for these loops.
-static bool detectInnerLoopsAndAddRegions(VPlan &Plan) {
+static bool detectInnerLoopsAndAddRegions(VPlan &Plan, VPDominatorTree &DT) {
   auto *VectorLoopRegion = Plan.getVectorLoopRegion();
   assert(VectorLoopRegion && "Outer-most loop region should already exist");
-
-  VPDominatorTree DT;
-  DT.recalculate(Plan);
 
   // A map of a loop header to a list of latches.
   DenseMap<VPBasicBlock *, SmallVector<VPBasicBlock *>> Latches;
@@ -2537,9 +2537,10 @@ static bool detectInnerLoopsAndAddRegions(VPlan &Plan) {
 // needs to be created return it (instead of BB) and connect it to the original
 // common successor. This can unlock BOSCC branches or preservation of uniform
 // branches.
-static VPBasicBlock *createDedicatedJoinBlock(
-    VPlan &Plan, VPDominatorTree &DT, VPBasicBlock *BB,
-    VPBasicBlock *LHSPred, VPBasicBlock *RHSPred) {
+static VPBasicBlock *createDedicatedJoinBlock(VPlan &Plan, VPDominatorTree &DT,
+                                              VPBasicBlock *BB,
+                                              VPBlockBase *LHSPred,
+                                              VPBlockBase *RHSPred) {
   assert(BB->getNumPredecessors() >= 2 && LHSPred != RHSPred &&
          is_contained(BB->predecessors(), LHSPred) &&
          is_contained(BB->predecessors(), RHSPred) &&
@@ -2592,7 +2593,7 @@ static VPBasicBlock *createDedicatedJoinBlock(
   return NewBB;
 }
 
-static std::optional<std::tuple<VPBlockBase *, VPBlockBase *, VPBlockBase *>>
+static std::optional<std::tuple<VPBasicBlock *, VPBlockBase *, VPBlockBase *>>
 canKeepBranchDuringIfConversion(const VPDominatorTree &DT, VPBasicBlock *VPBB) {
   const VPRegionBlock *Region = VPBB->getParent();
   auto FindSubregionExit =
@@ -2632,24 +2633,250 @@ canKeepBranchDuringIfConversion(const VPDominatorTree &DT, VPBasicBlock *VPBB) {
       FindSubregionExit(VPBB, VPBB->getSuccessors()[0]);
   auto [RHSExiting, RHSSucc] =
       FindSubregionExit(VPBB, VPBB->getSuccessors()[1]);
-  if (!LHSExiting || !RHSExiting || LHSSucc != RHSSucc)
+  if (!LHSExiting || !RHSExiting || LHSSucc != RHSSucc ||
+      !isa<VPBasicBlock>(LHSSucc))
     return std::nullopt;
 
-  return std::tuple(LHSSucc, LHSExiting, RHSExiting);
+  return std::tuple(cast<VPBasicBlock>(LHSSucc), LHSExiting, RHSExiting);
 }
 
-std::optional<DenseMap<VPRecipeBase *, VPValue*>>
+std::optional<DenseMap<VPBlockBase *, VPValue *>>
 VPlanTransforms::linarizeAndCollectMasks(
     VPlan &Plan, VPValue *HeaderMask,
-    const std::function<bool(Value *)> &IsUniform,
-    const std::function<VPRecipeBase *(VPRecipeBase *R, VPValue *Mask)> &HandleRecipe) {
-  DenseMap<VPRecipeBase *, VPValue *> Masks;
-  DenseMap<std::pair<VPBlockBase *, VPBlockBase *>, VPValue *> EdgeMasks;
-  DenseMap<VPBlockBase *, VPValue *> BlockMasks;
-  if (!detectInnerLoopsAndAddRegions(Plan))
+    const std::function<bool(const BranchInst &)> &IsUniform) {
+
+  // Create VPRegionBlocks for inner loops.
+  VPDominatorTree DT;
+  DT.recalculate(Plan);
+  if (!detectInnerLoopsAndAddRegions(Plan, DT))
     return std::nullopt;
 
-  // FIXME: Do stuff!!!
+  // Find uniform branches at the head of two single-entry single-exit
+  // subregions that join at the same block so that the branch can be
+  // preserved while linearizing/if-converting all others.
+  VPRegionBlock *VectorLoopRegion = Plan.getVectorLoopRegion();
+  VPBasicBlock *Header = VectorLoopRegion->getEntryBasicBlock();
+  DenseMap<VPBasicBlock *, VPBasicBlock *> UniformBranch2Join,
+      UniformJoin2Branch;
+  ReversePostOrderTraversal<VPBlockDeepTraversalWrapper<VPBlockBase *>> RPOT(
+      Header);
+  for (VPBasicBlock *BB : VPBlockUtils::blocksOnly<VPBasicBlock>(RPOT)) {
+    // Don't visit the tail loop or even the middle block.
+    if (!BB->getParent())
+      break;
+    if (BB->getNumSuccessors() > 2)
+      return std::nullopt; // TODO: Support switch terminators.
+    if (BB->getNumSuccessors() != 2 ||
+        !IsUniform(*cast<BranchInst>(
+            cast<VPInstruction>(BB->getTerminator())->getUnderlyingValue())))
+      continue;
+    auto JoinInfo = canKeepBranchDuringIfConversion(DT, BB);
+    if (!JoinInfo)
+      continue;
 
-  return Masks;
+    auto [JoinBB, LHSExitingBB, RHSExitingBB] = JoinInfo.value();
+    if (JoinBB->getNumPredecessors() > 2)
+      JoinBB = createDedicatedJoinBlock(Plan, DT, JoinBB, LHSExitingBB,
+                                        RHSExitingBB);
+    UniformBranch2Join[BB] = JoinBB;
+    UniformJoin2Branch[JoinBB] = BB;
+  }
+
+  VPBuilder Builder;
+  DenseMap<std::pair<VPBlockBase *, VPBlockBase *>, VPValue *> EdgeMasks;
+  DenseMap<VPBlockBase *, VPValue *> BlockMasks;
+  BlockMasks[Header] = HeaderMask;
+
+  // Create a new mask based on the mask of Pred and the condition for the
+  // edge from Pred to Succ.
+  auto CreateEdgeMask = [&](VPBasicBlock *Pred,
+                            VPBasicBlock *Succ) -> VPValue * {
+    if (auto Iter = EdgeMasks.find({Pred, Succ}); Iter != EdgeMasks.end())
+      return Iter->second;
+
+    VPValue *PredMask = BlockMasks.at(Pred);
+    assert(is_contained(Succ->predecessors(), Pred));
+    if (Pred->getNumSuccessors() == 1) {
+      EdgeMasks[std::pair(Pred, Succ)] = PredMask;
+      return PredMask;
+    }
+
+    auto *Term = cast<VPInstruction>(Pred->getTerminator());
+    assert(Term->getOpcode() == VPInstruction::BranchOnCond &&
+           "Predication of switch terminators unimplemented");
+    Builder.setInsertPoint(Term);
+    VPValue *Cond = Term->getOperand(0);
+    if (Pred->getSuccessors()[1] == Succ)
+      Cond = Builder.createNot(Cond, Term->getDebugLoc());
+
+    auto *Mask = PredMask
+                     ? Builder.createAnd(PredMask, Cond, Term->getDebugLoc())
+                     : Cond;
+    EdgeMasks[std::pair(Pred, Succ)] = Mask;
+    return Mask;
+  };
+
+  // Based on the edges from predecessors to BB, create a new mask for
+  // BB itself.
+  auto CreateBlockMask = [&](VPBasicBlock *BB) -> VPValue * {
+    if (auto Iter = BlockMasks.find(BB); Iter != BlockMasks.end())
+      return Iter->second;
+
+    VPValue *Mask = nullptr;
+    VPBasicBlock::iterator IP = BB->getFirstNonPhi();
+    for (VPBlockBase *Pred : BB->predecessors()) {
+      VPValue *EdgeMask = CreateEdgeMask(Pred->getExitingBasicBlock(), BB);
+      if (!EdgeMask) {
+        BlockMasks[BB] = nullptr;
+        return nullptr;
+      }
+      if (!Mask) {
+        Mask = EdgeMask;
+        continue;
+      }
+
+      Builder.setInsertPoint(BB, IP);
+      Mask = Builder.createOr(Mask, EdgeMask);
+    }
+
+    VPValue *V = nullptr;
+    using namespace VPlanPatternMatch;
+    if (match(Mask, m_c_BinaryOr(m_Not(m_VPValue(V)), m_Specific(V))))
+      Mask = V;
+
+    BlockMasks[BB] = Mask;
+    return Mask;
+  };
+
+  // Handle inner loops, especially if they have non-uniform trip-counts.
+  auto PredicateInnerLoop = [&](VPRegionBlock &Region) {
+    // The mask for the exit block should always be that of the preheader.
+    auto *Exit = cast<VPBasicBlock>(Region.getSingleSuccessor());
+    auto *Preheader = Region.getSinglePredecessor();
+    assert(Exit->getNumPredecessors() == 1 &&
+           Preheader->getNumSuccessors() == 1 &&
+           "Expected dedicated exits and preheaders");
+    VPValue *PreheaderMask = BlockMasks.at(Preheader);
+    BlockMasks[Exit] = PreheaderMask;
+
+    // If the trip-count of the loop is uniform, then all lanes of the
+    // vectoized loop will exit the inner loop at once, and the inner
+    // loop can use the same mask as the preheader.
+    auto *Entry = Region.getEntryBasicBlock();
+    auto *Exiting = Region.getExitingBasicBlock();
+    auto *Term = cast<VPInstruction>(Exiting->getTerminator());
+    const BranchInst *IRBr = cast<BranchInst>(Term->getUnderlyingValue());
+    if (IsUniform(*IRBr)) {
+      BlockMasks[Entry] = PreheaderMask;
+      return;
+    }
+
+    // In case the trip-count is not uniform, a active-lane mask is needed that
+    // will be a PHI which starts with the preheader mask and where the backedge
+    // value is true only for lanes that were active in the previous iteration
+    // and where the exit condition did not become true.
+    LLVMContext &Ctx = IRBr->getContext();
+    if (!PreheaderMask)
+      PreheaderMask = Plan.getOrAddLiveIn(ConstantInt::getTrue(Ctx));
+    auto *ALM = new VPWidenPHIRecipe(nullptr);
+    ALM->addOperand(PreheaderMask);
+    ALM->insertBefore(*Entry, Entry->getFirstNonPhi());
+    BlockMasks[Entry] = ALM;
+    Builder.setInsertPoint(Term);
+    DebugLoc DL(Term->getDebugLoc());
+    auto *NextALM = Builder.createLogicalAnd(
+        ALM, Builder.createNot(Term->getOperand(0), DL), DL);
+    ALM->addOperand(NextALM);
+    auto *Any = Builder.createNaryOp(VPInstruction::AnyOf, {NextALM}, DL);
+    Term->setOperand(0, Builder.createNot(Any, DL));
+
+    // Handle LCSSA phis and live-out values, which require a passthrough
+    // PHI/select pair to make sure the last active value for each lane
+    // leaves the loop.
+    for (VPRecipeBase &R : Exit->phis()) {
+      auto &LCSSAPhi = *cast<VPWidenPHIRecipe>(&R);
+      assert(LCSSAPhi.getNumOperands() == 0);
+      auto *OutVal = LCSSAPhi.getOperand(0);
+      auto *Def = OutVal->getDefiningRecipe();
+      if (!Def || Def->getParent()->getParent() != &Region)
+        continue;
+
+      auto *NewPhi = new VPWidenPHIRecipe(nullptr);
+      NewPhi->addOperand(Plan.getOrAddLiveIn(
+          PoisonValue::get(LCSSAPhi.getUnderlyingValue()->getType())));
+      NewPhi->insertBefore(*Entry, Entry->getFirstNonPhi());
+      auto *Select =
+          new VPInstruction(Instruction::Select, {ALM, OutVal, NewPhi});
+      Select->insertBefore(Term);
+      NewPhi->addOperand(Select);
+
+      LCSSAPhi.setOperand(0, Select);
+    }
+  };
+
+  // Traverse the loop, predicate instructions, and linearize the control
+  // flow if the branch cannot be preserved.
+  VPBlockBase *RPOPred = nullptr;
+  for (VPBasicBlock *BB : VPBlockUtils::blocksOnly<VPBasicBlock>(RPOT)) {
+    // Don't visit the tail loop or even the middle block.
+    VPRegionBlock *Region = BB->getParent();
+    assert(!Region->isReplicator());
+    if (!Region)
+      break;
+
+    if (Region->getEntry() == BB) {
+      PredicateInnerLoop(*Region);
+      RPOPred = BB;
+      continue;
+    }
+
+    VPBasicBlock *JoinBBOfBranch = UniformJoin2Branch.lookup(BB);
+    VPValue *Mask = CreateBlockMask(BB);
+
+    // Linearize/if-convert the control flow:
+    VPBlockBase *SinglePred = BB->getSinglePredecessor();
+    bool KeepPreds =
+        JoinBBOfBranch ||
+        (SinglePred &&
+         UniformBranch2Join.contains(cast_or_null<VPBasicBlock>(SinglePred)));
+    if (!KeepPreds) {
+      for (auto *Pred : to_vector(BB->predecessors()))
+        VPBlockUtils::disconnectBlocks(Pred, BB);
+      if (RPOPred)
+        VPBlockUtils::connectBlocks(RPOPred, BB);
+    }
+
+    RPOPred = Region->getExiting() == BB ? cast<VPBlockBase>(Region) : BB;
+
+    // LCSSA phis and inner-loop header phis will be skiped because their BBs
+    // have exactly one (the region) or zero (because in region entry)
+    // predecessors.
+    bool KeepPhis = BB->getNumPredecessors() <= 1 || JoinBBOfBranch;
+    if (KeepPhis)
+      continue;
+
+    assert(Mask);
+    VPBasicBlock::iterator IP = BB->getFirstNonPhi();
+    SmallVector<VPValue *, 4> Ops;
+    Ops.reserve(BB->getNumPredecessors() * 2);
+    for (VPRecipeBase &R : BB->phis()) {
+      auto *Phi = cast<VPWidenPHIRecipe>(&R);
+      assert(Phi->getNumOperands() == BB->getNumPredecessors());
+      auto *IRPhi = cast<PHINode>(Phi->getUnderlyingValue());
+      Ops.clear();
+      for (auto [Val, Pred] : zip(Phi->operands(), BB->predecessors())) {
+        Ops.push_back(Val);
+        Ops.push_back(EdgeMasks.at({Pred, BB}));
+      }
+
+      auto *Blend = new VPBlendRecipe(IRPhi, Ops);
+      Blend->insertBefore(*BB, IP);
+      IP = ++Blend->getIterator();
+      Phi->replaceAllUsesWith(Blend);
+      Phi->eraseFromParent();
+    }
+  }
+
+  assert(DT.verify(VPDominatorTree::VerificationLevel::Fast));
+  return BlockMasks;
 }
