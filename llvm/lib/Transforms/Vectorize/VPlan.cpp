@@ -32,19 +32,26 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+#include "llvm/Support/BlockFrequency.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GraphWriter.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
 #include <cassert>
+#include <cstdint>
+#include <optional>
 #include <string>
 
 using namespace llvm;
@@ -800,6 +807,7 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
     InstructionCost Cost = 0;
     for (VPBlockBase *Block : vp_depth_first_shallow(getEntry()))
       Cost += Block->cost(VF, Ctx);
+
     InstructionCost BackedgeCost =
         ForceTargetInstructionCost.getNumOccurrences()
             ? InstructionCost(ForceTargetInstructionCost.getNumOccurrences())
@@ -807,6 +815,13 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
     LLVM_DEBUG(dbgs() << "Cost of " << BackedgeCost << " for VF " << VF
                       << ": vector loop backedge\n");
     Cost += BackedgeCost;
+    if (!Ctx.OrigLoop->isInnermost()) {
+      auto Freq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
+                      .value_or(BlockFrequency(1));
+      LLVM_DEBUG(dbgs() << "Frequency weight for " << getName() << ": "
+                        << Freq.getFrequency() << "\n");
+      Cost *= Freq.getFrequency();
+    }
     return Cost;
   }
 
@@ -1665,4 +1680,77 @@ VPCostContext::getOperandInfo(VPValue *V) const {
     return {};
 
   return TTI::getOperandInfo(V->getLiveInIRValue());
+}
+
+const BasicBlock *
+VPCostContext::tryToFindIRBasicBlock(const DominatorTree *IRDT,
+                                     const VPBasicBlock *VPBB) {
+  if (auto *IRBB = dyn_cast<VPIRBasicBlock>(VPBB))
+    return IRBB->getIRBasicBlock();
+
+  SmallSetVector<const BasicBlock *, 4> BBs;
+  for (const VPRecipeBase &R : *VPBB) {
+    if (R.isPhi() || isa<VPBlendRecipe>(&R)) {
+      const auto *UV = R.getVPSingleValue()->getUnderlyingValue();
+      if (const auto *I = dyn_cast_or_null<Instruction>(UV))
+        return I->getParent();
+    } else if (auto *WR = dyn_cast<VPWidenRecipe>(&R)) {
+      BBs.insert(WR->getUnderlyingInstr()->getParent());
+    } else if (auto *RR = dyn_cast<VPReplicateRecipe>(&R)) {
+      BBs.insert(RR->getUnderlyingInstr()->getParent());
+    } else if (auto *WM = dyn_cast<VPWidenMemoryRecipe>(&R)) {
+      BBs.insert(WM->getIngredient().getParent());
+    }
+  }
+
+  if (BBs.size() == 1)
+    return BBs[0];
+
+  if (auto *Pred = dyn_cast_or_null<VPBasicBlock>(VPBB->getSinglePredecessor()))
+    return tryToFindIRBasicBlock(IRDT, Pred);
+
+  if (BBs.size() > 1 && IRDT) {
+    const BasicBlock *CDom = BBs[0];
+    for (const auto *BB : drop_begin(BBs))
+      CDom = IRDT->findNearestCommonDominator(CDom, BB);
+    return CDom;
+  }
+
+  if (auto *Region = VPBB->getEnclosingLoopRegion();
+      Region && Region->getEntry() != VPBB)
+    return tryToFindIRBasicBlock(IRDT, Region->getEntryBasicBlock());
+
+  return nullptr;
+}
+
+static const Loop *getInnermostLoopFor(const BasicBlock *BB, const Loop *Lp) {
+  for (const auto *SubLoop : Lp->getSubLoops())
+    if (SubLoop->contains(BB))
+      return getInnermostLoopFor(BB, Lp);
+
+  assert(Lp->contains(BB));
+  return Lp;
+}
+
+std::optional<BlockFrequency>
+VPCostContext::getBlockFrequencyEstimate(const VPBasicBlock *VPBB) const {
+  assert(OrigLoop && "Cannot provide freq. estimates without this!");
+  const auto *IRBB = tryToFindIRBasicBlock(IRDT, VPBB);
+  if (!IRBB) {
+    assert(VPBB->getParent() && "Unsupported for middle loop");
+    IRBB = tryToFindIRBasicBlock(
+        IRDT, VPBB->getPlan()->getVectorLoopRegion()->getEntryBasicBlock());
+  }
+
+  if (BFI)
+    return BlockFrequency(BFI->getBlockFreq(IRBB).getFrequency() /
+                          BFI->getEntryFreq().getFrequency());
+
+  // Without BFI, just assume every loop has a avg. trip-count of around 32.
+  unsigned DepthDiff = getInnermostLoopFor(IRBB, OrigLoop)->getLoopDepth() -
+                       OrigLoop->getLoopDepth();
+  uint64_t F = 1;
+  for (unsigned I = 0; I < DepthDiff; ++I)
+    F *= 32;
+  return BlockFrequency(F);
 }

@@ -19,9 +19,11 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/InstructionCost.h"
 
 namespace llvm {
@@ -372,6 +374,10 @@ struct VPCostContext {
   SmallPtrSet<Instruction *, 8> SkipCostComputation;
   TargetTransformInfo::TargetCostKind CostKind;
 
+  const DominatorTree *IRDT = nullptr;
+  const Loop *OrigLoop = nullptr;
+  const BlockFrequencyInfo *BFI = nullptr;
+
   VPCostContext(const TargetTransformInfo &TTI, const TargetLibraryInfo &TLI,
                 Type *CanIVTy, LoopVectorizationCostModel &CM,
                 TargetTransformInfo::TargetCostKind CostKind)
@@ -388,6 +394,19 @@ struct VPCostContext {
 
   /// Returns the OperandInfo for \p V, if it is a live-in.
   TargetTransformInfo::OperandValueInfo getOperandInfo(VPValue *V) const;
+
+  /// Get a estimate of the frequency of \p BB (before vectorization),
+  /// normalized w.r.t. the main vectorized loop.
+  std::optional<BlockFrequency>
+  getBlockFrequencyEstimate(const VPBasicBlock *BB) const;
+
+  /// Return a IR basic block likely (but not guaranteed) to correspond to the
+  /// VP basic block \p VPBB.
+  static const BasicBlock *tryToFindIRBasicBlock(const DominatorTree *IRDT,
+                                                 const VPBasicBlock *VPBB);
+
+  /// FIXME: Implement me (for BOSCC, fall back to branch weights!)!
+  BranchProbability getProbabilityToEnter(const VPBasicBlock *BB);
 };
 
 /// This class can be used to assign names to VPValues. For VPValues without

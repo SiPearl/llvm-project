@@ -9406,6 +9406,7 @@ static void enterInnerLoopRegion(VPlanHCFGBuilder &HCFGBuilder,
       !isa<SCEVCouldNotCompute>(BTC) && SE.isLoopInvariant(BTC, TheLoop);
   if (NeedsActiveLaneMask) {
     auto *InnerALM = new VPWidenPHIRecipe(nullptr);
+    InnerALM->setIsActiveLaneMask(true);
     if (!PreheaderMask)
       PreheaderMask = Region.getPlan()->getOrAddLiveIn(
           ConstantInt::getTrue(SE.getContext()));
@@ -9741,6 +9742,120 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
       HeaderVPBB);
 
   VPBasicBlock::iterator MBIP = MiddleVPBB->getFirstNonPhi();
+#if 0
+  VPValue *HeaderMask = nullptr;
+  if (CM.foldTailByMasking()) {
+    Builder.setInsertPoint(HeaderVPBB, HeaderVPBB->getFirstNonPhi());
+    RecipeBuilder.createHeaderMask();
+    HeaderMask = RecipeBuilder.getBlockInMask(HeaderBB);
+  }
+
+  // Do if-conversion and calculate block masks.
+  auto BlockMasks = VPlanTransforms::linarizeAndCollectMasks(
+      *Plan, HeaderMask, [&](const BranchInst &Br) -> bool {
+        auto *Lp = LI->getLoopFor(Br.getParent());
+        if (Lp->getLoopLatch()->getTerminator() == &Br) {
+          assert(Lp != OrigLoop && OrigLoop->contains(Lp) &&
+                 ExperimentalOLVInClassicPath);
+          const auto *TC = PSE.getSE()->getBackedgeTakenCount(Lp);
+          return !isa<SCEVCouldNotCompute>(TC) &&
+                 PSE.getSE()->isLoopInvariant(TC, OrigLoop);
+        }
+
+        return ExperimentalTryToKeepUnifromBranches &&
+               Legal->isInvariant(Br.getCondition());
+      });
+
+  if (!BlockMasks) {
+    LLVM_DEBUG(dbgs() << "VPlanTransforms::linearizeAndCollectMasks failed!");
+    return nullptr;
+  }
+
+  // Replace recipes with widened variants.
+  for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(RPOT)) {
+    if (!VPBB->getParent())
+      break; // Don't visit the middle block or anything after it.
+    if (auto *BB = HCFGBuilder.getIRBBForVPB(VPBB)) {
+      VPValue *Mask = BlockMasks.value().at(VPBB);
+      RecipeBuilder.setBlockInMask(BB, Mask);
+      if (Mask)
+        LLVM_DEBUG(dbgs() << "Mask for %" << VPBB->getName() << ": ";
+                   Mask->dump());
+    }
+
+    for (VPRecipeBase &R : make_early_inc_range(*VPBB)) {
+      auto *SingleDef = cast<VPSingleDefRecipe>(&R);
+      auto *UnderlyingValue = SingleDef->getUnderlyingValue();
+      if (!UnderlyingValue || isa<VPBlendRecipe>(SingleDef) ||
+          isa<VPCanonicalIVPHIRecipe>(SingleDef) ||
+          isa<VPWidenCanonicalIVRecipe>(SingleDef)) {
+        if (UnderlyingValue)
+          RecipeBuilder.setRecipe(cast<Instruction>(UnderlyingValue), &R);
+        continue;
+      }
+
+      assert(isa<VPInstruction>(&R) || isa<VPWidenPHIRecipe>(&R));
+      if (auto *Phi = dyn_cast<VPWidenPHIRecipe>(&R);
+          Phi && (VPBB != HeaderVPBB || Phi == HeaderMask)) {
+        if (UnderlyingValue)
+          RecipeBuilder.setRecipe(cast<Instruction>(UnderlyingValue), &R);
+        continue;
+      }
+      if (auto *VPI = dyn_cast<VPInstruction>(&R);
+          VPI && VPI->getOpcode() == VPInstruction::BranchOnCond)
+        continue;
+
+      auto *Instr = cast<Instruction>(UnderlyingValue);
+      // The stores with invariant address inside the loop will be deleted, and
+      // in the exit block, a uniform store recipe will be created for the final
+      // invariant store of the reduction.
+      if (StoreInst *SI = dyn_cast<StoreInst>(Instr);
+          SI && Legal->isInvariantAddressOfReduction(SI->getPointerOperand())) {
+        // Only create recipe for the final invariant store of the reduction.
+        if (Legal->isInvariantStoreOfReduction(SI)) {
+          auto *Recipe =
+              new VPReplicateRecipe(SI, R.operands(), true /* IsUniform */);
+          Recipe->insertBefore(*MiddleVPBB, MBIP);
+        }
+        R.eraseFromParent();
+        continue;
+      }
+
+      Builder.setInsertPoint(SingleDef);
+      SmallVector<VPValue *, 4> Operands(R.operands());
+      VPRecipeBase *Recipe =
+          RecipeBuilder.tryToCreateWidenRecipe(Instr, Operands, Range);
+      if (!Recipe)
+        Recipe = RecipeBuilder.handleReplication(Instr, Operands, Range);
+
+      RecipeBuilder.setRecipe(Instr, Recipe);
+      if (isa<VPWidenIntOrFpInductionRecipe>(Recipe) && isa<TruncInst>(Instr)) {
+        // Optimized a truncate to VPWidenIntOrFpInductionRecipe. It needs to be
+        // moved to the phi section in the header.
+        Recipe->insertBefore(*HeaderVPBB, HeaderVPBB->getFirstNonPhi());
+      } else {
+        Builder.insert(Recipe);
+      }
+      LLVM_DEBUG(dbgs() << "Replacing: "; R.dump(); dbgs() << "     with: ";
+                 Recipe->dump());
+      if (Recipe->getNumDefinedValues() == 1) {
+        SingleDef->replaceAllUsesWith(Recipe->getVPSingleValue());
+
+        // It is possible that R was used as mask, in which case that mask needs
+        // to be replaced.
+        for (auto Iter = BlockMasks->begin(), End = BlockMasks->end();
+             Iter != End; ++Iter)
+          if (Iter->second == R.getVPSingleValue())
+            Iter->second = Recipe->getVPSingleValue();
+      } else {
+        assert(Recipe->getNumDefinedValues() == 0 &&
+               "Unexpected multidef recipe");
+      }
+      R.eraseFromParent();
+    }
+  }
+
+#else
   VPBlockBase *PrevVPBB = nullptr;
   for (VPBlockBase *VPBlock : RPOT) {
     // Handle the entering into a new inner loop.
@@ -9926,6 +10041,7 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
       VPBlockUtils::connectBlocks(PrevVPBB, VPBB);
     PrevVPBB = VPBB;
   }
+#endif
 
   assert(isa<VPRegionBlock>(Plan->getVectorLoopRegion()) &&
          !Plan->getVectorLoopRegion()->getEntryBasicBlock()->empty() &&

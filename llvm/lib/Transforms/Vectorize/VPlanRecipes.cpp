@@ -3633,6 +3633,18 @@ void VPWidenPHIRecipe::print(raw_ostream &O, const Twine &Indent,
   O << Indent << "WIDEN-PHI ";
   printAsOperand(O, SlotTracker);
   O << " = phi ";
+#if 0
+  const auto &Preds = getParent()->getPredecessors();
+  if (Preds.size() != 0) {
+    assert(Preds.size() == getNumOperands());
+    for (const auto &[Pred, Val] : zip(Preds, operands())) {
+      O << "[";
+      Val->printAsOperand(O, SlotTracker);
+      O << ", BB<" << Pred->getName() << ">] ";
+    }
+    return;
+  }
+#endif
   printOperands(O, SlotTracker);
 }
 #endif

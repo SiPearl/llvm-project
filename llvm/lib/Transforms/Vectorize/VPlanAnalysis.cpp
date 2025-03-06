@@ -101,6 +101,9 @@ Type *VPTypeAnalysis::inferScalarTypeForRecipe(const VPInstruction *R) {
   case VPInstruction::BranchOnCount:
     return Type::getVoidTy(Ctx);
   default:
+    // Needed to verify a VPlan before recipe replacement.
+    if (auto *V = R->getUnderlyingValue())
+      return V->getType();
     break;
   }
   // Type inference not implemented for opcode.

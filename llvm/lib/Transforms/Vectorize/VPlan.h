@@ -536,7 +536,6 @@ public:
     case VPRecipeBase::VPScalarCastSC:
     case VPRecipeBase::VPScalarPHISC:
     case VPRecipeBase::VPPartialReductionSC:
-    case VPRecipeBase::VPScalarPHISC:
       return true;
     case VPRecipeBase::VPBranchOnMaskSC:
     case VPRecipeBase::VPInterleaveSC:
@@ -1937,6 +1936,9 @@ class VPWidenPHIRecipe : public VPSingleDefRecipe {
   /// Name to use for the generated IR instruction for the widened phi.
   std::string Name;
 
+  /// True if this is a active lane mask.
+  bool IsActiveLaneMask = false;
+
 public:
   /// Create a new VPWidenPHIRecipe for \p Phi with start value \p Start and
   /// debug location \p DL.
@@ -1959,6 +1961,10 @@ public:
   ~VPWidenPHIRecipe() override = default;
 
   VP_CLASSOF_IMPL(VPDef::VPWidenPHISC)
+
+  bool isActiveLaneMask() const { return IsActiveLaneMask; }
+
+  void setIsActiveLaneMask(bool IsALM) { IsActiveLaneMask = IsALM; }
 
   /// Generate the phi/select nodes.
   void execute(VPTransformState &State) override;

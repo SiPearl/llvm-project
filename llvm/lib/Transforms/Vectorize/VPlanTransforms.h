@@ -16,6 +16,7 @@
 #include "VPlan.h"
 #include "VPlanVerifier.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Support/CommandLine.h"
 
 namespace llvm {
@@ -180,6 +181,14 @@ struct VPlanTransforms {
   static void introduceBOSCCBranch(VPlan &Plan, VPValue *EntryMask,
                                    VPValue *ExitingEdgeMask,
                                    VPBasicBlock *Entry, VPBasicBlock *Exiting);
+
+#if 0
+  // TODO: Add a 100% VPlan based impl.!
+  static void introduceBOSCCBranches(VPlan &Plan,
+                                     unsigned VFxUFEstimate,
+                                     const BlockFrequencyInfo *BFI,
+                                     Loop *OrigLoop,
+#endif
 
   /// Given a "raw" unvectorized VPlan and the Mask to use for the header,
   /// linearize the control flow in the VPlan and return a map of every
