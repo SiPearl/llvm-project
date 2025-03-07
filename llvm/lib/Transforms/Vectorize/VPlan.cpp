@@ -36,6 +36,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/ProfDataUtils.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/BlockFrequency.h"
@@ -815,7 +816,7 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
     LLVM_DEBUG(dbgs() << "Cost of " << BackedgeCost << " for VF " << VF
                       << ": vector loop backedge\n");
     Cost += BackedgeCost;
-    if (!Ctx.OrigLoop->isInnermost()) {
+    if (Ctx.OrigLoop && !Ctx.OrigLoop->isInnermost()) {
       auto Freq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
                       .value_or(BlockFrequency(1));
       LLVM_DEBUG(dbgs() << "Frequency weight for " << getName() << ": "
@@ -1683,8 +1684,7 @@ VPCostContext::getOperandInfo(VPValue *V) const {
 }
 
 const BasicBlock *
-VPCostContext::tryToFindIRBasicBlock(const DominatorTree *IRDT,
-                                     const VPBasicBlock *VPBB) {
+VPCostContext::tryToFindIRBasicBlock(const VPBasicBlock *VPBB) const {
   if (auto *IRBB = dyn_cast<VPIRBasicBlock>(VPBB))
     return IRBB->getIRBasicBlock();
 
@@ -1707,7 +1707,7 @@ VPCostContext::tryToFindIRBasicBlock(const DominatorTree *IRDT,
     return BBs[0];
 
   if (auto *Pred = dyn_cast_or_null<VPBasicBlock>(VPBB->getSinglePredecessor()))
-    return tryToFindIRBasicBlock(IRDT, Pred);
+    return tryToFindIRBasicBlock(Pred);
 
   if (BBs.size() > 1 && IRDT) {
     const BasicBlock *CDom = BBs[0];
@@ -1718,7 +1718,7 @@ VPCostContext::tryToFindIRBasicBlock(const DominatorTree *IRDT,
 
   if (auto *Region = VPBB->getEnclosingLoopRegion();
       Region && Region->getEntry() != VPBB)
-    return tryToFindIRBasicBlock(IRDT, Region->getEntryBasicBlock());
+    return tryToFindIRBasicBlock(Region->getEntryBasicBlock());
 
   return nullptr;
 }
@@ -1735,11 +1735,11 @@ static const Loop *getInnermostLoopFor(const BasicBlock *BB, const Loop *Lp) {
 std::optional<BlockFrequency>
 VPCostContext::getBlockFrequencyEstimate(const VPBasicBlock *VPBB) const {
   assert(OrigLoop && "Cannot provide freq. estimates without this!");
-  const auto *IRBB = tryToFindIRBasicBlock(IRDT, VPBB);
+  const auto *IRBB = tryToFindIRBasicBlock(VPBB);
   if (!IRBB) {
     assert(VPBB->getParent() && "Unsupported for middle loop");
     IRBB = tryToFindIRBasicBlock(
-        IRDT, VPBB->getPlan()->getVectorLoopRegion()->getEntryBasicBlock());
+        VPBB->getPlan()->getVectorLoopRegion()->getEntryBasicBlock());
   }
 
   if (BFI)
@@ -1753,4 +1753,33 @@ VPCostContext::getBlockFrequencyEstimate(const VPBasicBlock *VPBB) const {
   for (unsigned I = 0; I < DepthDiff; ++I)
     F *= 32;
   return BlockFrequency(F);
+}
+
+BranchProbability
+VPCostContext::getEntryProbability(const VPBasicBlock *VPBB) const {
+  const auto *IRBB = tryToFindIRBasicBlock(VPBB);
+  if (!IRBB)
+    return BranchProbability::getUnknown();
+
+  // In case BFI is available, just use that.
+  if (BFI)
+    return BranchProbability::getBranchProbability(
+        BFI->getBlockFreq(OrigLoop->getHeader()).getFrequency(),
+        BFI->getBlockFreq(IRBB).getFrequency());
+
+  const auto *IRPred = IRBB->getSinglePredecessor();
+  if (!IRPred)
+    return BranchProbability::getUnknown();
+
+  // Check for explicitly added branch weight MD.
+  if (const auto *Term = dyn_cast<BranchInst>(IRPred->getTerminator());
+      Term && Term->isConditional()) {
+    uint64_t TrueVal, FalseVal;
+    if (extractBranchWeights(*Term, TrueVal, FalseVal))
+      return BranchProbability::getBranchProbability(
+          Term->getSuccessor(0) == IRBB ? TrueVal : FalseVal,
+          TrueVal + FalseVal);
+  }
+
+  return BranchProbability::getUnknown();
 }

@@ -336,7 +336,7 @@ define void @test_nested_inner_uniform(
 ; CHECK-NEXT:    br label %[[IF_TRUE_JOIN13]]
 ; CHECK:       [[IF_TRUE_JOIN13]]:
 ; CHECK-NEXT:    [[VEC_PHI:%.*]] = phi <2 x float> [ [[TMP19]], %[[PRED_LOAD_CONTINUE5]] ], [ [[TMP23]], %[[PRED_LOAD_IF6]] ], [ [[TMP28]], %[[PRED_LOAD_CONTINUE10]] ], [ [[TMP32]], %[[PRED_LOAD_IF11]] ]
-; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[TMP4]], <2 x float> [[TMP14]], <2 x float> [[VEC_PHI]]
+; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[TMP3]], <2 x float> [[VEC_PHI]], <2 x float> [[TMP14]]
 ; CHECK-NEXT:    [[TMP33:%.*]] = fmul <2 x float> [[PREDPHI]], [[PREDPHI]]
 ; CHECK-NEXT:    [[TMP34:%.*]] = getelementptr inbounds float, ptr [[D]], i64 [[TMP0]]
 ; CHECK-NEXT:    [[TMP35:%.*]] = getelementptr inbounds float, ptr [[TMP34]], i32 0
@@ -490,7 +490,7 @@ define void @test_nested_outer_uniform(
 ; CHECK-NEXT:    br label %[[PRED_LOAD_CONTINUE8]]
 ; CHECK:       [[PRED_LOAD_CONTINUE8]]:
 ; CHECK-NEXT:    [[TMP30:%.*]] = phi <2 x float> [ [[TMP25]], %[[PRED_LOAD_CONTINUE6]] ], [ [[TMP29]], %[[PRED_LOAD_IF7]] ]
-; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[TMP10]], <2 x float> [[TMP20]], <2 x float> [[TMP30]]
+; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[TMP9]], <2 x float> [[TMP30]], <2 x float> [[TMP20]]
 ; CHECK-NEXT:    br label %[[LOOP_LATCH9]]
 ; CHECK:       [[LOOP_LATCH9]]:
 ; CHECK-NEXT:    [[VEC_PHI:%.*]] = phi <2 x float> [ [[PREDPHI]], %[[PRED_LOAD_CONTINUE8]] ], [ [[TMP7]], %[[IF_FALSE1]] ]
@@ -818,7 +818,7 @@ define void @test_not_single_entry_single_exit(
 ; CHECK-NEXT:    [[TMP26:%.*]] = phi <2 x float> [ [[TMP21]], %[[PRED_LOAD_CONTINUE6]] ], [ [[TMP25]], %[[PRED_LOAD_IF7]] ]
 ; CHECK-NEXT:    [[TMP28:%.*]] = select <2 x i1> [[TMP16]], <2 x i1> [[TMP27]], <2 x i1> zeroinitializer
 ; CHECK-NEXT:    [[TMP30:%.*]] = or <2 x i1> [[TMP28]], [[TMP29]]
-; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[TMP29]], <2 x float> zeroinitializer, <2 x float> [[TMP26]]
+; CHECK-NEXT:    [[PREDPHI:%.*]] = select <2 x i1> [[BROADCAST_SPLAT]], <2 x float> [[TMP26]], <2 x float> zeroinitializer
 ; CHECK-NEXT:    [[TMP31:%.*]] = extractelement <2 x i1> [[TMP30]], i32 0
 ; CHECK-NEXT:    br i1 [[TMP31]], label %[[PRED_LOAD_IF9:.*]], label %[[PRED_LOAD_CONTINUE10:.*]]
 ; CHECK:       [[PRED_LOAD_IF9]]:

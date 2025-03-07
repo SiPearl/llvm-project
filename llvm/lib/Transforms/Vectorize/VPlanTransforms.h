@@ -14,6 +14,8 @@
 #define LLVM_TRANSFORMS_VECTORIZE_VPLANTRANSFORMS_H
 
 #include "VPlan.h"
+#include "VPlanDominatorTree.h"
+#include "VPlanHelpers.h"
 #include "VPlanVerifier.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
@@ -178,17 +180,11 @@ struct VPlanTransforms {
   /// Add explicit broadcasts for live-ins used as vectors.
   static void materializeLiveInBroadcasts(VPlan &Plan);
 
-  static void introduceBOSCCBranch(VPlan &Plan, VPValue *EntryMask,
-                                   VPValue *ExitingEdgeMask,
-                                   VPBasicBlock *Entry, VPBasicBlock *Exiting);
-
-#if 0
   // TODO: Add a 100% VPlan based impl.!
-  static void introduceBOSCCBranches(VPlan &Plan,
-                                     unsigned VFxUFEstimate,
-                                     const BlockFrequencyInfo *BFI,
-                                     Loop *OrigLoop,
-#endif
+  static void introduceBOSCCBranches(
+      VPlan &Plan, VPDominatorTree &DT, ElementCount VF, unsigned IC,
+      ArrayRef<std::tuple<VPValue *, VPBlockBase *, VPBlockBase *>> SESEs,
+      VPCostContext &CostCtx);
 
   /// Given a "raw" unvectorized VPlan and the Mask to use for the header,
   /// linearize the control flow in the VPlan and return a map of every

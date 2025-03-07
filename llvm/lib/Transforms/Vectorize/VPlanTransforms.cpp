@@ -24,6 +24,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/IVDescriptors.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
@@ -32,7 +33,13 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/InstructionCost.h"
+#include "llvm/Support/TypeSize.h"
+#include <optional>
+
+#define DEBUG_TYPE "vplan"
 
 using namespace llvm;
 
@@ -610,9 +617,8 @@ static void optimizeInnerLoopInductions(VPlan &Plan) {
       Phi.eraseFromParent();
   };
 
-  // TODO: Test this!
   auto HandleLCSSAPhi = [](VPWidenPHIRecipe &LCSSAPhi, VPRegionBlock &Region) {
-    assert(LCSSAPhi.getNumOperands() == 0);
+    assert(LCSSAPhi.getNumOperands() == 1);
     auto *Sel = dyn_cast<VPInstruction>(LCSSAPhi.getOperand(0));
     if (!Sel || Sel->getOpcode() != Instruction::Select ||
         Sel->getParent()->getParent() != &Region)
@@ -2287,82 +2293,6 @@ void VPlanTransforms::materializeLiveInBroadcasts(VPlan &Plan) {
   }
 }
 
-void VPlanTransforms::introduceBOSCCBranch(VPlan &Plan, VPValue *Mask,
-                                           VPValue *ExitingEdgeMask,
-                                           VPBasicBlock *EntryVPBB,
-                                           VPBasicBlock *ExitingVPBB) {
-  // Note that PredVPBB is the predecessor in the VPlan construction order
-  // (RPO), and not necessarily the predecessor of EntryIRBB.
-  auto *PredVPBB = cast<VPBasicBlock>(EntryVPBB->getSinglePredecessor());
-  assert(PredVPBB->getNumSuccessors() == 1 &&
-         "Multiple BOSCC branches stating from same BB not supported");
-  VPBasicBlock::iterator IPos = PredVPBB->end();
-  SmallVector<VPValue *> WorkList = {Mask};
-  while (!WorkList.empty()) {
-    VPRecipeBase *R = WorkList.pop_back_val()->getDefiningRecipe();
-    if (!R || R->getParent() != EntryVPBB)
-      continue;
-
-    R->moveBefore(*PredVPBB, IPos);
-    IPos = R->getIterator();
-    for (VPValue *Op : R->operands())
-      WorkList.push_back(Op);
-  }
-
-  // Create a conditional branch that enters the region starting with
-  // EntryVPBB if any lane in the mask is active, and that jumps directly
-  // to the successor of the exiting block if not.
-  auto *Cond = new VPInstruction(VPInstruction::AnyOf, {Mask});
-  PredVPBB->appendRecipe(Cond);
-  auto *Br = new VPInstruction(VPInstruction::BranchOnCond, {Cond});
-  PredVPBB->appendRecipe(Br);
-  auto *SuccVPBB = cast<VPBasicBlock>(ExitingVPBB->getSingleSuccessor());
-  assert(SuccVPBB->getNumPredecessors() == 1 && "No dedicated join block");
-  // The exiting block of the conditionally-branched-over region is always
-  // the first predecessor and the branching block the second one. This is
-  // important for PHI creation.
-  VPBlockUtils::connectBlocks(PredVPBB, SuccVPBB);
-
-  // Now that a conditional branch has been introduced, phis will be needed
-  // in the SuccVPBB block (for any phis in the original IR, represented by
-  // VPBlendRecipes, and for masks defined inside the region but used outside).
-  // The blends can be found by finding all uses of the edge mask.
-  for (VPUser *U : ExitingEdgeMask->users())
-    if (auto *Blend = dyn_cast<VPBlendRecipe>(U)) {
-      VPValue *V = Blend->getIncomingValueForMask(ExitingEdgeMask);
-      if (!V)
-        // For the unprobable case that a mask is used as incoming value.
-        continue;
-
-      auto *IRPhi = cast<PHINode>(Blend->getUnderlyingValue());
-      auto *Phi = new VPWidenPHIRecipe(IRPhi);
-      Phi->addOperand(V);
-      auto *Poison = Plan.getOrAddLiveIn(PoisonValue::get(IRPhi->getType()));
-      Phi->addOperand(Poison);
-      Phi->insertBefore(*SuccVPBB, SuccVPBB->getFirstNonPhi());
-      for (unsigned I = 0; I < Blend->getNumOperands(); I += 2)
-        if (Blend->getOperand(I) == V)
-          Blend->setOperand(I, Phi);
-    }
-
-  // Finally, create a phi for the exiting edge mask itself, which will
-  // be all-false for the edge bypassing the BOSCC region. If the region
-  // is only a single block, the mask will be defined in the RPO predecessor
-  // already and there is no need.
-  if (auto *MaskDef = ExitingEdgeMask->getDefiningRecipe();
-      MaskDef && MaskDef->getParent() != PredVPBB) {
-    auto *Phi = new VPWidenPHIRecipe(nullptr);
-    Phi->insertBefore(*SuccVPBB, SuccVPBB->getFirstNonPhi());
-    ExitingEdgeMask->replaceAllUsesWith(Phi);
-    Phi->addOperand(ExitingEdgeMask);
-    auto &Ctx = Plan.getCanonicalIV()->getScalarType()->getContext();
-    auto *False = ConstantInt::getFalse(Ctx);
-    Phi->addOperand(Plan.getOrAddLiveIn(False));
-  }
-
-  assert(verifyVPlanIsValid(Plan));
-}
-
 // Given a loop with multiple exits (\p Exiting), change the CFG so that
 // there is a single exiting block, and return that block.
 static VPBasicBlock *createSingleExitLoop(VPlan &Plan, VPDominatorTree &DT,
@@ -2833,7 +2763,7 @@ VPlanTransforms::linarizeAndCollectMasks(
     // leaves the loop.
     for (VPRecipeBase &R : Exit->phis()) {
       auto &LCSSAPhi = *cast<VPWidenPHIRecipe>(&R);
-      assert(LCSSAPhi.getNumOperands() == 0);
+      assert(LCSSAPhi.getNumOperands() == 1);
       auto *OutVal = LCSSAPhi.getOperand(0);
       auto *Def = OutVal->getDefiningRecipe();
       if (!Def || Def->getParent()->getParent() != &Region)
@@ -2954,4 +2884,152 @@ VPlanTransforms::linarizeAndCollectMasks(
   }
 
   return BlockMasks;
+}
+
+// The min. estimated probability that the BOSCC branch will be taken.
+// A higher probability makes BOSCC branch generation less likely.
+static const BranchProbability MinBOSCCJumpOverProbability =
+    BranchProbability::getBranchProbability(3, 4);
+
+// Used to hoist masks out of a region for which a
+// BOSCC branch is created. This can be necessary for the
+// anyof check and avoid PHIs in the successor.
+static void hoistMasksInFrontOf(VPValue *V, VPDominatorTree &DT,
+                                VPBasicBlock &Dst, VPBasicBlock::iterator IP) {
+  auto *Def = dyn_cast<VPInstruction>(V);
+  if (!Def || !(Def->getOpcode() == VPInstruction::Not ||
+                Def->getOpcode() == VPInstruction::LogicalAnd ||
+                Def->getOpcode() == Instruction::Or))
+    return;
+
+  // If this function were to be generalized to any non-side-effecting
+  // or memory-accessing instruction, then more care would need to be
+  // taken so that operands stay in a topological order.
+  // For masks, this will always be the case.
+  for (VPValue *Op : Def->operands())
+    hoistMasksInFrontOf(Op, DT, Dst, IP);
+  Def->moveBefore(Dst, IP);
+}
+
+void VPlanTransforms::introduceBOSCCBranches(
+    VPlan &Plan, VPDominatorTree &DT, ElementCount VF, unsigned IC,
+    ArrayRef<std::tuple<VPValue *, VPBlockBase *, VPBlockBase *>> SESEs,
+    VPCostContext &CostCtx) {
+  assert(DT.verify(VPDominatorTree::VerificationLevel::Fast));
+  assert(verifyVPlanIsValid(Plan));
+  if (SESEs.empty())
+    return;
+
+  unsigned VFxIC = IC * VF.getKnownMinValue();
+  if (VF.isScalable())
+    VFxIC *= CostCtx.TTI.getVScaleForTuning().value_or(0);
+
+  // If the cost of the region a BOSCC branch allows us to jump over
+  // is lower than that of the check and branch introduced by BOSCC,
+  // then don't do it.
+  Type *Int1Ty = IntegerType::getInt1Ty(CostCtx.LLVMCtx);
+  InstructionCost MinBOSCCCost =
+      CostCtx.TTI.getArithmeticReductionCost(Instruction::Or,
+                                             VectorType::get(Int1Ty, VF),
+                                             std::nullopt, CostCtx.CostKind) *
+          IC +
+      CostCtx.TTI.getArithmeticInstrCost(Instruction::Or, Int1Ty,
+                                         CostCtx.CostKind) *
+          (IC - 1) +
+      CostCtx.TTI.getCFInstrCost(Instruction::Br, CostCtx.CostKind) * 2;
+  LLVM_DEBUG(dbgs() << "BOSCC: Min. region cost: " << MinBOSCCCost
+                    << ", min. all-zero mask prop.: "
+                    << MinBOSCCJumpOverProbability << "\n");
+
+  ReversePostOrderTraversal<VPBlockDeepTraversalWrapper<VPBlockBase *>> RPOT(
+      Plan.getVectorLoopRegion());
+  for (auto [Mask, Entry, Exiting] : SESEs) {
+    auto *Pred = dyn_cast_or_null<VPBasicBlock>(Entry->getSinglePredecessor()),
+         *Succ = dyn_cast_or_null<VPBasicBlock>(Exiting->getSingleSuccessor());
+    // TODO: Relax to Succ->getNumPredecessors() > 1
+    if (!Pred || Pred->getNumSuccessors() != 1 || !Succ ||
+        Succ->getNumPredecessors() != 1 ||
+        vputils::isUniformAcrossVFsAndUFs(Mask))
+      continue;
+    LLVM_DEBUG(dbgs() << "BOSCC: Candiate: %" << Entry->getName() << " -> %"
+                      << Exiting->getName() << "\n");
+    assert(DT.dominates(Pred, Succ) && DT.dominates(Entry, Exiting));
+
+    // Get a estimate of the probability to execute these instructions.
+    // TODO: Bypass cost checks in case of `hasBranchWeightsOrigin(Br)`?
+    auto EntryProp = CostCtx.getEntryProbability(Entry->getEntryBasicBlock());
+    if (EntryProp.isUnknown()) {
+      LLVM_DEBUG(dbgs() << "BOSCC: Unknwon entry prop.\n");
+      continue;
+    }
+    auto NotProp = BranchProbability::getOne() - EntryProp;
+    auto MaskZeroProp = BranchProbability::getOne();
+    for (unsigned I = 0; I < VFxIC; ++I)
+      MaskZeroProp *= NotProp;
+    if (MaskZeroProp < MinBOSCCJumpOverProbability) {
+      LLVM_DEBUG(dbgs() << "BOSCC: All-zero mask prop. too low: "
+                        << MaskZeroProp << "\n");
+      continue;
+    }
+
+    // Calcuate the cost of this subregion.
+    InstructionCost Cost = 0;
+    auto EntryPos = find(RPOT, Entry),
+         ExitingPos = std::find(EntryPos, RPOT.end(), Exiting);
+    assert(EntryPos != RPOT.end() && ExitingPos != RPOT.end());
+    auto SESERange = make_range(EntryPos, ExitingPos + 1);
+    for (VPBlockBase *BB : SESERange)
+      Cost += BB->cost(VF, CostCtx) * IC;
+    if (!Cost.isValid() || Cost < MinBOSCCCost) {
+      LLVM_DEBUG(dbgs() << "BOSCC: Cost too low: " << Cost << "\n");
+      continue;
+    }
+
+    // Modify the VPlan and insert the BOSCC branch:
+    LLVM_DEBUG(dbgs() << "BOSCC: Add BOSCC branch for %" << Entry->getName()
+                      << " -> %" << Exiting->getName()
+                      << " region: estimates: VFxIC is ~" << VFxIC << ", Cost: "
+                      << Cost << "\n       entry prop.: " << EntryProp
+                      << ", all-zero mask prop.: " << MaskZeroProp << "\n");
+    VPBlockUtils::connectBlocks(Pred, Succ);
+    DT.applyUpdates({{VPDominatorTree::Insert, Pred, Succ}});
+    // The mask used for the entry block of the SESE can always be hoisted out,
+    // and that same mask is often also used in the successor block.
+    // TODO: At the moment, the VPlan-based cost-model ignores mask-creation
+    // costs. When that changes, then this hoist should probably done before the
+    // cost of the SESE is computed.
+    hoistMasksInFrontOf(Mask, DT, *Pred, Pred->end());
+    VPBuilder Builder(Pred, Pred->end());
+    Builder.createNaryOp(VPInstruction::BranchOnCond,
+                         {Builder.createNaryOp(VPInstruction::AnyOf, {Mask})});
+
+    // Handle values leaving the jumped-over region.
+    // PHIs will have to be created for them. Poison can be used as values for
+    // the edge from the block with the BOSCC branch.
+    for (VPBasicBlock *BB : VPBlockUtils::blocksOnly<VPBasicBlock>(SESERange))
+      for (VPRecipeBase &Def : *BB)
+        for (VPValue *V : Def.definedValues()) {
+          SmallVector<VPRecipeBase *> UsesToFix;
+          for (VPUser *U : V->users())
+            if (auto *UR = dyn_cast<VPRecipeBase>(U);
+                UR && !DT.dominates(BB, UR->getParent()) && !UR->isPhi())
+              UsesToFix.push_back(UR);
+          if (UsesToFix.empty())
+            continue;
+
+          LLVM_DEBUG();
+          Type *Ty = CostCtx.Types.inferScalarType(V);
+          auto *Phi = new VPWidenPHIRecipe(nullptr);
+          Phi->addOperand(V);
+          Phi->addOperand(Plan.getOrAddLiveIn(PoisonValue::get(Ty)));
+          Phi->insertBefore(*Succ, Succ->getFirstNonPhi());
+          for (VPRecipeBase *UR : UsesToFix)
+            for (unsigned I = 0; I < UR->getNumOperands(); ++I)
+              if (UR->getOperand(I) == V)
+                UR->setOperand(I, Phi);
+        }
+  }
+
+  assert(DT.verify(VPDominatorTree::VerificationLevel::Fast));
+  assert(verifyVPlanIsValid(Plan));
 }

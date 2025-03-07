@@ -402,11 +402,10 @@ struct VPCostContext {
 
   /// Return a IR basic block likely (but not guaranteed) to correspond to the
   /// VP basic block \p VPBB.
-  static const BasicBlock *tryToFindIRBasicBlock(const DominatorTree *IRDT,
-                                                 const VPBasicBlock *VPBB);
+  const BasicBlock *tryToFindIRBasicBlock(const VPBasicBlock *VPBB) const;
 
-  /// FIXME: Implement me (for BOSCC, fall back to branch weights!)!
-  BranchProbability getProbabilityToEnter(const VPBasicBlock *BB);
+  /// Return the probability that this basic block is visited.
+  BranchProbability getEntryProbability(const VPBasicBlock *VPBB) const;
 };
 
 /// This class can be used to assign names to VPValues. For VPValues without

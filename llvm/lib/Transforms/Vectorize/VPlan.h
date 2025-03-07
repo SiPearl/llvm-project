@@ -561,10 +561,10 @@ public:
 
   /// Returns the underlying instruction.
   Instruction *getUnderlyingInstr() {
-    return cast<Instruction>(getUnderlyingValue());
+    return cast_or_null<Instruction>(getUnderlyingValue());
   }
   const Instruction *getUnderlyingInstr() const {
-    return cast<Instruction>(getUnderlyingValue());
+    return cast_or_null<Instruction>(getUnderlyingValue());
   }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

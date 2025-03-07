@@ -9595,31 +9595,6 @@ static void reconnectVPlanCFGForPreservedBranch(
   }
 }
 
-static InstructionCost estimateSESERegionCost(const VPBlockBase *Entry,
-                                              const VPBlockBase *Exit,
-                                              VPCostContext &CostCtx,
-                                              ElementCount CostVF) {
-  InstructionCost Cost = 0;
-  SmallSetVector<const VPBlockBase *, 4> Worklist;
-  Worklist.insert(Entry);
-  for (unsigned I = 0; I < Worklist.size(); ++I) {
-    const VPBlockBase *Block = Worklist[I];
-    if (auto *Region = dyn_cast<VPRegionBlock>(Block)) {
-      Worklist.insert(Region->getEntry());
-      continue;
-    }
-    const auto *BB = cast<VPBasicBlock>(Block);
-    for (const auto &R : *BB)
-      Cost += R.cost(CostVF, CostCtx);
-
-    if (BB != Exit)
-      for (const auto *Succ : BB->getSuccessors())
-        Worklist.insert(Succ);
-  }
-
-  return Cost;
-}
-
 VPlanPtr
 LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
 
@@ -10083,65 +10058,32 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
   // Adjust the recipes for any inloop reductions.
   adjustRecipesForReductions(Plan, RecipeBuilder, Range.Start);
 
+  // Introduce BOSCC branches if enabled and estimated to be profitable.
+  if (ExperimentalBOSCC && BFI && Range.Start != ElementCount::getFixed(1)) {
+    SmallVector<std::tuple<VPValue *, VPBlockBase *, VPBlockBase *>> Candidates;
+    for (auto [_, PBI] : PotentialBOSCCBranches)
+      for (auto [Entry, Exiting] : {std::get<1>(PBI), std::get<2>(PBI)})
+        if (Exiting != std::get<0>(PBI))
+          Candidates.push_back(
+              {RecipeBuilder.getBlockInMask(HCFGBuilder.getIRBBForVPB(Entry)),
+               Entry, Exiting});
+    if (!Candidates.empty()) {
+      VPDominatorTree VPDT;
+      VPDT.recalculate(*Plan);
+      VPCostContext CostCtx(TTI, *TLI, Plan->getCanonicalIV()->getScalarType(),
+                            CM, TargetTransformInfo::TCK_RecipThroughput);
+      VPlanTransforms::introduceBOSCCBranches(*Plan, VPDT,
+                                              Range.End.divideCoefficientBy(2),
+                                              1, Candidates, CostCtx);
+    }
+  }
+
   // Interleave memory: for each Interleave Group we marked earlier as relevant
   // for this VPlan, replace the Recipes widening its memory instructions with a
   // single VPInterleaveRecipe at its insertion point.
   VPlanTransforms::runPass(VPlanTransforms::createInterleaveGroups, *Plan,
                            InterleaveGroups, RecipeBuilder,
                            CM.isScalarEpilogueAllowed());
-
-  // Introduce BOSCC branches if enabled and estimated to be profitable.
-  // TODO: Add cost-model based on the cost of the instructions in the
-  // jumped-over region.
-  if (ExperimentalBOSCC && BFI && Range.Start != ElementCount::getFixed(1)) {
-    unsigned EstVFxUF =
-        getEstimatedRuntimeVF(Range.End, CM.getVScaleForTuning());
-    uint64_t HeaderFreq =
-        BFI->getBlockFreq(OrigLoop->getHeader()).getFrequency();
-    for (auto [JoinBB, PBI] : PotentialBOSCCBranches) {
-      auto [BranchBB, LHS, RHS] = PBI;
-      for (auto [Entry, Exiting] : {LHS, RHS}) {
-        // Don't create BOSCC branches for bypasses.
-        if (Exiting == BranchBB)
-          continue;
-
-        BasicBlock *IREntry = HCFGBuilder.getIRBBForVPB(Entry);
-        uint64_t EntryFreq = BFI->getBlockFreq(IREntry).getFrequency();
-        if (EntryFreq >= HeaderFreq)
-          continue;
-
-        auto BranchProp =
-            BranchProbability::getBranchProbability(EntryFreq, HeaderFreq);
-        auto Prop = BranchProbability::getOne() - BranchProp;
-        // Raise Prop to the power of EstVFxUF to get the probability for a
-        // all-zero mask (in which case the BOSCC branch is taken).
-        BranchProbability AllZeroProp = BranchProbability::getOne();
-        for (unsigned I = 0; I < EstVFxUF; ++I)
-          AllZeroProp *= Prop;
-
-        VPCostContext CostCtx(TTI, *TLI, Plan->getCanonicalIV()->getScalarType(),
-                              CM, TargetTransformInfo::TCK_RecipThroughput);
-        InstructionCost Cost = estimateSESERegionCost(
-            Entry, Exiting, CostCtx, Range.End.divideCoefficientBy(2));
-        LLVM_DEBUG(dbgs() << "LV: BOSCC candidate: Edge %"
-                          << BranchBB->getName() << " -> %" << Entry->getName()
-                          << " has all-zero mask prob.: " << AllZeroProp
-                          << ", SESE cost: " << Cost << "\n");
-        if (!BranchProp.isZero() && !BranchProp.isUnknown() &&
-            AllZeroProp >= BOSCCMinimumProbability) {
-          VPValue *EntryMask = RecipeBuilder.getBlockInMask(IREntry);
-          VPValue *ExitingMask =
-              RecipeBuilder.getEdgeMask(HCFGBuilder.getIRBBForVPB(Exiting),
-                                        HCFGBuilder.getIRBBForVPB(JoinBB));
-
-          VPlanTransforms::introduceBOSCCBranch(
-              *Plan, EntryMask, ExitingMask, Entry->getEntryBasicBlock(),
-              Exiting->getExitingBasicBlock());
-          break;
-        }
-      }
-    }
-  }
 
   for (ElementCount VF : Range)
     Plan->addVF(VF);

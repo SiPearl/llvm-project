@@ -743,6 +743,13 @@ InstructionCost VPInstruction::computeCost(ElementCount VF,
     return Ctx.TTI.getArithmeticReductionCost(
         Instruction::Or, cast<VectorType>(VecTy), std::nullopt, Ctx.CostKind);
   }
+  case VPInstruction::BranchOnCond: {
+    if (getParent()->getNumSuccessors() == 0)
+      return 0; // Backedge costs are already taken into account at the region.
+
+    return Ctx.TTI.getCFInstrCost(Instruction::Br, Ctx.CostKind,
+                                  getUnderlyingInstr());
+  }
   default:
     // TODO: Compute cost other VPInstructions once the legacy cost model has
     // been retired.
@@ -3633,7 +3640,7 @@ void VPWidenPHIRecipe::print(raw_ostream &O, const Twine &Indent,
   O << Indent << "WIDEN-PHI ";
   printAsOperand(O, SlotTracker);
   O << " = phi ";
-#if 0
+#if 1
   const auto &Preds = getParent()->getPredecessors();
   if (Preds.size() != 0) {
     assert(Preds.size() == getNumOperands());

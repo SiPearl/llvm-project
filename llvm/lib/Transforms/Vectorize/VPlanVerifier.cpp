@@ -266,6 +266,10 @@ bool VPlanVerifier::verifyVPBasicBlock(const VPBasicBlock *VPBB) {
         if (UI->getParent() == VPBB) {
           if (RecipeNumbering[UI] < RecipeNumbering[&R]) {
             errs() << "Use before def!\n";
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+            R.dump();
+            UI->dump();
+#endif
             return false;
           }
           continue;
@@ -273,6 +277,10 @@ bool VPlanVerifier::verifyVPBasicBlock(const VPBasicBlock *VPBB) {
 
         if (!VPDT.dominates(VPBB, UI->getParent())) {
           errs() << "Use before def!\n";
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+          R.dump();
+          UI->dump();
+#endif
           return false;
         }
       }
