@@ -3017,9 +3017,16 @@ void VPlanTransforms::introduceBOSCCBranches(
           if (UsesToFix.empty())
             continue;
 
-          LLVM_DEBUG();
+          PHINode *IRPhi = nullptr;
+          if (auto *Blend = dyn_cast<VPBlendRecipe>(UsesToFix[0]);
+              Blend && any_of(index_range(0, Blend->getNumIncomingValues()),
+                              [&](unsigned I) {
+                                return Blend->getIncomingValue(I) == V;
+                              }))
+            IRPhi = cast<PHINode>(Blend->getUnderlyingValue());
+
           Type *Ty = CostCtx.Types.inferScalarType(V);
-          auto *Phi = new VPWidenPHIRecipe(nullptr);
+          auto *Phi = new VPWidenPHIRecipe(IRPhi);
           Phi->addOperand(V);
           Phi->addOperand(Plan.getOrAddLiveIn(PoisonValue::get(Ty)));
           Phi->insertBefore(*Succ, Succ->getFirstNonPhi());

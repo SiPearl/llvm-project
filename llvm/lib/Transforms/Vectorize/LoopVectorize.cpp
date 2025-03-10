@@ -426,15 +426,6 @@ static cl::opt<bool>
                       cl::desc("Enable experimental branch-on-superword "
                                "condition codes when vectorizing."));
 
-// The minimum probability that a mask for a subset of instruction in the loop
-// will be all-zero for the introduction of a BOSCC branch, adjusted
-// by the vectorization factor.
-static const BranchProbability BOSCCMinimumProbability =
-    BranchProbability(3, 4);
-
-// The minimum cost of a a region a BOSCC branch would jump over.
-static const InstructionCost BOSCCMinimumCost = 3;
-
 // Likelyhood of bypassing the vectorized loop because assumptions about SCEV
 // variables not overflowing do not hold. See `emitSCEVChecks`.
 static constexpr uint32_t SCEVCheckBypassWeights[] = {1, 127};
@@ -5256,6 +5247,8 @@ LoopVectorizationCostModel::calculateRegisterUsage(ArrayRef<ElementCount> VFs) {
   // used inside the loop. We need this number separately from the max-interval
   // usage number because when we unroll, loop-invariant values do not take
   // more register.
+  // TODO: Once uniform branches are preserved, a RPO traversal will be too
+  // pessimistic (unless the register allocator also uses a linear scan).
   LoopBlocksDFS DFS(TheLoop);
   DFS.perform(LI);
 
@@ -5277,8 +5270,20 @@ LoopVectorizationCostModel::calculateRegisterUsage(ArrayRef<ElementCount> VFs) {
   // constants).
   SmallSetVector<Instruction *, 8> LoopInvariants;
 
+  // For values than need to be considered alive over a inner loop, the latch
+  // terminator is used as fake user. However, as it will not have been assigned
+  // a index yet, use a extra dense map.
+  bool IsInnermost = TheLoop->isInnermost();
+  SmallDenseMap<Loop *, SmallPtrSet<Instruction *, 4>, 4> AliveOverAllOfLoop;
+
+  // Traverse all instructions, find their last use.
   for (BasicBlock *BB : make_range(DFS.beginRPO(), DFS.endRPO())) {
+    Loop *UserLp = !IsInnermost ? LI->getLoopFor(BB) : TheLoop;
+    bool IsInnerLoopHeader =
+        !IsInnermost && UserLp != TheLoop && BB == UserLp->getHeader();
     for (Instruction &I : BB->instructionsWithoutDebug()) {
+      PHINode *UserHeaderPhi =
+          IsInnerLoopHeader ? dyn_cast<PHINode>(&I) : nullptr;
       IdxToInstr.push_back(&I);
 
       // Save the end location of each USE.
@@ -5298,11 +5303,44 @@ LoopVectorizationCostModel::calculateRegisterUsage(ArrayRef<ElementCount> VFs) {
           continue;
         }
 
+        if (!IsInnermost) {
+          Loop *UsedLp = LI->getLoopFor(Instr->getParent());
+          if (UserHeaderPhi && UserHeaderPhi->getIncomingValueForBlock(
+                                   UserLp->getLoopLatch()) == U) {
+            // A instruction is used as backedge value of a inner loop: it
+            // should be considered alive at least up to the latch branch.
+            if (AliveOverAllOfLoop[UserLp].insert(Instr).second)
+              LLVM_DEBUG(dbgs() << "LV(REG): Used as backedge value: " << *Instr
+                                << "\n");
+            continue;
+          }
+
+          if (UsedLp != UserLp && UserLp != TheLoop) {
+            // A value defined in the vectorized loop is used by a instruction
+            // in a inner loop. This means that the it should be considered
+            // alive until the end of the inner loop.
+            if (AliveOverAllOfLoop[UserLp].insert(Instr).second)
+              LLVM_DEBUG(dbgs()
+                         << "LV(REG): Used in inner loop: " << *Instr << "\n");
+            continue;
+          }
+        }
+
         // Overwrite previous end points.
         EndPoint[Instr] = IdxToInstr.size();
         Ends.insert(Instr);
       }
     }
+
+    // Increase the live interval of any value that needs to be alive over
+    // all of this inner loop.
+    if (!IsInnermost && UserLp->isLoopLatch(BB))
+      if (auto Uses = AliveOverAllOfLoop.find(UserLp);
+          Uses != AliveOverAllOfLoop.end())
+        for (Instruction *Used : Uses->second) {
+          EndPoint[Used] = IdxToInstr.size();
+          Ends.insert(Used);
+        }
   }
 
   // Saves the list of intervals that end with the index in 'key'.
@@ -10059,7 +10097,8 @@ LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(VFRange &Range) {
   adjustRecipesForReductions(Plan, RecipeBuilder, Range.Start);
 
   // Introduce BOSCC branches if enabled and estimated to be profitable.
-  if (ExperimentalBOSCC && BFI && Range.Start != ElementCount::getFixed(1)) {
+  if (ExperimentalBOSCC && !TTI.hasBranchDivergence(HeaderBB->getParent()) &&
+      BFI && Range.Start != ElementCount::getFixed(1)) {
     SmallVector<std::tuple<VPValue *, VPBlockBase *, VPBlockBase *>> Candidates;
     for (auto [_, PBI] : PotentialBOSCCBranches)
       for (auto [Entry, Exiting] : {std::get<1>(PBI), std::get<2>(PBI)})
