@@ -434,6 +434,62 @@ void VPlanTransforms::createAndOptimizeReplicateRegions(VPlan &Plan) {
   }
 }
 
+// Return true if the mask argument is known to always have at least
+// one lane active.
+static bool maskKnownToHaveActiveLane(VPValue *V) {
+  if (auto *Phi = dyn_cast<VPWidenPHIRecipe>(V))
+    return all_of(Phi->operands(), maskKnownToHaveActiveLane) ||
+           (Phi->isActiveLaneMask() &&
+            maskKnownToHaveActiveLane(Phi->getOperand(0)));
+
+  using namespace VPlanPatternMatch;
+  return match(V, m_True()) || isa<VPActiveLaneMaskPHIRecipe>(V);
+}
+
+void VPlanTransforms::handleMaskedUniformReplicateRecipes(VPlan &Plan) {
+  // Find any predicated uniform replication recipes.
+  SmallVector<VPReplicateRecipe *> WorkList;
+  for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(
+           vp_depth_first_deep(Plan.getEntry())))
+    for (VPRecipeBase &R : *VPBB)
+      if (auto *Rep = dyn_cast<VPReplicateRecipe>(&R);
+          Rep && Rep->isUniform() && Rep->isPredicated())
+        WorkList.push_back(Rep);
+
+  VPTypeAnalysis TypeInfo(Plan.getCanonicalIV()->getScalarType());
+  for (VPReplicateRecipe *R : WorkList) {
+    VPValue *Mask = R->getMask();
+    // If the mask is known to always have at least one active lane,
+    // the mask can just be dropped. Otherwise, a check at runtime is needed
+    // that tests if any lane is active.
+    if (!maskKnownToHaveActiveLane(Mask)) {
+      VPBasicBlock *Pred = R->getParent(),
+                   *IfAny = Pred->splitAt(R->getIterator()),
+                   *Succ = IfAny->splitAt(++R->getIterator());
+      Succ->setName(Pred->getName() + ".join");
+      auto *AnyOf = new VPInstruction(VPInstruction::AnyOf, {Mask});
+      AnyOf->insertBefore(*Pred, Pred->end());
+      auto *CondBr = new VPInstruction(VPInstruction::BranchOnCond, {AnyOf});
+      CondBr->insertBefore(*Pred, Pred->end());
+      VPBlockUtils::connectBlocks(Pred, Succ);
+
+      // TODO: Use a scalar phi as soon as those are available.
+      auto *Phi = new VPWidenPHIRecipe(nullptr);
+      R->replaceAllUsesWith(Phi);
+      Phi->insertBefore(*Succ, Succ->begin());
+      Phi->addOperand(R);
+      Phi->addOperand(
+          Plan.getOrAddLiveIn(PoisonValue::get(TypeInfo.inferScalarType(R))));
+    }
+
+    auto *NewR = new VPReplicateRecipe(R->getUnderlyingInstr(),
+                                       drop_end(R->operands()), true, nullptr);
+    NewR->insertBefore(R);
+    R->replaceAllUsesWith(NewR);
+    R->eraseFromParent();
+  }
+}
+
 /// Remove redundant casts of inductions.
 ///
 /// Such redundant casts are casts of induction variables that can be ignored,
@@ -1557,6 +1613,7 @@ void VPlanTransforms::optimize(VPlan &Plan) {
   runPass(simplifyRecipes, Plan, *Plan.getCanonicalIV()->getScalarType());
   runPass(removeDeadRecipes, Plan);
 
+  runPass(handleMaskedUniformReplicateRecipes, Plan);
   runPass(createAndOptimizeReplicateRegions, Plan);
   runPass(mergeBlocksIntoPredecessors, Plan);
   runPass(licm, Plan);

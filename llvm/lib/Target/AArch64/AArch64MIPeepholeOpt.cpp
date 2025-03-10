@@ -835,6 +835,11 @@ bool AArch64MIPeepholeOpt::visitCopy(MachineInstr &MI) {
   return true;
 }
 
+// TODO: SVE : Add a opt. that propagates the masks of "sinks" such as
+// reductions or stores up to the operand arith. instructions, using the "sink"
+// mask instead of a all-true mask? Consider a element-wise select or so a sink
+// as well?
+
 bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;

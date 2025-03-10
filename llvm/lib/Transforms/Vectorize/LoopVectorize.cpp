@@ -3586,7 +3586,7 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
                         << *I << "\n");
       return;
     }
-    if (isPredicatedInst(I)) {
+    if (isPredicatedInst(I) && !(isa<LoadInst>(I) && !TheLoop->isInnermost())) {
       LLVM_DEBUG(
           dbgs() << "LV: Found not uniform due to requiring predication: " << *I
                  << "\n");
@@ -7544,6 +7544,17 @@ InstructionCost LoopVectorizationPlanner::cost(VPlan &Plan,
   InstructionCost Cost = precomputeCosts(Plan, VF, CostCtx);
 
   // Now compute and add the VPlan-based cost.
+  if (!OrigLoop->isInnermost() &&
+      Hints.getForce() == LoopVectorizeHints::FK_Enabled) {
+    // Only do this when FK_Enable is present as the scalar cost is not weighted
+    // yet!
+    // TODO: Weight the precomputeCosts and the scalar cost calc.!
+    // FIXME: Find out why the costs for inner-loop consec. loads is wrong!
+    // TODO: Wrong recipe?
+    CostCtx.OrigLoop = OrigLoop;
+    CostCtx.BFI = BFI;
+    CostCtx.IRDT = DT;
+  }
   Cost += Plan.cost(VF, CostCtx);
 #ifndef NDEBUG
   unsigned EstimatedWidth = getEstimatedRuntimeVF(VF, CM.getVScaleForTuning());
@@ -8855,7 +8866,8 @@ VPRecipeBuilder::handleReplication(Instruction *I, ArrayRef<VPValue *> Operands,
   // manually above for scalable vectors, which this assert needs to account for
   // as well.
   assert((Range.Start.isScalar() || !IsUniform || !IsPredicated ||
-          (Range.Start.isScalable() && isa<IntrinsicInst>(I))) &&
+          (Range.Start.isScalable() && isa<IntrinsicInst>(I)) ||
+          (isa<LoadInst>(I) && !OrigLoop->isInnermost())) &&
          "Should not predicate a uniform recipe");
   auto *Recipe = new VPReplicateRecipe(
       I, make_range(Operands.begin(), Operands.end()), IsUniform, BlockInMask);

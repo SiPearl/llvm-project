@@ -610,7 +610,10 @@ bool LoopVectorizationLegality::isUniformMemOp(Instruction &I,
   // stores from being uniform.  The current lowering simply doesn't handle
   // it; in particular, the cost model distinguishes scatter/gather from
   // scalar w/predication, and we currently rely on the scalar path.
-  return isUniform(Ptr, VF) && !blockNeedsPredication(I.getParent());
+  // TODO: Uniform predicated loads happen a lot inner loops.
+  return isUniform(Ptr, VF) &&
+         ((!TheLoop->isInnermost() && isa<LoadInst>(&I)) ||
+          !blockNeedsPredication(I.getParent()));
 }
 
 bool LoopVectorizationLegality::canVectorizeOuterLoop() {

@@ -809,6 +809,15 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
     for (VPBlockBase *Block : vp_depth_first_shallow(getEntry()))
       Cost += Block->cost(VF, Ctx);
 
+    if (Ctx.OrigLoop && !Ctx.OrigLoop->isInnermost()) {
+      auto Freq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
+                      .value_or(BlockFrequency(1));
+      Cost *= Freq.getFrequency();
+      LLVM_DEBUG(dbgs() << "Frequency weight for " << getName() << ": "
+                        << Freq.getFrequency() << ", Region cost of " << Cost
+                        << " for VF " << VF << "\n");
+    }
+
     InstructionCost BackedgeCost =
         ForceTargetInstructionCost.getNumOccurrences()
             ? InstructionCost(ForceTargetInstructionCost.getNumOccurrences())
@@ -816,13 +825,6 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
     LLVM_DEBUG(dbgs() << "Cost of " << BackedgeCost << " for VF " << VF
                       << ": vector loop backedge\n");
     Cost += BackedgeCost;
-    if (Ctx.OrigLoop && !Ctx.OrigLoop->isInnermost()) {
-      auto Freq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
-                      .value_or(BlockFrequency(1));
-      LLVM_DEBUG(dbgs() << "Frequency weight for " << getName() << ": "
-                        << Freq.getFrequency() << "\n");
-      Cost *= Freq.getFrequency();
-    }
     return Cost;
   }
 
@@ -1726,7 +1728,7 @@ VPCostContext::tryToFindIRBasicBlock(const VPBasicBlock *VPBB) const {
 static const Loop *getInnermostLoopFor(const BasicBlock *BB, const Loop *Lp) {
   for (const auto *SubLoop : Lp->getSubLoops())
     if (SubLoop->contains(BB))
-      return getInnermostLoopFor(BB, Lp);
+      return getInnermostLoopFor(BB, SubLoop);
 
   assert(Lp->contains(BB));
   return Lp;
@@ -1747,10 +1749,11 @@ VPCostContext::getBlockFrequencyEstimate(const VPBasicBlock *VPBB) const {
                           BFI->getEntryFreq().getFrequency());
 
   // Without BFI, just assume every loop has a avg. trip-count of around 32.
-  unsigned DepthDiff = getInnermostLoopFor(IRBB, OrigLoop)->getLoopDepth() -
-                       OrigLoop->getLoopDepth();
+  unsigned Depth = OrigLoop->contains(IRBB)
+                       ? getInnermostLoopFor(IRBB, OrigLoop)->getLoopDepth()
+                       : OrigLoop->getLoopDepth() - 1;
   uint64_t F = 1;
-  for (unsigned I = 0; I < DepthDiff; ++I)
+  for (unsigned I = 0; I < Depth; ++I)
     F *= 32;
   return BlockFrequency(F);
 }
