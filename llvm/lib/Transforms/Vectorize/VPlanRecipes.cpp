@@ -703,7 +703,13 @@ Value *VPInstruction::generate(VPTransformState &State) {
     return NewPhi;
   }
   case VPInstruction::AnyOf: {
-    // FIXME: Fix AnyOf for interleaving only?!
+    if (State.VF.isScalar()) {
+      Value *A = State.get(getOperand(0));
+      assert(!A->getType()->isIntegerTy(1) &&
+             "Expected scalar boolean operand");
+      return A;
+    }
+
     Value *A = State.get(getOperand(0));
     return Builder.CreateOrReduce(A);
   }

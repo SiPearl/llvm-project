@@ -454,7 +454,8 @@ void VPlanTransforms::handleMaskedUniformReplicateRecipes(VPlan &Plan) {
     if (auto *Region = VPBB->getParent(); Region && !Region->isReplicator())
       for (VPRecipeBase &R : *VPBB)
         if (auto *Rep = dyn_cast<VPReplicateRecipe>(&R);
-            Rep && Rep->isUniform() && Rep->isPredicated())
+            Rep && Rep->isUniform() && Rep->isPredicated() &&
+            Rep->mayReadOrWriteMemory())
           WorkList.push_back(Rep);
 
   // Build a list of recipes (in reverse topological order) that can be
@@ -1679,7 +1680,8 @@ void VPlanTransforms::optimize(VPlan &Plan) {
   runPass(simplifyRecipes, Plan, *Plan.getCanonicalIV()->getScalarType());
   runPass(removeDeadRecipes, Plan);
 
-  runPass(handleMaskedUniformReplicateRecipes, Plan);
+  if (!Plan.hasVF(ElementCount::getFixed(1)))
+    runPass(handleMaskedUniformReplicateRecipes, Plan);
   runPass(createAndOptimizeReplicateRegions, Plan);
   runPass(mergeBlocksIntoPredecessors, Plan);
   runPass(licm, Plan);
