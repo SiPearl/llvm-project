@@ -450,28 +450,89 @@ void VPlanTransforms::handleMaskedUniformReplicateRecipes(VPlan &Plan) {
   // Find any predicated uniform replication recipes.
   SmallVector<VPReplicateRecipe *> WorkList;
   for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(
-           vp_depth_first_deep(Plan.getEntry())))
-    for (VPRecipeBase &R : *VPBB)
-      if (auto *Rep = dyn_cast<VPReplicateRecipe>(&R);
-          Rep && Rep->isUniform() && Rep->isPredicated())
-        WorkList.push_back(Rep);
+           vp_depth_first_deep(Plan.getVectorLoopRegion())))
+    if (auto *Region = VPBB->getParent(); Region && !Region->isReplicator())
+      for (VPRecipeBase &R : *VPBB)
+        if (auto *Rep = dyn_cast<VPReplicateRecipe>(&R);
+            Rep && Rep->isUniform() && Rep->isPredicated())
+          WorkList.push_back(Rep);
+
+  // Build a list of recipes (in reverse topological order) that can be
+  // sunken into the same basic block as Seed.
+  auto BuildSinkableList =
+      [&](VPReplicateRecipe *Root, VPBasicBlock *OrigBB,
+          VPBasicBlock *AnyActiveBB) -> SmallSetVector<VPRecipeBase *, 4> {
+    SmallSetVector<VPRecipeBase *, 4> ToSink;
+    SmallVector<VPValue *, 4> WorkList;
+    WorkList.append(Root->op_begin(), Root->op_end());
+    while (!WorkList.empty()) {
+      VPValue *V = WorkList.pop_back_val();
+      VPRecipeBase *Def = V->getDefiningRecipe();
+      // Don't sink side-effecting recipes or ones from
+      // different basic blocks.
+      if (!Def || ToSink.contains(Def) || Def->getParent() != OrigBB ||
+          Def->isPhi() || Def->mayHaveSideEffects() ||
+          Def->mayReadOrWriteMemory())
+        continue;
+
+      // Don't sink if there is any user not also beeing sunken.
+      // This also ensures a topological order of the sunken recipes.
+      if (any_of(Def->definedValues(), [&](VPValue *V) -> bool {
+            return any_of(V->users(), [&](VPUser *U) -> bool {
+              auto *UR = cast<VPRecipeBase>(U);
+              return UR->getParent() != Root->getParent() &&
+                     !ToSink.contains(UR);
+            });
+          }))
+        continue;
+
+      ToSink.insert(Def);
+      WorkList.append(Def->op_begin(), Def->op_end());
+    }
+
+    return ToSink;
+  };
+
+  VPValue *PrevMask = nullptr;
+  VPBasicBlock *PrevBB = nullptr;
 
   VPTypeAnalysis TypeInfo(Plan.getCanonicalIV()->getScalarType());
-  for (VPReplicateRecipe *R : WorkList) {
+  for (VPReplicateRecipe *R : reverse(WorkList)) {
     VPValue *Mask = R->getMask();
     // If the mask is known to always have at least one active lane,
     // the mask can just be dropped. Otherwise, a check at runtime is needed
     // that tests if any lane is active.
     if (!maskKnownToHaveActiveLane(Mask)) {
-      VPBasicBlock *Pred = R->getParent(),
-                   *IfAny = Pred->splitAt(R->getIterator()),
-                   *Succ = IfAny->splitAt(++R->getIterator());
-      Succ->setName(Pred->getName() + ".join");
-      auto *AnyOf = new VPInstruction(VPInstruction::AnyOf, {Mask});
-      AnyOf->insertBefore(*Pred, Pred->end());
-      auto *CondBr = new VPInstruction(VPInstruction::BranchOnCond, {AnyOf});
-      CondBr->insertBefore(*Pred, Pred->end());
-      VPBlockUtils::connectBlocks(Pred, Succ);
+      VPBasicBlock *Pred = R->getParent(), *IfAny = nullptr, *Succ = nullptr;
+      // If at the end of the same basic block, there already is a branch around
+      // a uniform memory access, and the mask is the same, and there are no
+      // side-effecting instructions between this recipe and that block, then
+      // reuse the existing branch.
+      if (Mask == PrevMask && Pred == PrevBB &&
+          std::all_of(
+              ++R->getIterator(), PrevBB->getTerminator()->getIterator(),
+              [&](VPRecipeBase &R) {
+                return !R.mayHaveSideEffects() && !R.mayReadOrWriteMemory();
+              })) {
+        IfAny = cast<VPBasicBlock>(Pred->getSuccessors()[0]);
+        Succ = cast<VPBasicBlock>(Pred->getSuccessors()[1]);
+        R->moveBefore(*IfAny, IfAny->begin());
+        assert(IfAny->getSingleSuccessor() == Succ);
+      } else {
+        IfAny = Pred->splitAt(R->getIterator());
+        Succ = IfAny->splitAt(++R->getIterator());
+
+        IfAny->setName(Pred->getName() + ".anyactive");
+        Succ->setName(Pred->getName() + ".join");
+        auto *AnyOf = new VPInstruction(VPInstruction::AnyOf, {Mask});
+        AnyOf->insertBefore(*Pred, Pred->end());
+        auto *CondBr = new VPInstruction(VPInstruction::BranchOnCond, {AnyOf});
+        CondBr->insertBefore(*Pred, Pred->end());
+        VPBlockUtils::connectBlocks(Pred, Succ);
+
+        PrevMask = Mask;
+        PrevBB = Pred;
+      }
 
       // TODO: Use a scalar phi as soon as those are available.
       auto *Phi = new VPWidenPHIRecipe(nullptr);
@@ -480,6 +541,11 @@ void VPlanTransforms::handleMaskedUniformReplicateRecipes(VPlan &Plan) {
       Phi->addOperand(R);
       Phi->addOperand(
           Plan.getOrAddLiveIn(PoisonValue::get(TypeInfo.inferScalarType(R))));
+
+      // Sink other instructions only used by this one inside the IfAny block.
+      auto ToSink = BuildSinkableList(R, Pred, IfAny);
+      for (VPRecipeBase *SinkMe : reverse(ToSink))
+        SinkMe->moveBefore(*IfAny, R->getIterator());
     }
 
     auto *NewR = new VPReplicateRecipe(R->getUnderlyingInstr(),
