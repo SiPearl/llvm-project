@@ -810,12 +810,20 @@ InstructionCost VPRegionBlock::cost(ElementCount VF, VPCostContext &Ctx) {
       Cost += Block->cost(VF, Ctx);
 
     if (Ctx.OrigLoop && !Ctx.OrigLoop->isInnermost()) {
-      auto Freq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
-                      .value_or(BlockFrequency(1));
-      Cost *= Freq.getFrequency();
-      LLVM_DEBUG(dbgs() << "Frequency weight for " << getName() << ": "
-                        << Freq.getFrequency() << ", Region cost of " << Cost
-                        << " for VF " << VF << "\n");
+      auto EntryFreq = Ctx.getBlockFrequencyEstimate(getEntryBasicBlock())
+                           .value_or(BlockFrequency(1));
+      auto PreheaderFreq = Ctx.getBlockFrequencyEstimate(getPreheaderVPBB())
+                               .value_or(BlockFrequency(1));
+
+      // As, a.t.m., not every block individually, but instead regions
+      // as a whole are weighted, it is necessary to normalize by the freq.
+      // of the preheader. This is because a potential outer region will
+      // re-weight all inner costs, including already weighted inner regions.
+      auto Freq = EntryFreq.getFrequency() / PreheaderFreq.getFrequency();
+      Cost *= Freq;
+      LLVM_DEBUG(dbgs() << "LV: Freq. weight of " << getName() << ": " << Freq
+                        << ", weighted cost of " << Cost << " for VF " << VF
+                        << "\n");
     }
 
     InstructionCost BackedgeCost =
@@ -1692,6 +1700,8 @@ VPCostContext::tryToFindIRBasicBlock(const VPBasicBlock *VPBB) const {
 
   SmallSetVector<const BasicBlock *, 4> BBs;
   for (const VPRecipeBase &R : *VPBB) {
+    if (isa<VPCanonicalIVPHIRecipe>(&R))
+      return OrigLoop->getHeader();
     if (R.isPhi() || isa<VPBlendRecipe>(&R)) {
       const auto *UV = R.getVPSingleValue()->getUnderlyingValue();
       if (const auto *I = dyn_cast_or_null<Instruction>(UV))
@@ -1739,22 +1749,29 @@ VPCostContext::getBlockFrequencyEstimate(const VPBasicBlock *VPBB) const {
   assert(OrigLoop && "Cannot provide freq. estimates without this!");
   const auto *IRBB = tryToFindIRBasicBlock(VPBB);
   if (!IRBB) {
-    assert(VPBB->getParent() && "Unsupported for middle loop");
-    IRBB = tryToFindIRBasicBlock(
-        VPBB->getPlan()->getVectorLoopRegion()->getEntryBasicBlock());
+    assert(VPBB->getParent() &&
+           "Cannot get freq. est. of blocks outside vector loop regin.");
+    return BlockFrequency(1);
   }
 
   if (BFI)
-    return BlockFrequency(BFI->getBlockFreq(IRBB).getFrequency() /
-                          BFI->getEntryFreq().getFrequency());
+    // Note that this can return zero because the header freq. can be higher
+    // than that of a block behind a condition (and block frequencies are
+    // unit-less integers).
+    return BlockFrequency(
+        BFI->getBlockFreq(IRBB).getFrequency() /
+        BFI->getBlockFreq(OrigLoop->getHeader()).getFrequency());
 
-  // Without BFI, just assume every loop has a avg. trip-count of around 32.
-  unsigned Depth = OrigLoop->contains(IRBB)
-                       ? getInnermostLoopFor(IRBB, OrigLoop)->getLoopDepth()
-                       : OrigLoop->getLoopDepth() - 1;
+  if (!OrigLoop->contains(IRBB))
+    return BlockFrequency(1);
+
+  // Without BFI, just guess a avg. trip-count for all loops and assign a freq.
+  // based on the depth.
+  unsigned DepthDiff = getInnermostLoopFor(IRBB, OrigLoop)->getLoopDepth() -
+                       OrigLoop->getLoopDepth();
   uint64_t F = 1;
-  for (unsigned I = 0; I < Depth; ++I)
-    F *= 32;
+  for (unsigned I = 0; I < DepthDiff; ++I)
+    F *= VPCostContext::DefaultInnerLoopFreq;
   return BlockFrequency(F);
 }
 

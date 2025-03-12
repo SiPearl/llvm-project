@@ -374,6 +374,12 @@ struct VPCostContext {
   SmallPtrSet<Instruction *, 8> SkipCostComputation;
   TargetTransformInfo::TargetCostKind CostKind;
 
+  // If BFI is not available, the trip-count estimate of inner
+  // loops to use when computing costs.
+  static constexpr uint64_t DefaultInnerLoopFreq = 16;
+
+  // Additional information about the input IR needed
+  // for outer-loop vectorization or BOSCC:
   const DominatorTree *IRDT = nullptr;
   const Loop *OrigLoop = nullptr;
   const BlockFrequencyInfo *BFI = nullptr;
@@ -396,7 +402,9 @@ struct VPCostContext {
   TargetTransformInfo::OperandValueInfo getOperandInfo(VPValue *V) const;
 
   /// Get a estimate of the frequency of \p BB (before vectorization),
-  /// normalized w.r.t. the main vectorized loop.
+  /// normalized w.r.t. the main vectorized loop. The vectorized loop header
+  /// should have a frequency of one. Blocks in loops in inner loops will have
+  /// a higher frequency.
   std::optional<BlockFrequency>
   getBlockFrequencyEstimate(const VPBasicBlock *BB) const;
 

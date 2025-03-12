@@ -128,6 +128,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -5681,6 +5682,17 @@ InstructionCost LoopVectorizationCostModel::expectedCost(ElementCount VF) {
     addFullyUnrolledInstructionsToIgnore(TheLoop, Legal->getInductionVars(),
                                          ValuesToIgnoreForVF);
 
+  // In case of outer-loop vect., inner loops need to be weighted by the
+  // frequency that this inner block will probably have.
+  bool IsInnermost = TheLoop->isInnermost();
+  auto CalculateBlockWeight = [&](const BasicBlock *BB) -> uint64_t {
+    unsigned DepthDiff = LI->getLoopDepth(BB) - TheLoop->getLoopDepth();
+    uint64_t F = 1;
+    for (unsigned I = 0; I < DepthDiff; ++I)
+      F *= VPCostContext::DefaultInnerLoopFreq;
+    return F;
+  };
+
   // For each block.
   for (BasicBlock *BB : TheLoop->blocks()) {
     InstructionCost BlockCost;
@@ -5712,6 +5724,11 @@ InstructionCost LoopVectorizationCostModel::expectedCost(ElementCount VF) {
     // Legal is used so as to not include all blocks in tail folded loops.
     if (VF.isScalar() && Legal->blockNeedsPredication(BB))
       BlockCost /= getPredBlockCostDivisor(CostKind);
+
+    if (!IsInnermost)
+      // The VPlan-based cost model will not calculate these weights
+      // in the same way in case the loop needs predication.
+      BlockCost *= CalculateBlockWeight(BB);
 
     Cost += BlockCost;
   }
@@ -7549,8 +7566,6 @@ InstructionCost LoopVectorizationPlanner::cost(VPlan &Plan,
     // Only do this when FK_Enable is present as the scalar cost is not weighted
     // yet!
     // TODO: Weight the precomputeCosts and the scalar cost calc.!
-    // FIXME: Find out why the costs for inner-loop consec. loads is wrong!
-    // TODO: Wrong recipe?
     CostCtx.OrigLoop = OrigLoop;
     CostCtx.BFI = BFI;
     CostCtx.IRDT = DT;
