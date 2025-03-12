@@ -3586,7 +3586,7 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
                         << *I << "\n");
       return;
     }
-    if (isPredicatedInst(I) && !(isa<LoadInst>(I) && !TheLoop->isInnermost())) {
+    if (isPredicatedInst(I) && !isa<LoadInst>(I)) {
       LLVM_DEBUG(
           dbgs() << "LV: Found not uniform due to requiring predication: " << *I
                  << "\n");
@@ -8867,7 +8867,7 @@ VPRecipeBuilder::handleReplication(Instruction *I, ArrayRef<VPValue *> Operands,
   // as well.
   assert((Range.Start.isScalar() || !IsUniform || !IsPredicated ||
           (Range.Start.isScalable() && isa<IntrinsicInst>(I)) ||
-          (isa<LoadInst>(I) && !OrigLoop->isInnermost())) &&
+          isa<LoadInst>(I)) &&
          "Should not predicate a uniform recipe");
   auto *Recipe = new VPReplicateRecipe(
       I, make_range(Operands.begin(), Operands.end()), IsUniform, BlockInMask);

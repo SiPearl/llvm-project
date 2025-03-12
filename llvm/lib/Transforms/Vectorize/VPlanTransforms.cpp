@@ -1680,8 +1680,9 @@ void VPlanTransforms::optimize(VPlan &Plan) {
   runPass(simplifyRecipes, Plan, *Plan.getCanonicalIV()->getScalarType());
   runPass(removeDeadRecipes, Plan);
 
-  if (!Plan.hasVF(ElementCount::getFixed(1)))
+  if (!Plan.hasScalarVFOnly())
     runPass(handleMaskedUniformReplicateRecipes, Plan);
+
   runPass(createAndOptimizeReplicateRegions, Plan);
   runPass(mergeBlocksIntoPredecessors, Plan);
   runPass(licm, Plan);

@@ -68,15 +68,15 @@ attributes #0 = { "target-cpu"="knl" }
 
 ; CHECK-LABEL: PR40816
 ;
-; Check that scalar with predication instructions are not considered uniform
-; after vectorization, because that results in replicating a region instead of
-; having a single instance (out of VF). The predication stems from a tiny count
+; Check that scalar with predication instructions are considered uniform
+; after vectorization, because that generted instructions will be behind a check
+; that at least one lane is active. The predication stems from a tiny count
 ; of 3 leading to folding the tail by masking using icmp ule <i, i+1> <= <2, 2>.
 ;
 ; CHECK:     LV: Found trip count: 3
 ; CHECK:     LV: Found uniform instruction:   {{%.*}} = icmp eq i32 {{%.*}}, 0
-; CHECK-NOT: LV: Found uniform instruction:   {{%.*}} = load i32, ptr {{%.*}}, align 1
-; CHECK:     LV: Found not uniform due to requiring predication:  {{%.*}} = load i32, ptr {{%.*}}, align 1
+; CHECK:     LV: Found uniform instruction:   {{%.*}} = load i32, ptr {{%.*}}, align 1
+; CHECK-NOT: LV: Found not uniform due to requiring predication:  {{%.*}} = load i32, ptr {{%.*}}, align 1
 ; CHECK:     LV: Found scalar instruction:   {{%.*}} = getelementptr inbounds [3 x i32], ptr @a, i32 0, i32 {{%.*}}
 ;
 ; FORCE-LABEL: @PR40816(
