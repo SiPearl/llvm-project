@@ -93,6 +93,91 @@ TEST_F(VPVerifierTest, VPInstructionUseBeforeDefDifferentBB) {
 #endif
 }
 
+TEST_F(VPVerifierTest, VPWidenPHIRecipeInHeaderDefDoesNotDomUse) {
+  VPlan &Plan = getPlan();
+
+  VPBasicBlock *Entry = Plan.getEntry();
+  VPBasicBlock *LoopBody = Plan.createVPBasicBlock("loop.body");
+  VPRegionBlock *LoopRegion =
+      Plan.createVPRegionBlock(LoopBody, LoopBody, "loop.region");
+
+  VPValue *One = Plan.getOrAddLiveIn(ConstantInt::get(Type::getInt32Ty(C), 1));
+  auto *CanIV = new VPCanonicalIVPHIRecipe(One, {});
+  auto *ExitCond = new VPInstruction(VPInstruction::BranchOnCond, {CanIV});
+  auto *DefI = new VPInstruction(Instruction::Add, {CanIV, One});
+  auto *Phi = new VPWidenPHIRecipe(nullptr);
+  LoopBody->appendRecipe(CanIV);
+  LoopBody->appendRecipe(Phi);
+  LoopBody->appendRecipe(DefI);
+  LoopBody->appendRecipe(ExitCond);
+
+  // This will lead to a invalid VPlan, the backedge value must always be
+  // the second operand.
+  Phi->addOperand(DefI);
+  Phi->addOperand(One);
+
+  VPBlockUtils::connectBlocks(Entry, LoopRegion);
+  VPBlockUtils::connectBlocks(LoopRegion, Plan.getScalarHeader());
+
+#if GTEST_HAS_STREAM_REDIRECTION
+  ::testing::internal::CaptureStderr();
+#endif
+  EXPECT_FALSE(verifyVPlanIsValid(Plan));
+#if GTEST_HAS_STREAM_REDIRECTION
+  EXPECT_STREQ(
+      "Found VPWidenPHIRecipe where a incoming value does not dominate its use",
+      ::testing::internal::GetCapturedStderr().substr(0, 71).c_str());
+#endif
+}
+
+TEST_F(VPVerifierTest, VPWidenPHIRecipeDefDoesNotDomUse) {
+  VPlan &Plan = getPlan();
+
+  VPBasicBlock *Entry = Plan.getEntry();
+  VPBasicBlock *LoopBody = Plan.createVPBasicBlock("loop.body"),
+               *IfTrue = Plan.createVPBasicBlock("if.true"),
+               *IfFalse = Plan.createVPBasicBlock("if.false"),
+               *LoopLatch = Plan.createVPBasicBlock("loop.latch");
+  VPRegionBlock *LoopRegion =
+      Plan.createVPRegionBlock(LoopBody, LoopLatch, "loop.region");
+
+  VPValue *One = Plan.getOrAddLiveIn(ConstantInt::get(Type::getInt32Ty(C), 1));
+  auto *CanIV = new VPCanonicalIVPHIRecipe(One, {});
+  auto *ExitCond = new VPInstruction(VPInstruction::BranchOnCond, {CanIV});
+  auto *InnerCond = new VPInstruction(VPInstruction::BranchOnCond, {One});
+  auto *DefI = new VPInstruction(Instruction::Add, {CanIV, One});
+  auto *Phi = new VPWidenPHIRecipe(nullptr);
+  LoopBody->appendRecipe(CanIV);
+  LoopBody->appendRecipe(InnerCond);
+  IfTrue->appendRecipe(DefI);
+  LoopLatch->appendRecipe(Phi);
+  LoopLatch->appendRecipe(ExitCond);
+
+  // This will lead to a invalid VPlan, DefI is defined in the first predecessor
+  // but the second operand of this phi.
+  Phi->addOperand(One);
+  Phi->addOperand(DefI);
+
+  VPBlockUtils::connectBlocks(Entry, LoopRegion);
+  IfTrue->setParent(LoopRegion);
+  IfFalse->setParent(LoopRegion);
+  VPBlockUtils::connectBlocks(LoopBody, IfTrue);
+  VPBlockUtils::connectBlocks(LoopBody, IfFalse);
+  VPBlockUtils::connectBlocks(IfTrue, LoopLatch);
+  VPBlockUtils::connectBlocks(IfFalse, LoopLatch);
+  VPBlockUtils::connectBlocks(LoopRegion, Plan.getScalarHeader());
+
+#if GTEST_HAS_STREAM_REDIRECTION
+  ::testing::internal::CaptureStderr();
+#endif
+  EXPECT_FALSE(verifyVPlanIsValid(Plan));
+#if GTEST_HAS_STREAM_REDIRECTION
+  EXPECT_STREQ(
+      "Found VPWidenPHIRecipe where a incoming value does not dominate its use",
+      ::testing::internal::GetCapturedStderr().substr(0, 71).c_str());
+#endif
+}
+
 TEST_F(VPVerifierTest, VPBlendUseBeforeDefDifferentBB) {
   VPlan &Plan = getPlan();
   IntegerType *Int32 = IntegerType::get(C, 32);

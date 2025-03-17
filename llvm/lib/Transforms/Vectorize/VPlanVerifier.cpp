@@ -37,6 +37,9 @@ class VPlanVerifier {
   // VPHeaderPHIRecipes.
   bool verifyPhiRecipes(const VPBasicBlock *VPBB);
 
+  bool verifyWidenPhiRecipe(const VPRegionBlock *R,
+                            const VPWidenPHIRecipe *Phi);
+
   /// Verify that \p EVL is used correctly. The user must be either in
   /// EVL-based recipes as a last operand or VPInstruction::Add which is
   /// incoming value into EVL's recipe.
@@ -69,6 +72,44 @@ public:
 };
 } // namespace
 
+bool VPlanVerifier::verifyWidenPhiRecipe(const VPRegionBlock *R,
+                                         const VPWidenPHIRecipe *Phi) {
+  SmallVector<const VPBlockBase *, 2> Preds;
+  if (Phi->getParent() == R->getEntryBasicBlock()) {
+    const VPBasicBlock *Preheader =
+        R->getSinglePredecessor()->getExitingBasicBlock();
+    const VPBasicBlock *Exiting = R->getExitingBasicBlock();
+    if (Phi->getNumOperands() != 2) {
+      errs() << "Found VPWidenPHIRecipe in a loop header with bad number "
+                "incoming blocks";
+      return false;
+    }
+    Preds = {Preheader, Exiting};
+  } else {
+    const VPBasicBlock *ParentBB = Phi->getParent();
+    if (ParentBB->getNumPredecessors() != Phi->getNumOperands()) {
+      errs() << "Found VPWidenPHIRecipe with incoming blocks not matching the "
+                "number predecessors";
+      return false;
+    }
+    Preds = {ParentBB->getPredecessors().begin(),
+             ParentBB->getPredecessors().end()};
+  }
+
+  for (unsigned I = 0; I < Phi->getNumOperands(); I++) {
+    const auto *IncBB = Preds[I]->getExitingBasicBlock();
+    const auto *IncVal = Phi->getOperand(I);
+    if (const auto *R = IncVal->getDefiningRecipe();
+        R && !VPDT.dominates(R->getParent(), IncBB)) {
+      errs() << "Found VPWidenPHIRecipe where a incoming value does not "
+                "dominate its use";
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool VPlanVerifier::verifyPhiRecipes(const VPBasicBlock *VPBB) {
   auto RecipeI = VPBB->begin();
   auto End = VPBB->end();
@@ -98,6 +139,7 @@ bool VPlanVerifier::verifyPhiRecipes(const VPBasicBlock *VPBB) {
       return false;
     }
 
+
     // Check if the recipe operands match the number of predecessors.
     // TODO Extend to other phi-like recipes.
     if (auto *PhiIRI = dyn_cast<VPIRPhi>(&*RecipeI)) {
@@ -109,6 +151,15 @@ bool VPlanVerifier::verifyPhiRecipes(const VPBasicBlock *VPBB) {
         return false;
       }
     }
+
+    if (const auto *WidenPhi = dyn_cast<VPWidenPHIRecipe>(RecipeI))
+      if (!verifyWidenPhiRecipe(ParentR, WidenPhi)) {
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+        errs() << ": ";
+        WidenPhi->dump();
+#endif
+        return false;
+      }
 
     RecipeI++;
   }
