@@ -286,6 +286,7 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr %A, ptr %B) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Non vectorizable stores to invariant address were not found in loop.
 ; CHECK-NEXT:      SCEV assumptions:
+; CHECK-NEXT:      {{\{\{}}%B,+,(4 * %L)}<%middle.loop>,+,(4 + (4 * %M * %L))}<%inner.loop> Added Flags: <nusw>
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    middle.loop:
@@ -309,6 +310,8 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr %A, ptr %B) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Non vectorizable stores to invariant address were not found in loop.
 ; CHECK-NEXT:      SCEV assumptions:
+; CHECK-NEXT:      {{\{\{\{}}%A,+,(4 * %M * %L)}<%outer.loop>,+,(4 * %L)}<%middle.loop>,+,4}<%inner.loop> Added Flags: <nusw>
+; CHECK-NEXT:      {{\{\{}}%B,+,(4 * %L)}<%middle.loop>,+,(4 + (4 * %M * %L))}<%inner.loop> Added Flags: <nusw>
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    outer.loop:
@@ -332,6 +335,8 @@ define void @quuz(i64 %N, i64 %M, i64 %L, ptr %A, ptr %B) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Non vectorizable stores to invariant address were not found in loop.
 ; CHECK-NEXT:      SCEV assumptions:
+; CHECK-NEXT:      {{\{\{\{}}%A,+,(4 * %M * %L)}<%outer.loop>,+,(4 * %L)}<%middle.loop>,+,4}<%inner.loop> Added Flags: <nusw>
+; CHECK-NEXT:      {{\{\{}}%B,+,(4 * %L)}<%middle.loop>,+,(4 + (4 * %M * %L))}<%inner.loop> Added Flags: <nusw>
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ;

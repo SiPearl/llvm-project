@@ -11061,9 +11061,14 @@ preparePlanForEpilogueVectorLoop(VPlan &Plan, Loop *L,
 }
 
 bool LoopVectorizePass::processLoop(Loop *L) {
-  LLVM_DEBUG(dbgs() << "\nLV: Checking a loop in '"
-                    << L->getHeader()->getParent()->getName() << "' from "
-                    << L->getLocStr() << "\n");
+  LLVM_DEBUG({
+    dbgs() << "\nLV: Checking a loop in '"
+           << L->getHeader()->getParent()->getName() << "' from "
+           << L->getLocStr();
+    if (ExperimentalOLVInClassicPath)
+      dbgs() << " with header %" << L->getHeader()->getNameOrAsOperand();
+    dbgs() << "\n";
+  });
 
   LoopVectorizeHints Hints(L, InterleaveOnlyWhenForced, *ORE, TTI);
 
@@ -11512,48 +11517,53 @@ LoopVectorizeResult LoopVectorizePass::runImpl(Function &F) {
     Changed |= CFGChanged |=
         simplifyLoop(L, DT, LI, SE, AC, nullptr, false /* PreserveLCSSA */);
 
-  // Build up a worklist of inner-loops to vectorize. This is necessary as
-  // the act of vectorizing or partially unrolling a loop creates new loops
-  // and can invalidate iterators across the loops.
+  // Start by collecting inner-most loops, or loops on which vectorization is
+  // forced.
   SmallVector<Loop *, 8> Worklist;
-
   for (Loop *L : *LI)
     collectSupportedLoops(*L, LI, ORE, Worklist);
 
-  LoopsAnalyzed += Worklist.size();
-
-  // Now walk the identified inner loops.
+  DenseMap<Loop *, bool> VisitedLoops;
   while (!Worklist.empty()) {
     Loop *L = Worklist.pop_back_val();
-
-    // For the inner loops we actually process, form LCSSA to simplify the
-    // transform.
+    assert(!VisitedLoops.contains(L) && "Loop already visited!");
     Changed |= formLCSSARecursively(*L, *DT, LI, SE);
 
+    LoopsAnalyzed += 1;
     bool Vectorized = processLoop(L);
-
-    // In case vectorization of a outer loop failed, add subloops to the
-    // worklist, so that they are visited. When stress-testing, re-vectorize the
-    // subloops even if they are now in the tail of a already vectorized loop.
-    // TODO: Ideally, the VPlans for outer and inner loops would be available
-    // at the same time, the VPlan costs would be normalized by their loop depth
-    // level, and a cost-model driven choice between outer- and inner loop vect.
-    // could be done.
-    if (!Vectorized || ExperimentalOLVStressTest)
-      for (Loop *SubLoop : L->getSubLoops())
-        collectSupportedLoops(*SubLoop, LI, ORE, Worklist,
-                              /*CFGKnownToBeReducible*/ true);
-
+    VisitedLoops[L] = Vectorized;
     Changed |= CFGChanged |= Vectorized;
-
-    if (Changed) {
+    if (Changed)
       LAIs->clear();
-
+    if (Vectorized) {
 #ifndef NDEBUG
       if (VerifySCEV)
         SE->verify();
 #endif
+      continue;
     }
+
+    // If all sub-loops of a loop have been visited but not vectorized,
+    // try to vectorize that loop if outer-loop vect. is enabled.
+    // TODO: For now, only do that for loops explicitly annotated as parallel.
+    Loop *ParentLoop = L->getParentLoop();
+    if (ParentLoop && ExperimentalOLVInClassicPath &&
+        all_of(ParentLoop->getSubLoops(),
+               [&](Loop *L) {
+                 auto Iter = VisitedLoops.find(L);
+                 return Iter != VisitedLoops.end() && !Iter->second;
+               }) &&
+        ParentLoop->isAnnotatedParallel())
+      Worklist.push_back(ParentLoop);
+
+    // In case of OLV stress-testing, the worklist is filled with outer-most
+    // loops first, so the inner ones need to be handled next.
+    if (ExperimentalOLVStressTest && !L->isInnermost() &&
+        all_of(L->getSubLoops(),
+               [&](Loop *L) { return !VisitedLoops.contains(L); }))
+      for (Loop *SubLoop : L->getSubLoops())
+        collectSupportedLoops(*SubLoop, LI, ORE, Worklist,
+                              /*CFGKnownToBeReducible*/ true);
   }
 
   // Process each loop nest in the function.
