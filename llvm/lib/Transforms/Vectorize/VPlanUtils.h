@@ -107,6 +107,25 @@ class VPBlockUtils {
 public:
   VPBlockUtils() = delete;
 
+  /// Disconnect \p OldPred from \p Succ and connect \p NewPred to \p Succ
+  /// instead, but also swaping phi operands in the successor if necessary.
+  static void replacePredecessor(VPBlockBase *OldPred, VPBlockBase *NewPred,
+                                 VPBlockBase *Succ) {
+    Succ->replacePredecessor(OldPred, NewPred);
+    OldPred->removeSuccessor(Succ);
+    NewPred->appendSuccessor(Succ);
+  }
+
+  // Disconnect \p Pred and \p OldSucc and connect \p Pred and \p NewSucc
+  // instead, but in a way that the successor order or \p Pred does not
+  // change.
+  static void replaceSuccessor(VPBlockBase *OldSucc, VPBlockBase *NewSucc,
+                               VPBlockBase *Pred) {
+    Pred->replaceSuccessor(OldSucc, NewSucc);
+    OldSucc->removePredecessor(Pred);
+    NewSucc->appendPredecessor(Pred);
+  }
+
   /// Insert disconnected VPBlockBase \p NewBlock after \p BlockPtr. Add \p
   /// NewBlock as successor of \p BlockPtr and \p BlockPtr as predecessor of \p
   /// NewBlock, and propagate \p BlockPtr parent to \p NewBlock. \p BlockPtr's
@@ -124,6 +143,9 @@ public:
     }
     BlockPtr->clearSuccessors();
     connectBlocks(BlockPtr, NewBlock);
+    VPRegionBlock *Parent = BlockPtr->getParent();
+    if (Parent && Parent->getExiting() == BlockPtr)
+      Parent->setExiting(NewBlock);
   }
 
   /// Insert disconnected block \p NewBlock before \p Blockptr. First
@@ -141,6 +163,9 @@ public:
     }
     BlockPtr->clearPredecessors();
     connectBlocks(NewBlock, BlockPtr);
+    VPRegionBlock *Parent = BlockPtr->getParent();
+    if (Parent && Parent->getEntry() == BlockPtr)
+      Parent->setEntry(NewBlock);
   }
 
   /// Insert disconnected VPBlockBases \p IfTrue and \p IfFalse after \p

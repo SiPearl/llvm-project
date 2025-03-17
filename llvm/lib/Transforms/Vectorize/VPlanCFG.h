@@ -26,12 +26,10 @@ namespace llvm {
 //===----------------------------------------------------------------------===//
 
 /// Iterator to traverse all successors of a VPBlockBase node. This includes the
-/// entry node of VPRegionBlocks. Exit blocks of a region implicitly have their
-/// parent region's successors. This ensures all blocks in a region are visited
-/// before any blocks in a successor region when doing a reverse post-order
-// traversal of the graph. Region blocks themselves traverse only their entries
-// directly and not their successors. Those will be traversed when a region's
-// exiting block is traversed
+/// entry node of VPRegionBlocks.
+/// NOTE: A region's single successor is the entry node.
+///       A region exiting node has the regions successor.
+///       Backedges are ignored.
 template <typename BlockPtrTy>
 class VPAllSuccessorsIterator
     : public iterator_facade_base<VPAllSuccessorsIterator<BlockPtrTy>,
@@ -109,6 +107,87 @@ public:
   VPAllSuccessorsIterator operator++(int X) {
     VPAllSuccessorsIterator Orig = *this;
     SuccessorIdx++;
+    return Orig;
+  }
+};
+
+/// Iterator to traverse all predecessors of a VPBlockBase node. This includes
+/// the region node for a region's entry node. NOTE: The successor of a region
+/// has the exiting block as predecessor.
+///       A region entry node has the region as single predecessor.
+///       Backedges are ignored.
+template <typename BlockPtrTy>
+class VPAllPredecessorsIterator
+    : public iterator_facade_base<VPAllSuccessorsIterator<BlockPtrTy>,
+                                  std::bidirectional_iterator_tag,
+                                  VPBlockBase> {
+  BlockPtrTy Block;
+  size_t PredecessorIdx;
+
+  /// Templated helper to dereference predecessor \p PredIdx of \p Block. Used
+  /// by both the const and non-const operator* implementations.
+  template <typename T1> static T1 deref(T1 Block, unsigned PredIdx) {
+    if (Block->getNumPredecessors() == 0) {
+      assert(PredIdx == 0);
+      auto *R = Block->getParent();
+      return R;
+    }
+
+    auto *Pred = Block->getPredecessors()[PredIdx];
+    if (auto *R = dyn_cast<VPRegionBlock>(Pred))
+      return R->getExiting();
+    return Pred;
+  }
+
+public:
+  /// Used by iterator_facade_base with bidirectional_iterator_tag.
+  using reference = BlockPtrTy;
+
+  VPAllPredecessorsIterator(BlockPtrTy Block, size_t Idx = 0)
+      : Block(Block), PredecessorIdx(Idx) {}
+  VPAllPredecessorsIterator(const VPAllPredecessorsIterator &Other)
+      : Block(Other.Block), PredecessorIdx(Other.PredecessorIdx) {}
+
+  VPAllPredecessorsIterator &operator=(const VPAllPredecessorsIterator &R) {
+    Block = R.Block;
+    PredecessorIdx = R.PredecessorIdx;
+    return *this;
+  }
+
+  static VPAllPredecessorsIterator end(BlockPtrTy Block) {
+    unsigned NumPreds = Block->getNumPredecessors();
+    if (NumPreds == 0)
+      if (auto *R = Block->getParent())
+        return {Block, 1};
+
+    return {Block, NumPreds};
+  }
+
+  bool operator==(const VPAllPredecessorsIterator &R) const {
+    return Block == R.Block && PredecessorIdx == R.PredecessorIdx;
+  }
+
+  bool operator!=(const VPAllPredecessorsIterator &R) const {
+    return !(*this == R);
+  }
+
+  const VPBlockBase *operator*() const { return deref(Block, PredecessorIdx); }
+
+  BlockPtrTy operator*() { return deref(Block, PredecessorIdx); }
+
+  VPAllPredecessorsIterator &operator++() {
+    PredecessorIdx++;
+    return *this;
+  }
+
+  VPAllPredecessorsIterator &operator--() {
+    PredecessorIdx--;
+    return *this;
+  }
+
+  VPAllPredecessorsIterator operator++(int X) {
+    VPAllSuccessorsIterator Orig = *this;
+    PredecessorIdx++;
     return Orig;
   }
 };
@@ -283,18 +362,16 @@ template <> struct GraphTraits<const VPBlockBase *> {
 /// predecessors recursively through regions.
 template <> struct GraphTraits<Inverse<VPBlockBase *>> {
   using NodeRef = VPBlockBase *;
-  using ChildIteratorType = SmallVectorImpl<VPBlockBase *>::iterator;
+  using ChildIteratorType = VPAllPredecessorsIterator<VPBlockBase *>;
 
-  static NodeRef getEntryNode(Inverse<NodeRef> B) {
-    llvm_unreachable("not implemented");
-  }
+  static NodeRef getEntryNode(Inverse<NodeRef> N) { return N.Graph; }
 
   static inline ChildIteratorType child_begin(NodeRef N) {
-    llvm_unreachable("not implemented");
+    return ChildIteratorType(N);
   }
 
   static inline ChildIteratorType child_end(NodeRef N) {
-    llvm_unreachable("not implemented");
+    return ChildIteratorType::end(N);
   }
 };
 

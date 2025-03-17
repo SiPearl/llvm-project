@@ -417,7 +417,7 @@ public:
   /// Return the cost of this recipe, taking into account if the cost
   /// computation should be skipped and the ForceTargetInstructionCost flag.
   /// Also takes care of printing the cost for debugging.
-  InstructionCost cost(ElementCount VF, VPCostContext &Ctx);
+  InstructionCost cost(ElementCount VF, VPCostContext &Ctx) const;
 
   /// Insert an unlinked recipe into a basic block immediately before
   /// the specified recipe.
@@ -579,10 +579,10 @@ public:
 
   /// Returns the underlying instruction.
   Instruction *getUnderlyingInstr() {
-    return cast<Instruction>(getUnderlyingValue());
+    return cast_or_null<Instruction>(getUnderlyingValue());
   }
   const Instruction *getUnderlyingInstr() const {
-    return cast<Instruction>(getUnderlyingValue());
+    return cast_or_null<Instruction>(getUnderlyingValue());
   }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -2096,6 +2096,9 @@ class VPWidenPHIRecipe : public VPSingleDefRecipe, public VPPhiAccessors {
 protected:
   const VPRecipeBase *getAsRecipe() const override { return this; }
 
+  /// True if this is a active lane mask.
+  bool IsActiveLaneMask = false;
+
 public:
   /// Create a new VPWidenPHIRecipe for \p Phi with start value \p Start and
   /// debug location \p DL.
@@ -2119,6 +2122,10 @@ public:
 
   VP_CLASSOF_IMPL(VPDef::VPWidenPHISC)
 
+  bool isActiveLaneMask() const { return IsActiveLaneMask; }
+
+  void setIsActiveLaneMask(bool IsALM) { IsActiveLaneMask = IsALM; }
+
   /// Generate the phi/select nodes.
   void execute(VPTransformState &State) override;
 
@@ -2127,6 +2134,15 @@ public:
   void print(raw_ostream &O, const Twine &Indent,
              VPSlotTracker &SlotTracker) const override;
 #endif
+
+  InstructionCost computeCost(ElementCount VF,
+                              VPCostContext &Ctx) const override;
+
+  /// Returns the \p I th incoming VPBasicBlock.
+  VPBasicBlock *getIncomingBlock(unsigned I);
+
+  /// Returns the \p I th incoming VPValue.
+  VPValue *getIncomingValue(unsigned I) const { return getOperand(I); }
 };
 
 /// A recipe for handling first-order recurrence phis. The start value is the

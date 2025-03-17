@@ -8,6 +8,7 @@
 
 #include "VPlanUtils.h"
 #include "VPlanCFG.h"
+#include "VPlan.h"
 #include "VPlanPatternMatch.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
@@ -115,12 +116,17 @@ bool vputils::isUniformAcrossVFsAndUFs(VPValue *V) {
                all_of(R->operands(), isUniformAcrossVFsAndUFs);
       })
       .Case<VPInstruction>([](const auto *VPI) {
-        return VPI->isScalarCast() &&
-               isUniformAcrossVFsAndUFs(VPI->getOperand(0));
+	// VPInstruction PHIs are always scalar.
+	return VPI->isPhi() || (VPI->isScalarCast() &&
+                               isUniformAcrossVFsAndUFs(VPI->getOperand(0)));
       })
       .Case<VPWidenCastRecipe>([](const auto *R) {
         // A cast is uniform according to its operand.
         return isUniformAcrossVFsAndUFs(R->getOperand(0));
+      })
+      .Case<VPInstruction>([](const VPInstruction *I) {
+        // VPInstruction PHIs are always scalar.
+        return I->isPhi();
       })
       .Default([](const VPRecipeBase *) { // A value is considered non-uniform
                                           // unless proven otherwise.

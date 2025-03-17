@@ -244,7 +244,7 @@ void VPRecipeBase::moveBefore(VPBasicBlock &BB,
   insertBefore(BB, I);
 }
 
-InstructionCost VPRecipeBase::cost(ElementCount VF, VPCostContext &Ctx) {
+InstructionCost VPRecipeBase::cost(ElementCount VF, VPCostContext &Ctx) const {
   // Get the underlying instruction for the recipe, if there is one. It is used
   // to
   //   * decide if cost computation should be skipped for this recipe,
@@ -741,6 +741,9 @@ Value *VPInstruction::generate(VPTransformState &State) {
     return Builder.CreatePtrAdd(Ptr, Addend, Name, getGEPNoWrapFlags());
   }
   case VPInstruction::AnyOf: {
+    if (State.VF.isScalar())
+      return State.get(getOperand(0));
+
     Value *A = State.get(getOperand(0));
     return Builder.CreateOrReduce(A);
   }
@@ -823,10 +826,17 @@ InstructionCost VPInstruction::computeCost(ElementCount VF,
                                   I32Ty, {Arg0Ty, I32Ty, I1Ty});
     return Ctx.TTI.getIntrinsicInstrCost(Attrs, Ctx.CostKind);
   }
+  case VPInstruction::BranchOnCond: {
+    if (getParent()->getNumSuccessors() == 0)
+      return 0; // Backedge costs are already taken into account at the region.
+
+    return Ctx.TTI.getCFInstrCost(Instruction::Br, Ctx.CostKind,
+                                  getUnderlyingInstr());
+  }
   default:
     // TODO: Compute cost other VPInstructions once the legacy cost model has
     // been retired.
-    assert(!getUnderlyingValue() &&
+    assert((!getUnderlyingValue() || getOpcode() == Instruction::PHI) &&
            "unexpected VPInstruction witht underlying value");
     return 0;
   }
@@ -3933,9 +3943,7 @@ void VPReductionPHIRecipe::print(raw_ostream &O, const Twine &Indent,
 #endif
 
 void VPWidenPHIRecipe::execute(VPTransformState &State) {
-  assert(EnableVPlanNativePath &&
-         "Non-native vplans are not expected to have VPWidenPHIRecipes.");
-
+  State.setDebugLocFrom(getDebugLoc());
   Value *Op0 = State.get(getOperand(0));
   Type *VecTy = Op0->getType();
   Value *VecPhi = State.Builder.CreatePHI(VecTy, 2, Name);
@@ -3952,6 +3960,14 @@ void VPWidenPHIRecipe::print(raw_ostream &O, const Twine &Indent,
   printPhiOperands(O, SlotTracker);
 }
 #endif
+
+InstructionCost VPWidenPHIRecipe::computeCost(ElementCount VF,
+                                              VPCostContext &Ctx) const {
+  if (getNumOperands() == 1)
+    return 0; // LCSSA Phis can be considered free.
+
+  return Ctx.TTI.getCFInstrCost(Instruction::PHI, TTI::TCK_RecipThroughput);
+}
 
 // TODO: It would be good to use the existing VPWidenPHIRecipe instead and
 // remove VPActiveLaneMaskPHIRecipe.
