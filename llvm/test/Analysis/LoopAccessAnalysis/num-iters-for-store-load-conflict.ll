@@ -273,8 +273,13 @@ define void @unknown_loop_bounds(i64 %x, i64 %y) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    outer.header:
-; CHECK-NEXT:      Report: loop is not the innermost loop
+; CHECK-NEXT:      Report: unsafe dependent memory operations in loop.
+; CHECK-NEXT:  Backward loop carried data dependence.
 ; CHECK-NEXT:      Dependences:
+; CHECK-NEXT:        Backward:
+; CHECK-NEXT:            %l = load double, ptr %gep.0, align 8 ->
+; CHECK-NEXT:            store double %l, ptr %gep.1, align 8
+; CHECK-EMPTY:
 ; CHECK-NEXT:      Run-time memory checks:
 ; CHECK-NEXT:      Grouped accesses:
 ; CHECK-EMPTY:

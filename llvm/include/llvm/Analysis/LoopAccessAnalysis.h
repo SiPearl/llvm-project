@@ -181,9 +181,10 @@ public:
   };
 
   MemoryDepChecker(PredicatedScalarEvolution &PSE, const Loop *L,
+                   const LoopInfo &LI,
                    const DenseMap<Value *, const SCEV *> &SymbolicStrides,
                    unsigned MaxTargetVectorWidthInBits)
-      : PSE(PSE), InnermostLoop(L), SymbolicStrides(SymbolicStrides),
+      : PSE(PSE), InnermostLoop(L), LI(LI), SymbolicStrides(SymbolicStrides),
         MaxTargetVectorWidthInBits(MaxTargetVectorWidthInBits) {}
 
   /// Register the location (instructions are given increasing numbers)
@@ -296,7 +297,9 @@ private:
   /// example we might assume a unit stride for a pointer in order to prove
   /// that a memory access is strided and doesn't wrap.
   PredicatedScalarEvolution &PSE;
+  // FIXME: Rename, is not always the inner-most one anymore!
   const Loop *InnermostLoop;
+  const LoopInfo &LI;
 
   /// Reference to map of pointer values to
   /// their stride symbols, if they have a symbolic stride.

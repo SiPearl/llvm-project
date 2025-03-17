@@ -58,8 +58,17 @@ define void @Test(ptr nocapture %obj, i64 %z) #0 {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    .outer.preheader:
-; CHECK-NEXT:      Report: loop is not the innermost loop
+; CHECK-NEXT:      Report: unsafe dependent memory operations in loop.
+; CHECK-NEXT:  Unknown data dependence.
 ; CHECK-NEXT:      Dependences:
+; CHECK-NEXT:        Unknown:
+; CHECK-NEXT:            %4 = load i32, ptr %1, align 4 ->
+; CHECK-NEXT:            store i32 %8, ptr %6, align 4
+; CHECK-EMPTY:
+; CHECK-NEXT:        Unknown:
+; CHECK-NEXT:            %3 = load i32, ptr %2, align 4 ->
+; CHECK-NEXT:            store i32 %8, ptr %6, align 4
+; CHECK-EMPTY:
 ; CHECK-NEXT:      Run-time memory checks:
 ; CHECK-NEXT:      Grouped accesses:
 ; CHECK-EMPTY:

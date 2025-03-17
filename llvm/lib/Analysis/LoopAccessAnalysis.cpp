@@ -23,6 +23,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
+#include "llvm/Analysis/DependenceAnalysis.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopIterator.h"
@@ -188,6 +189,23 @@ RuntimeCheckingPtrGroup::RuntimeCheckingPtrGroup(
   Members.push_back(Index);
 }
 
+static bool isInvariantToTheLoop(const Loop *L, ScalarEvolution &SE,
+                                 const SCEV *E) {
+  if (SE.isLoopInvariant(E, L))
+    return true;
+
+  if (auto *AddRec = dyn_cast<SCEVAddRecExpr>(E);
+      AddRec && L != AddRec->getLoop() && L->contains(AddRec->getLoop())) {
+    for (auto *Op : AddRec->operands())
+      if (!isInvariantToTheLoop(L, SE, Op))
+        return false;
+
+    return true;
+  }
+
+  return false;
+}
+
 std::pair<const SCEV *, const SCEV *> llvm::getStartAndEndForAccess(
     const Loop *Lp, const SCEV *PtrExpr, Type *AccessTy, const SCEV *MaxBECount,
     ScalarEvolution *SE,
@@ -208,7 +226,8 @@ std::pair<const SCEV *, const SCEV *> llvm::getStartAndEndForAccess(
 
   if (SE->isLoopInvariant(PtrExpr, Lp)) {
     ScStart = ScEnd = PtrExpr;
-  } else if (auto *AR = dyn_cast<SCEVAddRecExpr>(PtrExpr)) {
+  } else if (auto *AR = dyn_cast<SCEVAddRecExpr>(PtrExpr);
+             AR && AR->getLoop() == Lp) {
     ScStart = AR->getStart();
     ScEnd = AR->evaluateAtIteration(MaxBECount, *SE);
     const SCEV *Step = AR->getStepRecurrence(*SE);
@@ -225,6 +244,63 @@ std::pair<const SCEV *, const SCEV *> llvm::getStartAndEndForAccess(
       ScStart = SE->getUMinExpr(ScStart, ScEnd);
       ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
     }
+  } else if (auto *AR = dyn_cast<SCEVAddRecExpr>(PtrExpr);
+             AR && Lp->contains(AR->getLoop())) {
+    // There is a inner loop. We know at this point that start, step and
+    // trip-count of all inner-loop accesses is invariant w.r.t. Lp., so
+    // compute the smallest accessed address and the biggest accessed
+    // address (inclusive). Backage taken counts can always be assumed to
+    // be non-negative (even though they will often have SCEVs looking
+    // something like `-1 + %N`).
+    // Note that a loop contains itself, so the loop below also handles a
+    // recurrence around the analysed loop (but not those with lower depths).
+    LLVM_DEBUG(dbgs() << "LAA: PtrExpr for inner-loop access: " << *PtrExpr
+                      << "\n");
+    // Because we want to visit the recurrences from the outside in, quickly
+    // decompose it and build a explicit stack of nested recurrences.
+    SmallVector<const SCEVAddRecExpr *, 4> Recs;
+    while (AR && Lp->contains(AR->getLoop())) {
+      Recs.push_back(AR);
+      AR = dyn_cast<SCEVAddRecExpr>(AR->getStart());
+      assert(AR || SE->isLoopInvariant(Recs.back()->getStart(), Lp));
+    }
+
+    // The start value of the recurrence around the outer-most loop is always
+    // guaranteed to be invariant (the main reason we traverse the recurrence
+    // nest in reverse order).
+    ScStart = Recs.back()->getStart();
+    ScEnd = ScStart;
+    for (const SCEVAddRecExpr *Rec : reverse(Recs)) {
+      const SCEV *Ex = SE->getSymbolicMaxBackedgeTakenCount(Rec->getLoop());
+      const SCEV *Step = Rec->getStepRecurrence(*SE);
+      const SCEV *Off =
+          SE->getMinusSCEV(Rec->evaluateAtIteration(Ex, *SE), Rec->getStart());
+
+      if (!SE->isKnownNonNegative(Step)) {
+        // For the creation of the runtime pointer checks, ScStart needs to
+        // be the lower bound and ScEnd the upper bound for the accessed
+        // addresses. If the step (%X) is negative, {%S,+,%X}[0] = %S will be
+        // bigger than {%S,+,%X}[%N] = %S + (%X * %N), and so start and end
+        // need to be switched.
+        if (SE->isKnownNegative(Step)) {
+          ScEnd = SE->getAddExpr(ScEnd, Off);
+          std::swap(ScStart, ScEnd);
+          continue;
+        }
+
+        // If it is unknown if the stride will be positive or negative,
+        // use unsigned min/max expressions.
+        ScStart = SE->getUMinExpr(ScStart, SE->getAddExpr(ScStart, Off));
+        ScEnd = SE->getUMaxExpr(ScEnd, SE->getAddExpr(ScEnd, Off));
+      }
+
+      // If the offset is known to be non-negative, just add it to the previous
+      // (outer) assumed end.
+      ScEnd = SE->getAddExpr(ScEnd, Off);
+    }
+
+    LLVM_DEBUG(dbgs() << "     ScStart: " << *ScStart
+                      << "\n     ScEnd: " << *ScEnd << "\n");
   } else
     return {SE->getCouldNotCompute(), SE->getCouldNotCompute()};
 
@@ -811,16 +887,40 @@ private:
 static std::optional<int64_t>
 getStrideFromAddRec(const SCEVAddRecExpr *AR, const Loop *Lp, Type *AccessTy,
                     Value *Ptr, PredicatedScalarEvolution &PSE) {
-  // The access function must stride over the innermost loop.
+  // The access function must stride over the queried loop.
   if (Lp != AR->getLoop()) {
-    LLVM_DEBUG({
-      dbgs() << "LAA: Bad stride - Not striding over innermost loop ";
-      if (Ptr)
-        dbgs() << *Ptr << " ";
+    assert(!Lp->isInnermost() && Lp->contains(AR->getLoop()) &&
+           "Classic SE should have detected invariance");
+    while (AR && Lp != AR->getLoop()) {
+      if (isInvariantToTheLoop(Lp, *PSE.getSE(), AR))
+        return {0};
 
-      dbgs() << "SCEV: " << *AR << "\n";
-    });
-    return std::nullopt;
+      const SCEV *Step = AR->getStepRecurrence(*PSE.getSE());
+      if (!isInvariantToTheLoop(Lp, *PSE.getSE(), Step)) {
+        LLVM_DEBUG({
+          dbgs() << "LAA: Bad stride - Stride depends on inner loop ";
+          if (Ptr)
+            dbgs() << *Ptr << " ";
+
+          dbgs() << "SCEV: " << *AR << "\n";
+        });
+
+        return std::nullopt;
+      }
+
+      AR = dyn_cast<SCEVAddRecExpr>(AR->getStart());
+    }
+
+    if (!AR || Lp != AR->getLoop()) {
+      LLVM_DEBUG({
+        dbgs() << "LAA: Bad stride - Not striding over correct ";
+        if (Ptr)
+          dbgs() << *Ptr << " ";
+
+        dbgs() << "SCEV: " << *AR << "\n";
+      });
+      return std::nullopt;
+    }
   }
 
   // Check the step is constant.
@@ -1135,6 +1235,28 @@ bool AccessAnalysis::createCheckForAccess(
     const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(P.getPointer());
     if (!AR && Assume)
       AR = PSE.getAsAddRec(Ptr);
+
+    if (!TheLoop->isInnermost()) {
+      ScalarEvolution &SE = *PSE.getSE();
+      // For non-innermost loops, the step, start and max trip count of every
+      // recurrence (including around inner loops) needs to be invariant w.r.t.
+      // the loop to vectorize.
+      while (AR && TheLoop->contains(AR->getLoop())) {
+        const auto *Ex = SE.getSymbolicMaxBackedgeTakenCount(AR->getLoop());
+        if (isa<SCEVCouldNotCompute>(Ex) || !SE.isLoopInvariant(Ex, TheLoop))
+          return false;
+
+        const SCEV *Step = AR->getStepRecurrence(SE);
+        if (!AR->isAffine() || !SE.isLoopInvariant(Step, TheLoop))
+          return false;
+
+        if (SE.isLoopInvariant(AR->getStart(), TheLoop))
+          break;
+
+        AR = dyn_cast<SCEVAddRecExpr>(AR->getStart());
+      }
+    }
+
     if (!AR || !AR->isAffine())
       return false;
 
@@ -1929,6 +2051,12 @@ MemoryDepChecker::getDependenceDistanceStrideAndSize(
       if (SE.isKnownPredicate(CmpInst::ICMP_ULE, SinkEnd, SrcStart))
         return MemoryDepChecker::Dependence::NoDep;
     }
+  } else {
+    // In case of outer-loop vectorization, distances of zero between
+    // accesses in inner loops can happen, and are safe to vectorize.
+    if (Dist->isZero() && !InnermostLoop->isInnermost() && ATy == BTy &&
+        !ATy->isScalableTy())
+      return MemoryDepChecker::Dependence::NoDep;
   }
 
   // Need accesses with constant strides and the same direction for further
@@ -1949,8 +2077,9 @@ MemoryDepChecker::getDependenceDistanceStrideAndSize(
                     << " Sink induction step: " << StrideBPtrInt << "\n");
   // At least Src or Sink are loop invariant and the other is strided or
   // invariant. We can generate a runtime check to disambiguate the accesses.
-  if (!StrideAPtrInt || !StrideBPtrInt)
+  if (!StrideAPtrInt || !StrideBPtrInt) {
     return MemoryDepChecker::Dependence::Unknown;
+  }
 
   // Both Src and Sink have a constant stride, check if they are in the same
   // direction.
@@ -1992,6 +2121,35 @@ MemoryDepChecker::Dependence::DepType
 MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
                               const MemAccessInfo &B, unsigned BIdx) {
   assert(AIdx < BIdx && "Must pass arguments in program order");
+
+  // In case of inner loops, support is very limited for now, and needs more
+  // testing!
+  if (!InnermostLoop->isInnermost()) {
+    // Ignore dependencies between reads only.
+    const auto &[APtr, AIsWrite] = A;
+    const auto &[BPtr, BIsWrite] = B;
+    if (!AIsWrite && !BIsWrite)
+      return Dependence::NoDep;
+
+    const Loop *Lp = InnermostLoop;
+    const auto *IA = InstMap[AIdx], *IB = InstMap[BIdx];
+    const Loop *LA = LI.getLoopFor(IA->getParent()),
+               *LB = LI.getLoopFor(IB->getParent());
+    if (LA != Lp || LB != Lp) {
+      // Loads or stores in inner loops to invariant addresses can carry
+      // loop-carried dependencies.
+      const SCEV *ASCEV = PSE.getSCEV(APtr);
+      const SCEV *BSCEV = PSE.getSCEV(BPtr);
+      if (isInvariantToTheLoop(Lp, *PSE.getSE(), ASCEV) ||
+          isInvariantToTheLoop(Lp, *PSE.getSE(), BSCEV))
+        return Dependence::Unknown;
+
+      // The logic below mostly works for inner-loop accesses as well, even if
+      // in inner loops, but only if the accesses are in the same inner loop.
+      if (LA != LB)
+        return Dependence::Unknown;
+    }
+  }
 
   // Get the dependence distance, stride, type size and what access writes for
   // the dependence between A and B.
@@ -2322,13 +2480,6 @@ bool LoopAccessInfo::canAnalyzeLoop() {
   LLVM_DEBUG(dbgs() << "\nLAA: Checking a loop in '"
                     << TheLoop->getHeader()->getParent()->getName() << "' from "
                     << TheLoop->getLocStr() << "\n");
-
-  // We can only analyze innermost loops.
-  if (!TheLoop->isInnermost()) {
-    LLVM_DEBUG(dbgs() << "LAA: loop is not the innermost loop\n");
-    recordAnalysis("NotInnerMostLoop") << "loop is not the innermost loop";
-    return false;
-  }
 
   // We must have a single backedge.
   if (TheLoop->getNumBackEdges() != 1) {
@@ -2690,7 +2841,7 @@ void LoopAccessInfo::emitUnsafeDependenceRemark() {
   }
 
   const std::string Info =
-      HasForcedDistribution
+      (HasForcedDistribution || !TheLoop->isInnermost())
           ? "unsafe dependent memory operations in loop."
           : "unsafe dependent memory operations in loop. Use "
             "#pragma clang loop distribute(enable) to allow loop distribution "
@@ -2769,7 +2920,7 @@ bool LoopAccessInfo::isInvariant(Value *V) const {
   if (!SE->isSCEVable(V->getType()))
     return false;
   const SCEV *S = SE->getSCEV(V);
-  return SE->isLoopInvariant(S, TheLoop);
+  return isInvariantToTheLoop(TheLoop, *SE, S);
 }
 
 /// If \p Ptr is a GEP, which has a loop-variant operand, return that operand.
@@ -2919,7 +3070,7 @@ LoopAccessInfo::LoopAccessInfo(Loop *L, ScalarEvolution *SE,
     MaxTargetVectorWidthInBits =
         TTI->getRegisterBitWidth(TargetTransformInfo::RGK_FixedWidthVector) * 2;
 
-  DepChecker = std::make_unique<MemoryDepChecker>(*PSE, L, SymbolicStrides,
+  DepChecker = std::make_unique<MemoryDepChecker>(*PSE, L, *LI, SymbolicStrides,
                                                   MaxTargetVectorWidthInBits);
   PtrRtChecking = std::make_unique<RuntimePointerChecking>(*DepChecker, SE);
   if (canAnalyzeLoop())

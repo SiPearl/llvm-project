@@ -38,8 +38,13 @@ define void @backward_min_distance_8(ptr %A, i64 %N) {
 ; COMMON-EMPTY:
 ; COMMON-NEXT:      Expressions re-written:
 ; COMMON-NEXT:    outer.header:
-; COMMON-NEXT:      Report: loop is not the innermost loop
-; COMMON-NEXT:      Dependences:
+; COMMON-NEXT:    Report: unsafe dependent memory operations in loop.
+; COMMON-NEXT:Unknown data dependence.
+; COMMON-NEXT:    Dependences:
+; COMMON-NEXT:      Unknown:
+; COMMON-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; COMMON-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; COMMON-EMPTY:
 ; COMMON-NEXT:      Run-time memory checks:
 ; COMMON-NEXT:      Grouped accesses:
 ; COMMON-EMPTY:
@@ -93,8 +98,13 @@ define void @backward_min_distance_120(ptr %A, i64 %N) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    outer.header:
-; CHECK-NEXT:      Report: loop is not the innermost loop
-; CHECK-NEXT:      Dependences:
+; CHECK-NEXT:    Report: unsafe dependent memory operations in loop.
+; CHECK-NEXT:Unknown data dependence.
+; CHECK-NEXT:    Dependences:
+; CHECK-NEXT:      Unknown:
+; CHECK-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; CHECK-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; CHECK-EMPTY:
 ; CHECK-NEXT:      Run-time memory checks:
 ; CHECK-NEXT:      Grouped accesses:
 ; CHECK-EMPTY:
@@ -126,8 +136,13 @@ define void @backward_min_distance_120(ptr %A, i64 %N) {
 ; VW128-EMPTY:
 ; VW128-NEXT:      Expressions re-written:
 ; VW128-NEXT:    outer.header:
-; VW128-NEXT:      Report: loop is not the innermost loop
-; VW128-NEXT:      Dependences:
+; VW128-NEXT:    Report: unsafe dependent memory operations in loop.
+; VW128-NEXT:Unknown data dependence.
+; VW128-NEXT:    Dependences:
+; VW128-NEXT:      Unknown:
+; VW128-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; VW128-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; VW128-EMPTY:
 ; VW128-NEXT:      Run-time memory checks:
 ; VW128-NEXT:      Grouped accesses:
 ; VW128-EMPTY:
@@ -159,8 +174,13 @@ define void @backward_min_distance_120(ptr %A, i64 %N) {
 ; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Expressions re-written:
 ; MAXLEN-NEXT:    outer.header:
-; MAXLEN-NEXT:      Report: loop is not the innermost loop
-; MAXLEN-NEXT:      Dependences:
+; MAXLEN-NEXT:    Report: unsafe dependent memory operations in loop.
+; MAXLEN-NEXT:Unknown data dependence.
+; MAXLEN-NEXT:    Dependences:
+; MAXLEN-NEXT:      Unknown:
+; MAXLEN-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; MAXLEN-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Run-time memory checks:
 ; MAXLEN-NEXT:      Grouped accesses:
 ; MAXLEN-EMPTY:
@@ -214,8 +234,13 @@ define void @backward_min_distance_128(ptr %A, i64 %N) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    outer.header:
-; CHECK-NEXT:      Report: loop is not the innermost loop
-; CHECK-NEXT:      Dependences:
+; CHECK-NEXT:    Report: unsafe dependent memory operations in loop.
+; CHECK-NEXT:Unknown data dependence.
+; CHECK-NEXT:    Dependences:
+; CHECK-NEXT:      Unknown:
+; CHECK-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; CHECK-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; CHECK-EMPTY:
 ; CHECK-NEXT:      Run-time memory checks:
 ; CHECK-NEXT:      Grouped accesses:
 ; CHECK-EMPTY:
@@ -247,8 +272,13 @@ define void @backward_min_distance_128(ptr %A, i64 %N) {
 ; VW128-EMPTY:
 ; VW128-NEXT:      Expressions re-written:
 ; VW128-NEXT:    outer.header:
-; VW128-NEXT:      Report: loop is not the innermost loop
-; VW128-NEXT:      Dependences:
+; VW128-NEXT:    Report: unsafe dependent memory operations in loop.
+; VW128-NEXT:Unknown data dependence.
+; VW128-NEXT:    Dependences:
+; VW128-NEXT:      Unknown:
+; VW128-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; VW128-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; VW128-EMPTY:
 ; VW128-NEXT:      Run-time memory checks:
 ; VW128-NEXT:      Grouped accesses:
 ; VW128-EMPTY:
@@ -280,8 +310,13 @@ define void @backward_min_distance_128(ptr %A, i64 %N) {
 ; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Expressions re-written:
 ; MAXLEN-NEXT:    outer.header:
-; MAXLEN-NEXT:      Report: loop is not the innermost loop
-; MAXLEN-NEXT:      Dependences:
+; MAXLEN-NEXT:    Report: unsafe dependent memory operations in loop.
+; MAXLEN-NEXT:Unknown data dependence.
+; MAXLEN-NEXT:    Dependences:
+; MAXLEN-NEXT:      Unknown:
+; MAXLEN-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; MAXLEN-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Run-time memory checks:
 ; MAXLEN-NEXT:      Grouped accesses:
 ; MAXLEN-EMPTY:
@@ -335,8 +370,13 @@ define void @backward_min_distance_256(ptr %A, i64 %N) {
 ; CHECK-EMPTY:
 ; CHECK-NEXT:      Expressions re-written:
 ; CHECK-NEXT:    outer.header:
-; CHECK-NEXT:      Report: loop is not the innermost loop
-; CHECK-NEXT:      Dependences:
+; CHECK-NEXT:    Report: unsafe dependent memory operations in loop.
+; CHECK-NEXT:Unknown data dependence.
+; CHECK-NEXT:    Dependences:
+; CHECK-NEXT:      Unknown:
+; CHECK-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; CHECK-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; CHECK-EMPTY:
 ; CHECK-NEXT:      Run-time memory checks:
 ; CHECK-NEXT:      Grouped accesses:
 ; CHECK-EMPTY:
@@ -361,8 +401,13 @@ define void @backward_min_distance_256(ptr %A, i64 %N) {
 ; VW128-EMPTY:
 ; VW128-NEXT:      Expressions re-written:
 ; VW128-NEXT:    outer.header:
-; VW128-NEXT:      Report: loop is not the innermost loop
-; VW128-NEXT:      Dependences:
+; VW128-NEXT:    Report: unsafe dependent memory operations in loop.
+; VW128-NEXT:Unknown data dependence.
+; VW128-NEXT:    Dependences:
+; VW128-NEXT:      Unknown:
+; VW128-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; VW128-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; VW128-EMPTY:
 ; VW128-NEXT:      Run-time memory checks:
 ; VW128-NEXT:      Grouped accesses:
 ; VW128-EMPTY:
@@ -394,8 +439,13 @@ define void @backward_min_distance_256(ptr %A, i64 %N) {
 ; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Expressions re-written:
 ; MAXLEN-NEXT:    outer.header:
-; MAXLEN-NEXT:      Report: loop is not the innermost loop
-; MAXLEN-NEXT:      Dependences:
+; MAXLEN-NEXT:    Report: unsafe dependent memory operations in loop.
+; MAXLEN-NEXT:Unknown data dependence.
+; MAXLEN-NEXT:    Dependences:
+; MAXLEN-NEXT:      Unknown:
+; MAXLEN-NEXT:          %l = load i8, ptr %gep, align 4 -> 
+; MAXLEN-NEXT:          store i8 %add, ptr %gep.off.iv, align 4
+; MAXLEN-EMPTY:
 ; MAXLEN-NEXT:      Run-time memory checks:
 ; MAXLEN-NEXT:      Grouped accesses:
 ; MAXLEN-EMPTY:
