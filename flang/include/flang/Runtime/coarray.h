@@ -21,7 +21,6 @@
 FORTRAN_EXTERN_C_BEGIN
 
 namespace Fortran::runtime {
-
 class Descriptor;
 
 // Map each coarray_handle pointer to the coarray base_addr

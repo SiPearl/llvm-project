@@ -24,6 +24,7 @@ set(supported_sources
   buffer.cpp
   coarray.cpp
   character.cpp
+  coarray.cpp
   connection.cpp
   copy.cpp
   derived-api.cpp

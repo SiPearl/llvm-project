@@ -669,10 +669,10 @@ public:
 
     mlir::Type i64Ty = builder->getI64Type();
     mlir::Type resultType = fir::getBaseTypeOf(addr);
-    if (coarrayRef.subscript().size()) {
+    if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
-      auto dataRef{Fortran::evaluate::ExtractDataRef(expr)};
-      auto [remoteStride, extents] = genStrideAndExtents(dataRef.value(), loc);
+      auto [remoteStride, extents] =
+          genStrideAndExtents(coarrayRef.base(), loc);
       mlir::Value currentImageStride, unusedStride;
       mlir::Type emptyArrayType = fir::SequenceType::get(
           {static_cast<fir::SequenceType::Extent>(0)}, i64Ty);
@@ -5244,12 +5244,11 @@ private:
     builder->create<fir::StoreOp>(
         loc, builder->createIntegerConstant(loc, i32Ty, 0), offset);
     mlir::Type i64Ty = builder->getI64Type();
-    if (coarrayRef.subscript().size()) {
+    if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
       // LHS is a CoarrayRef, so this is also an Fortran::evaluate::DataRef
-      auto lhsDataRef{Fortran::evaluate::ExtractDataRef(assign.lhs)};
       auto [remoteStride, extents] =
-          genStrideAndExtents(lhsDataRef.value(), loc);
+          genStrideAndExtents(coarrayRef.base(), loc);
       mlir::Value currentImageStride, unusedStride;
       if (auto rhsDataRef{Fortran::evaluate::ExtractDataRef(assign.rhs)}) {
         currentImageStride = genStrideAndExtents(rhsDataRef.value(), loc).first;
