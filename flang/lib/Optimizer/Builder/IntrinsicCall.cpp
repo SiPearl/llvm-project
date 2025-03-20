@@ -4046,9 +4046,9 @@ IntrinsicLibrary::genCoshape(mlir::Type resultType,
       fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
   mlir::Value result =
       fir::runtime::genCoshape(builder, loc, handle, args[0].corank());
-  resultType.dump();
-  result.getType().dump();
-  return result;
+  llvm::SmallVector<mlir::Value, 1> extents{builder.createIntegerConstant(
+      loc, builder.getIndexType(), args[0].corank())};
+  return fir::ArrayBoxValue{result, extents};
 }
 
 // COUNT
@@ -8895,7 +8895,7 @@ IntrinsicLibrary::genThisImage(mlir::Type resultType,
     mlir::Value dim;
     mlir::Type thisImageType;
     if (!dimIsAbsent) {
-      dim = fir::getBase(args[3]);
+      dim = fir::getBase(args[1]);
       thisImageType = builder.getI64Type();
     } else {
       thisImageType = fir::SequenceType::get(
@@ -9053,8 +9053,10 @@ IntrinsicLibrary::genLcobound(mlir::Type resultType,
     // Handle the DIM argument
     dim = fir::getBase(args[1]);
   }
-  mlir::Value result =
+  fir::ExtendedValue result =
       fir::runtime::genLCoBounds(builder, loc, handle, args[0].corank(), dim);
+  if (!dimIsAbsent)
+    return builder.createConvert(loc, resultType, fir::getBase(result));
   return result;
 }
 
@@ -9074,8 +9076,10 @@ IntrinsicLibrary::genUcobound(mlir::Type resultType,
     // Handle the DIM argument
     dim = fir::getBase(args[1]);
   }
-  mlir::Value result =
+  fir::ExtendedValue result =
       fir::runtime::genUCoBounds(builder, loc, handle, args[0].corank(), dim);
+  if (!dimIsAbsent)
+    return builder.createConvert(loc, resultType, fir::getBase(result));
   return result;
 }
 
