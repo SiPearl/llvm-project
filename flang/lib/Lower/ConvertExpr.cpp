@@ -1865,6 +1865,7 @@ public:
     return fir::BoxValue(
         box, fir::factory::getNonDefaultLowerBounds(builder, loc, exv),
         fir::factory::getNonDeferredLenParams(exv),
+        /*box.getExplicitExtents(),*/ {},
         Fortran::lower::genCoshape(converter, loc, expr, stmtCtx),
         Fortran::lower::genCoSubscripts(converter, loc, expr, stmtCtx));
   }

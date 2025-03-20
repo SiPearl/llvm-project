@@ -5023,10 +5023,6 @@ private:
 
     // Helper to generate the code evaluating the right-hand side.
     auto evaluateRhs = [&](Fortran::lower::StatementContext &stmtCtx) {
-      auto rhsCoref = Fortran::evaluate::ExtractCoarrayRef(assign.rhs);
-      if (rhsCoref.has_value())
-        return hlfir::Entity{fir::getBase(
-            genCoarrayExprValue(assign.rhs, rhsCoref.value(), stmtCtx, loc))};
       hlfir::Entity rhs = Fortran::lower::convertExprToHLFIR(
           loc, *this, assign.rhs, localSymbols, stmtCtx);
       // Load trivial scalar RHS to allow the loads to be hoisted outside of
@@ -5169,22 +5165,26 @@ private:
       Fortran::common::visit(
           Fortran::common::visitors{
               [&](const Fortran::evaluate::Triplet &trip) {
-                mlir::Value lb, ub;
+                mlir::Value lb, ub, stride;
                 if (const auto &lbExpr = trip.lower()) {
-                  const auto *lbe = Fortran::semantics::GetExpr(*lbExpr);
-                  lb = fir::getBase(genExprValue(*lbe, stmtCtx));
-                } else
-                  lb = getBaseBounds(ss.index()).first;
+                  if (const auto *lbe = Fortran::semantics::GetExpr(*lbExpr))
+                    lb = fir::getBase(genExprValue(*lbe, stmtCtx));
+                }
                 if (const auto &ubExpr = trip.upper()) {
-                  const auto *ube = Fortran::semantics::GetExpr(*ubExpr);
-                  ub = fir::getBase(genExprValue(*ube, stmtCtx));
-                } else
+                  if (const auto *ube = Fortran::semantics::GetExpr(*ubExpr))
+                    ub = fir::getBase(genExprValue(*ube, stmtCtx));
+                }
+                if (!lb)
+                  lb = getBaseBounds(ss.index()).first;
+                if (!ub)
                   ub = getBaseBounds(ss.index()).second;
-                const auto *strideExpr =
-                    Fortran::semantics::GetExpr(trip.stride());
-                mlir::Value stride = builder->createConvert(
-                    loc, idxTy,
-                    fir::getBase(genExprValue(*strideExpr, stmtCtx)));
+                if (const auto *strideExpr =
+                        Fortran::semantics::GetExpr(trip.stride())) {
+                  stride = builder->createConvert(
+                      loc, idxTy,
+                      fir::getBase(genExprValue(*strideExpr, stmtCtx)));
+                } else
+                  stride = builder->createIntegerConstant(loc, idxTy, 1);
                 auto extent =
                     builder->genExtentFromTriplet(loc, lb, ub, stride, i64Ty);
                 // Storing extent into extents at index
@@ -5292,6 +5292,7 @@ private:
       return;
     }
     if (lowerToHighLevelFIR()) {
+      // TODO: Implement HLFIR data assignment with RHS as a coarray.
       Fortran::common::visit(
           Fortran::common::visitors{
               [&](const Fortran::evaluate::Assignment::Intrinsic &) {

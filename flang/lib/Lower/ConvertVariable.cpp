@@ -2348,10 +2348,7 @@ void Fortran::lower::mapSymbolAttributes(
   auto arg = symMap.lookupSymbol(sym).getAddr();
   mlir::Value addr = preAlloc;
 
-  if (Fortran::evaluate::IsCoarray(sym)) {
-    mlir::Type baseType = fir::unwrapRefType(addr.getType());
-    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym, baseType);
-  } else if (arg)
+  if (arg)
     if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(arg.getType())) {
       // Contiguous assumed shape that can be tracked without a fir.box.
       mlir::Type refTy = builder.getRefType(boxTy.getEleTy());
@@ -2425,6 +2422,16 @@ void Fortran::lower::mapSymbolAttributes(
       else
         populateLBoundsExtents(lbounds, extents, ba.dynamicBound(), arg);
     }
+  }
+
+  if (Fortran::evaluate::IsCoarray(sym)) {
+    mlir::Type baseType;
+    if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(addr.getType()))
+      baseType = boxTy.getEleTy();
+    else
+      baseType = fir::unwrapRefType(addr.getType());
+    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym, baseType,
+                                              extents);
   }
 
   // Allocate or extract raw address for the entity

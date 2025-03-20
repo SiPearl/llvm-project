@@ -155,7 +155,8 @@ mlir::Value fir::runtime::getThisImageWithCoarray(
 
   args.insert(args.end(), {team, result});
   builder.create<fir::CallOp>(loc, funcOp, args);
-  return result;
+  return !isStaticallyAbsent(dim) ? builder.create<fir::LoadOp>(loc, result)
+                                  : result;
 }
 
 /// Generate Call to runtime prif_image_status
@@ -241,14 +242,17 @@ mlir::Value fir::runtime::getImageIndexFromBox(fir::FirOpBuilder &builder,
 }
 
 /// Generate Call to runtime prif_lcobound_{with|no}_dim
-mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
-                                       mlir::Location loc, mlir::Value handle,
-                                       size_t corank, mlir::Value dim) {
+fir::ExtendedValue fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
+                                              mlir::Location loc,
+                                              mlir::Value handle, size_t corank,
+                                              mlir::Value dim) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
   if (isStaticallyAbsent(dim)) {
+    llvm::SmallVector<mlir::Value, 1> extents{
+        builder.createIntegerConstant(loc, builder.getIndexType(), corank)};
     mlir::Type resultType = fir::SequenceType::get(
         static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
     mlir::Value result =
@@ -258,7 +262,7 @@ mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
         builder.createFunction(loc, PRIFNAME_SUB("lcobound_no_dim"), ftype);
     localArgs.emplace_back(result);
     builder.create<fir::CallOp>(loc, funcOp, localArgs);
-    return result;
+    return fir::ArrayBoxValue(result, extents);
   } else {
     mlir::Value result = builder.createTemporary(loc, builder.getI64Type());
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
@@ -271,14 +275,17 @@ mlir::Value fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
 }
 
 /// Generate Call to runtime prif_ucobound_{with|no}_dim
-mlir::Value fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
-                                       mlir::Location loc, mlir::Value handle,
-                                       size_t corank, mlir::Value dim) {
+fir::ExtendedValue fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
+                                              mlir::Location loc,
+                                              mlir::Value handle, size_t corank,
+                                              mlir::Value dim) {
   mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
   if (isStaticallyAbsent(dim)) {
+    llvm::SmallVector<mlir::Value, 1> extents{
+        builder.createIntegerConstant(loc, builder.getIndexType(), corank)};
     mlir::Type resultType = fir::SequenceType::get(
         static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
     mlir::Value result =
@@ -288,7 +295,7 @@ mlir::Value fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
         builder.createFunction(loc, PRIFNAME_SUB("ucobound_no_dim"), ftype);
     localArgs.emplace_back(result);
     builder.create<fir::CallOp>(loc, funcOp, localArgs);
-    return result;
+    return fir::ArrayBoxValue(result, extents);
   } else {
     mlir::Value result = builder.createTemporary(loc, builder.getI64Type());
     mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);

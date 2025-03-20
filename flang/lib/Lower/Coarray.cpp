@@ -474,7 +474,8 @@ void Fortran::lower::genAllocateCoarray(
 /// Generate call to prif_allocate_coarray runtime subroutine
 mlir::Value Fortran::lower::genAllocateCoarray(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
-    const Fortran::semantics::Symbol &sym, mlir::Type allocType) {
+    const Fortran::semantics::Symbol &sym, mlir::Type allocType,
+    llvm::SmallVector<mlir::Value> extents) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol
   auto [lcobounds, ucobounds] =
@@ -489,11 +490,19 @@ mlir::Value Fortran::lower::genAllocateCoarray(
   std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
       builder.getModule(), /*allowDefaultLayout*/ true);
   mlir::Value sizeInBytes = builder.createTemporary(loc, i64Ty);
-  auto size = fir::getTypeSizeAndAlignmentOrCrash(loc, allocType, *dl,
-                                                  builder.getKindMap())
-                  .first;
-  builder.create<fir::StoreOp>(
-      loc, builder.createIntegerConstant(loc, i64Ty, size), sizeInBytes);
+  mlir::Type elemType = fir::unwrapSeqOrBoxedSeqType(allocType);
+  if (auto sizeAndAlign = fir::getTypeSizeAndAlignment(loc, elemType, *dl,
+                                                       builder.getKindMap())) {
+    mlir::Value typeSize =
+        builder.createIntegerConstant(loc, i64Ty, sizeAndAlign.value().first);
+    for (mlir::Value extent : extents) {
+      typeSize = builder.create<mlir::arith::MulIOp>(
+          loc, typeSize, builder.createConvert(loc, i64Ty, extent));
+    }
+    builder.create<fir::StoreOp>(loc, typeSize, sizeInBytes);
+  } else {
+    TODO(loc, "Coarray: element type size not defined.");
+  }
 
   // TODO: Handle STAT and ERRMSG
   mlir::Value stat = builder.create<fir::AbsentOp>(

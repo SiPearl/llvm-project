@@ -98,14 +98,14 @@ mlir::Value getImageIndexFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
                                  fir::ExtendedValue b, mlir::Value handle);
 
 /// Generate Call to runtime prif_lcobound_{with|no}_dim
-mlir::Value genLCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
-                         mlir::Value handle, size_t corank,
-                         mlir::Value dim = {});
+fir::ExtendedValue genLCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value handle, size_t corank,
+                                mlir::Value dim = {});
 
 /// Generate Call to runtime prif_ucobound_{with|no}_dim
-mlir::Value genUCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
-                         mlir::Value handle, size_t corank,
-                         mlir::Value dim = {});
+fir::ExtendedValue genUCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value handle, size_t corank,
+                                mlir::Value dim = {});
 
 /// Generate Call to runtime prif_coshape
 mlir::Value genCoshape(fir::FirOpBuilder &builder, mlir::Location loc,

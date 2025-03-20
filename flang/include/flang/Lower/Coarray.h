@@ -87,7 +87,8 @@ void genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
 
 mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                                mlir::Location loc, const semantics::Symbol &sym,
-                               mlir::Type allocType);
+                               mlir::Type allocTy,
+                               llvm::SmallVector<mlir::Value> extents);
 
 mlir::Value genDeallocateCoarray(Fortran::lower::AbstractConverter &converter,
                                  mlir::Location loc, fir::MutableBoxValue box,
