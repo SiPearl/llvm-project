@@ -104,6 +104,8 @@ class CompilerInvocation : public CompilerInvocationBase {
 
   bool warnAsErr = false;
 
+  bool allowArgumentMismatch = false;
+
   // Executable name
   const char *argv0;
 
@@ -193,6 +195,9 @@ public:
   bool &getWarnAsErr() { return warnAsErr; }
   const bool &getWarnAsErr() const { return warnAsErr; }
 
+  bool &getAllowArgumentMismatch() { return allowArgumentMismatch; }
+  const bool &getAllowArgumentMismatch() const { return allowArgumentMismatch; }
+
   bool &getUseAnalyzedObjectsForUnparse() {
     return useAnalyzedObjectsForUnparse;
   }
@@ -262,6 +267,8 @@ public:
   }
 
   void setWarnAsErr(bool flag) { warnAsErr = flag; }
+
+  void setAllowArgumentMismatch(bool flag) { allowArgumentMismatch = flag; }
 
   void setUseAnalyzedObjectsForUnparse(bool flag) {
     useAnalyzedObjectsForUnparse = flag;

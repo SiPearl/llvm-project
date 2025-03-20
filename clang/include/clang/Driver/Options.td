@@ -1531,6 +1531,17 @@ defm allow_editor_placeholders : BoolFOption<"allow-editor-placeholders",
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Treat editor placeholders as valid source code">,
   NegFlag<SetFalse>>;
+def fallow_argument_mismatch
+    : Flag<["-"], "fallow-argument-mismatch">,
+      Group<f_Group>,
+      Visibility<[FlangOption, FC1Option]>,
+      HelpText<"This options degrades the error to a warning for mismatches "
+               "arguments.">,
+      DocBrief<
+          [{Some code contains calls to external procedures with mismatches between
+  the calls and the procedure definition, or with mismatches between different calls.
+  Such code is non-conforming, and will usually be flagged with an error. This options
+  degrades the error to a warning.}]>;
 def fallow_unsupported : Flag<["-"], "fallow-unsupported">, Group<f_Group>;
 def fapple_kext : Flag<["-"], "fapple-kext">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,

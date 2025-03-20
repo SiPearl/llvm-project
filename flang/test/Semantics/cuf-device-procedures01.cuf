@@ -1,4 +1,4 @@
-! RUN: %flang_fc1 -fdebug-dump-symbols %s | FileCheck %s
+! RUN: %flang_fc1 -fdebug-dump-symbols -fallow-argument-mismatch %s | FileCheck %s
 
 ! Test CUDA Fortran intrinsic can pass semantic
 

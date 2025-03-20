@@ -282,6 +282,10 @@ struct FrontendOptions {
   // Default values for environment variables to be set by the runtime.
   std::vector<Fortran::lower::EnvironmentDefault> envDefaults;
 
+  // Value to allow argument mismatching with procedures with msmatches between
+  // the calls and the definition
+  bool allowArgumentMismatch = false;
+
   // The column after which characters are ignored in fixed form lines in the
   // source file.
   int fixedFormColumns = 72;

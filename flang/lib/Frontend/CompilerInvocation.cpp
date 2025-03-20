@@ -971,6 +971,13 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
                              clang::DiagnosticsEngine &diags) {
   unsigned numErrorsBefore = diags.getNumErrors();
 
+  // -fallow-argument-mismatch.
+  if (args.hasArg(clang::driver::options::OPT_fallow_argument_mismatch)) {
+    res.setAllowArgumentMismatch(true);
+  } else {
+    res.setAllowArgumentMismatch(false);
+  }
+
   // -fd-lines-as-code
   if (args.hasArg(clang::driver::options::OPT_fd_lines_as_code)) {
     if (res.getFrontendOpts().fortranForm == FortranForm::FreeForm) {
@@ -1653,6 +1660,14 @@ void CompilerInvocation::setFortranOpts() {
   if (getDisableWarnings()) {
     fortranOptions.features.DisableAllNonstandardWarnings();
     fortranOptions.features.DisableAllUsageWarnings();
+  }
+
+  if (getAllowArgumentMismatch()) {
+    fortranOptions.features.EnableWarning(
+        Fortran::common::UsageWarning::IncompatibleImplicitInterfaces, true);
+  } else {
+    fortranOptions.features.EnableWarning(
+        Fortran::common::UsageWarning::IncompatibleImplicitInterfaces, false);
   }
 }
 

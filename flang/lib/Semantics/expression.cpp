@@ -3471,13 +3471,21 @@ std::optional<characteristics::Procedure> ExpressionAnalyzer::CheckCall(
         std::string whyNot;
         if (!chars->IsCompatibleWith(iter->second.second,
                 /*ignoreImplicitVsExplicit=*/false, &whyNot)) {
-          if (auto *msg{Warn(
-                  common::UsageWarning::IncompatibleImplicitInterfaces,
-                  callSite,
-                  "Reference to the procedure '%s' has an implicit interface that is distinct from another reference: %s"_warn_en_US,
-                  name, whyNot)}) {
-            msg->Attach(
-                iter->second.first, "previous reference to '%s'"_en_US, name);
+          if (context_.ShouldWarn(
+                  common::UsageWarning::IncompatibleImplicitInterfaces)) {
+            if (auto *msg{Say(callSite,
+                    "Reference to the procedure '%s' has an implicit interface that is distinct from another reference: %s"_warn_en_US,
+                    name, whyNot)}) {
+              msg->Attach(
+                  iter->second.first, "previous reference to '%s'"_en_US, name);
+            }
+          } else {
+            if (auto *msg{Say(callSite,
+                    "Reference to the procedure '%s' has an implicit interface that is distinct from another reference: %s"_err_en_US,
+                    name, whyNot)}) {
+              msg->Attach(
+                  iter->second.first, "previous reference to '%s'"_en_US, name);
+            }
           }
         }
       } else {

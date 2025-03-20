@@ -101,6 +101,7 @@ public:
   bool underscoring() const { return underscoring_; }
   bool warningsAreErrors() const { return warningsAreErrors_; }
   bool debugModuleWriter() const { return debugModuleWriter_; }
+  bool allowArgumentMismatch() const { return allowArgumentMismatch_; }
   const evaluate::IntrinsicProcTable &intrinsics() const { return intrinsics_; }
   const evaluate::TargetCharacteristics &targetCharacteristics() const {
     return targetCharacteristics_;
@@ -161,6 +162,11 @@ public:
 
   SemanticsContext &set_debugModuleWriter(bool x) {
     debugModuleWriter_ = x;
+    return *this;
+  }
+
+  SemanticsContext &set_allowArgumentMismatch(bool x) {
+    allowArgumentMismatch_ = x;
     return *this;
   }
 
@@ -315,6 +321,7 @@ private:
   bool warnOnNonstandardUsage_{false};
   bool warningsAreErrors_{false};
   bool debugModuleWriter_{false};
+  bool allowArgumentMismatch_{false};
   const evaluate::IntrinsicProcTable intrinsics_;
   evaluate::TargetCharacteristics targetCharacteristics_;
   Scope globalScope_;
