@@ -6296,6 +6296,7 @@ void VPlanTransforms::createPartialReductions(VPlan &Plan,
 }
 
 static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
+                                 bool AllReductionsAllowed,
                                  VPActiveLaneMaskPHIRecipe *&ALM) {
   // Look for recipes that block step-changing transformations, either by
   // relying on a step of VFxUF or by relying on the fact that a normal
@@ -6320,6 +6321,9 @@ static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
       // anymore.
       if (auto *RedPhi = dyn_cast<VPReductionPHIRecipe>(&R);
           RedPhi && !RedPhi->isInLoop()) {
+        if (AllReductionsAllowed)
+          continue;
+
         auto *Sel = dyn_cast<VPInstruction>(&RedPhi->getBackedgeRecipe());
         if (!Sel || Sel->getOpcode() != Instruction::Select ||
             !isa_and_nonnull<VPActiveLaneMaskPHIRecipe>(
@@ -6350,7 +6354,7 @@ bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
          "Divisions by a non-power of 2 would require recalculation of the "
          "VectorTripCount!");
   VPActiveLaneMaskPHIRecipe *ALM = nullptr;
-  if (!canChangeStepInVPlan(Plan, false, ALM))
+  if (!canChangeStepInVPlan(Plan, false, true, ALM))
     return false;
 
   if (ALM) {
@@ -6395,6 +6399,25 @@ bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
        Plan.getTripCount(), ALMMultiplier},
       DebugLoc(), "half.vf.mask");
   TmpHeaderMask->replaceAllUsesWith(NewHeaderMask);
+
+  // Fix out-of loop reductions: They need to use a select to keep
+  // inactive lanes at the start value. Otherwise, they might be poison.
+  for (VPRecipeBase &R :
+       *VectorLoop->getSingleSuccessor()->getEntryBasicBlock())
+    if (auto *FinalRed = dyn_cast<VPInstruction>(&R);
+        FinalRed &&
+        FinalRed->getOpcode() == VPInstruction::ComputeReductionResult) {
+      auto *RedPhi = dyn_cast<VPReductionPHIRecipe>(FinalRed->getOperand(0));
+      if (!RedPhi || RedPhi->isInLoop())
+        continue;
+
+      auto *Sum = FinalRed->getOperand(1);
+      assert(Sum->getDefiningRecipe()->getParent()->getParent() == VectorLoop);
+      auto *Sel = new VPInstruction(
+          Instruction::Select, {NewHeaderMask, Sum, RedPhi->getStartValue()});
+      Sel->insertAfter(Sum->getDefiningRecipe());
+      FinalRed->setOperand(1, Sel);
+    }
 
   // Housekeeping for later execution steps.
   TmpHeaderMask->getDefiningRecipe()->eraseFromParent();

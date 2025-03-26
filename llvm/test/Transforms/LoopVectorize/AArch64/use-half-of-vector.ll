@@ -127,6 +127,123 @@ exit:
   ret void
 }
 
+define float @reduction(i64 %n, ptr %a) #0 {
+; IC1-LABEL: define float @reduction(
+; IC1-SAME: i64 [[N:%.*]], ptr [[A:%.*]]) #[[ATTR0]] {
+; IC1-NEXT:  [[ENTRY:.*]]:
+; IC1-NEXT:    [[TMP0:%.*]] = call i64 @llvm.vscale.i64()
+; IC1-NEXT:    [[TMP1:%.*]] = shl nuw i64 [[TMP0]], 2
+; IC1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i64 [[N]], [[TMP1]]
+; IC1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label %[[SCALAR_PH:.*]], label %[[VECTOR_PH:.*]]
+; IC1:       [[VECTOR_PH]]:
+; IC1-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[N]], [[TMP1]]
+; IC1-NEXT:    [[N_VEC:%.*]] = sub i64 [[N]], [[N_MOD_VF]]
+; IC1-NEXT:    [[TMP3:%.*]] = lshr i64 [[TMP1]], 1
+; IC1-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 [[TMP3]], i64 [[N]])
+; IC1-NEXT:    br label %[[VECTOR_BODY:.*]]
+; IC1:       [[VECTOR_BODY]]:
+; IC1-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
+; IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP6:%.*]], %[[VECTOR_BODY]] ]
+; IC1-NEXT:    [[TMP4:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
+; IC1-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP4]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
+; IC1-NEXT:    [[TMP5:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD]], [[WIDE_MASKED_LOAD]]
+; IC1-NEXT:    [[TMP6]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP5]]
+; IC1-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP3]]
+; IC1-NEXT:    [[TMP8:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
+; IC1-NEXT:    br i1 [[TMP8]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP4:![0-9]+]]
+; IC1:       [[MIDDLE_BLOCK]]:
+; IC1-NEXT:    [[TMP7:%.*]] = call fast float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> [[TMP6]])
+; IC1-NEXT:    [[CMP_N:%.*]] = icmp eq i64 [[N]], [[N_VEC]]
+; IC1-NEXT:    br i1 [[CMP_N]], label %[[EXIT:.*]], label %[[SCALAR_PH]]
+; IC1:       [[SCALAR_PH]]:
+; IC1-NEXT:    [[BC_RESUME_VAL:%.*]] = phi i64 [ [[N_VEC]], %[[MIDDLE_BLOCK]] ], [ 0, %[[ENTRY]] ]
+; IC1-NEXT:    [[BC_MERGE_RDX:%.*]] = phi float [ [[TMP7]], %[[MIDDLE_BLOCK]] ], [ 0.000000e+00, %[[ENTRY]] ]
+; IC1-NEXT:    br label %[[LOOP:.*]]
+; IC1:       [[LOOP]]:
+; IC1-NEXT:    [[I:%.*]] = phi i64 [ [[I_NEXT:%.*]], %[[LOOP]] ], [ [[BC_RESUME_VAL]], %[[SCALAR_PH]] ]
+; IC1-NEXT:    [[SUM_PHI:%.*]] = phi float [ [[ADD:%.*]], %[[LOOP]] ], [ [[BC_MERGE_RDX]], %[[SCALAR_PH]] ]
+; IC1-NEXT:    [[A_ADDR:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[I]]
+; IC1-NEXT:    [[A_VAL:%.*]] = load float, ptr [[A_ADDR]], align 4
+; IC1-NEXT:    [[MUL:%.*]] = fmul float [[A_VAL]], [[A_VAL]]
+; IC1-NEXT:    [[ADD]] = fadd fast float [[SUM_PHI]], [[MUL]]
+; IC1-NEXT:    [[I_NEXT]] = add nuw i64 [[I]], 1
+; IC1-NEXT:    [[EXITCOND:%.*]] = icmp eq i64 [[I_NEXT]], [[N]]
+; IC1-NEXT:    br i1 [[EXITCOND]], label %[[EXIT]], label %[[LOOP]], !llvm.loop [[LOOP5:![0-9]+]]
+; IC1:       [[EXIT]]:
+; IC1-NEXT:    [[ADD_LCSSA:%.*]] = phi float [ [[ADD]], %[[LOOP]] ], [ [[TMP7]], %[[MIDDLE_BLOCK]] ]
+; IC1-NEXT:    ret float [[ADD_LCSSA]]
+;
+; IC2-LABEL: define float @reduction(
+; IC2-SAME: i64 [[N:%.*]], ptr [[A:%.*]]) #[[ATTR0]] {
+; IC2-NEXT:  [[ENTRY:.*]]:
+; IC2-NEXT:    [[TMP0:%.*]] = call i64 @llvm.vscale.i64()
+; IC2-NEXT:    [[TMP1:%.*]] = shl nuw nsw i64 [[TMP0]], 3
+; IC2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i64 [[N]], [[TMP1]]
+; IC2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label %[[SCALAR_PH:.*]], label %[[VECTOR_PH:.*]]
+; IC2:       [[VECTOR_PH]]:
+; IC2-NEXT:    [[TMP4:%.*]] = shl nuw i64 [[TMP0]], 2
+; IC2-NEXT:    [[TMP11:%.*]] = shl nuw i64 [[TMP4]], 1
+; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[N]], [[TMP11]]
+; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[N]], [[N_MOD_VF]]
+; IC2-NEXT:    [[TMP3:%.*]] = lshr i64 [[TMP11]], 2
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 [[TMP3]], i64 [[N]])
+; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
+; IC2:       [[VECTOR_BODY]]:
+; IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
+; IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP9:%.*]], %[[VECTOR_BODY]] ]
+; IC2-NEXT:    [[VEC_PHI2:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP10:%.*]], %[[VECTOR_BODY]] ]
+; IC2-NEXT:    [[TMP5:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
+; IC2-NEXT:    [[TMP6:%.*]] = getelementptr inbounds float, ptr [[TMP5]], i64 [[TMP4]]
+; IC2-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP5]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
+; IC2-NEXT:    [[WIDE_MASKED_LOAD3:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP6]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
+; IC2-NEXT:    [[TMP7:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD]], [[WIDE_MASKED_LOAD]]
+; IC2-NEXT:    [[TMP8:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD3]], [[WIDE_MASKED_LOAD3]]
+; IC2-NEXT:    [[TMP9]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP7]]
+; IC2-NEXT:    [[TMP10]] = fadd fast <vscale x 4 x float> [[VEC_PHI2]], [[TMP8]]
+; IC2-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP3]]
+; IC2-NEXT:    [[TMP13:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
+; IC2-NEXT:    br i1 [[TMP13]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP4:![0-9]+]]
+; IC2:       [[MIDDLE_BLOCK]]:
+; IC2-NEXT:    [[BIN_RDX:%.*]] = fadd fast <vscale x 4 x float> [[TMP10]], [[TMP9]]
+; IC2-NEXT:    [[TMP14:%.*]] = call fast float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> [[BIN_RDX]])
+; IC2-NEXT:    [[CMP_N:%.*]] = icmp eq i64 [[N]], [[N_VEC]]
+; IC2-NEXT:    br i1 [[CMP_N]], label %[[EXIT:.*]], label %[[SCALAR_PH]]
+; IC2:       [[SCALAR_PH]]:
+; IC2-NEXT:    [[BC_RESUME_VAL:%.*]] = phi i64 [ [[N_VEC]], %[[MIDDLE_BLOCK]] ], [ 0, %[[ENTRY]] ]
+; IC2-NEXT:    [[BC_MERGE_RDX:%.*]] = phi float [ [[TMP14]], %[[MIDDLE_BLOCK]] ], [ 0.000000e+00, %[[ENTRY]] ]
+; IC2-NEXT:    br label %[[LOOP:.*]]
+; IC2:       [[LOOP]]:
+; IC2-NEXT:    [[I:%.*]] = phi i64 [ [[I_NEXT:%.*]], %[[LOOP]] ], [ [[BC_RESUME_VAL]], %[[SCALAR_PH]] ]
+; IC2-NEXT:    [[SUM_PHI:%.*]] = phi float [ [[ADD:%.*]], %[[LOOP]] ], [ [[BC_MERGE_RDX]], %[[SCALAR_PH]] ]
+; IC2-NEXT:    [[A_ADDR:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[I]]
+; IC2-NEXT:    [[A_VAL:%.*]] = load float, ptr [[A_ADDR]], align 4
+; IC2-NEXT:    [[MUL:%.*]] = fmul float [[A_VAL]], [[A_VAL]]
+; IC2-NEXT:    [[ADD]] = fadd fast float [[SUM_PHI]], [[MUL]]
+; IC2-NEXT:    [[I_NEXT]] = add nuw i64 [[I]], 1
+; IC2-NEXT:    [[EXITCOND:%.*]] = icmp eq i64 [[I_NEXT]], [[N]]
+; IC2-NEXT:    br i1 [[EXITCOND]], label %[[EXIT]], label %[[LOOP]], !llvm.loop [[LOOP5:![0-9]+]]
+; IC2:       [[EXIT]]:
+; IC2-NEXT:    [[ADD_LCSSA:%.*]] = phi float [ [[ADD]], %[[LOOP]] ], [ [[TMP14]], %[[MIDDLE_BLOCK]] ]
+; IC2-NEXT:    ret float [[ADD_LCSSA]]
+;
+entry:
+  br label %loop
+
+loop:
+  %i = phi i64 [ %i.next, %loop ], [ 0, %entry ]
+  %sum.phi = phi float [ %add, %loop ], [ 0x0, %entry ]
+  %a.addr = getelementptr inbounds float, ptr %a, i64 %i
+  %a.val = load float, ptr %a.addr, align 4
+  %mul = fmul float %a.val, %a.val
+  %add = fadd fast float %sum.phi, %mul
+  %i.next = add nuw i64 %i, 1
+  %exitcond = icmp eq i64 %i.next, %n
+  br i1 %exitcond, label %exit, label %loop
+
+exit:
+  ret float %add
+}
+
 attributes #0 = { vscale_range(1,16) "target-features"="+sve,+neon" }
 ; HIGH-DIVISOR: [[LOOP0]] = distinct !{[[LOOP0]], [[META1:![0-9]+]], [[META2:![0-9]+]]}
 ; HIGH-DIVISOR: [[META1]] = !{!"llvm.loop.isvectorized", i32 1}
@@ -137,9 +254,13 @@ attributes #0 = { vscale_range(1,16) "target-features"="+sve,+neon" }
 ; IC1: [[META1]] = !{!"llvm.loop.isvectorized", i32 1}
 ; IC1: [[META2]] = !{!"llvm.loop.unroll.runtime.disable"}
 ; IC1: [[LOOP3]] = distinct !{[[LOOP3]], [[META2]], [[META1]]}
+; IC1: [[LOOP4]] = distinct !{[[LOOP4]], [[META1]], [[META2]]}
+; IC1: [[LOOP5]] = distinct !{[[LOOP5]], [[META2]], [[META1]]}
 ;.
 ; IC2: [[LOOP0]] = distinct !{[[LOOP0]], [[META1:![0-9]+]], [[META2:![0-9]+]]}
 ; IC2: [[META1]] = !{!"llvm.loop.isvectorized", i32 1}
 ; IC2: [[META2]] = !{!"llvm.loop.unroll.runtime.disable"}
 ; IC2: [[LOOP3]] = distinct !{[[LOOP3]], [[META2]], [[META1]]}
+; IC2: [[LOOP4]] = distinct !{[[LOOP4]], [[META1]], [[META2]]}
+; IC2: [[LOOP5]] = distinct !{[[LOOP5]], [[META2]], [[META1]]}
 ;.
