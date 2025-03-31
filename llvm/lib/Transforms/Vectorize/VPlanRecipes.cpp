@@ -4563,13 +4563,18 @@ void VPFirstOrderRecurrencePHIRecipe::execute(VPTransformState &State) {
       State.CFG.VPBB2IRBB.at(getParent()->getCFGPredecessor(0));
   if (State.VF.isVector()) {
     auto *IdxTy = Builder.getInt32Ty();
-    auto *One = ConstantInt::get(IdxTy, 1);
     IRBuilder<>::InsertPointGuard Guard(Builder);
     Builder.SetInsertPoint(VectorPH->getTerminator());
-    auto *RuntimeVF = getRuntimeVF(Builder, IdxTy, State.VF);
-    auto *LastIdx = Builder.CreateSub(RuntimeVF, One);
-    VectorInit = Builder.CreateInsertElement(
-        PoisonValue::get(VecTy), VectorInit, LastIdx, "vector.recur.init");
+    if (State.Plan->getVectorIVStep() == &State.Plan->getVFxUF()) {
+      auto *One = ConstantInt::get(IdxTy, 1);
+      auto *RuntimeVF = getRuntimeVF(Builder, IdxTy, State.VF);
+      auto *LastIdx = Builder.CreateSub(RuntimeVF, One);
+      VectorInit = Builder.CreateInsertElement(
+          PoisonValue::get(VecTy), VectorInit, LastIdx, "vector.recur.init");
+    } else {
+      VectorInit =
+          Builder.CreateVectorSplat(State.VF, VectorInit, "vector.recur.init");
+    }
   }
 
   // Create a phi node for the new recurrence.

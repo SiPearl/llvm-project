@@ -7427,11 +7427,14 @@ DenseMap<const SCEV *, Value *> LoopVectorizationPlanner::executePlan(
   if (BestVPlan.hasEarlyExit())
     ++LoopsEarlyExitVectorized;
 
-  if (AddArtificialVFDivisor &&
-      BestVF.getKnownMinValue() / AddArtificialVFDivisor < 1)
+  if (AddArtificialVFDivisor && !BestVPlan.hasConstantStep() &&
+      BestVF.getKnownMinValue() / AddArtificialVFDivisor < 1) {
     WithColor::warning() << "`-mllvm -vectorizer-div-vf-by=N` will not apply: "
-                            "step would be zero:"
-                         << OrigLoop->getStartLoc();
+                            "step would be zero. ";
+    if (OrigLoop->getStartLoc())
+      OrigLoop->getStartLoc()->print(errs());
+    errs() << "\n";
+  }
 
   // TODO: Move to VPlan transform stage once the transition to the VPlan-based
   // cost model is complete for better cost estimates.
@@ -8172,11 +8175,24 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
       if (auto P = VPlanTransforms::narrowInterleaveGroups(*Plan, TTI))
         VPlans.push_back(std::move(P));
 
-      if (AddArtificialVFDivisor && AddArtificialVFDivisor != 1) {
+      if (AddArtificialVFDivisor) {
         VPValue *TmpHeaderMask = vputils::findHeaderMask(*Plan);
-        if (TmpHeaderMask)
-          VPlanTransforms::tryToLowerEffectiveVectorUse(*Plan, TmpHeaderMask,
-                                                        AddArtificialVFDivisor);
+        if (TmpHeaderMask) {
+          if (std::optional<StringRef> FailureReason =
+                  VPlanTransforms::tryToLowerEffectiveVectorUse(
+                      *Plan, TmpHeaderMask, AddArtificialVFDivisor, *Legal)) {
+            WithColor::warning()
+                << "`-mllvm -vectorizer-div-vf-by=N` will not apply: "
+                   "VPlan/loop not supported: "
+                << FailureReason.value();
+            if (OrigLoop->getStartLoc()) {
+              errs() << " (";
+              OrigLoop->getStartLoc()->print(errs());
+              errs() << ")";
+            }
+            errs() << "\n";
+          }
+        }
       }
 
       assert(verifyVPlanIsValid(*Plan) && "VPlan is invalid");
@@ -8258,6 +8274,12 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
     };
     if (!getDecisionAndClampRange(ApplyIG, Range))
       continue;
+
+    // Masked reversed IGs are not supported. AddArtificialVFDivisor
+    // will create a mask.
+    if (IG->isReverse() && AddArtificialVFDivisor)
+      continue;
+
     InterleaveGroups.insert(IG);
   }
 

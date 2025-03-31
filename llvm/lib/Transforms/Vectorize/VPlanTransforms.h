@@ -19,7 +19,9 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
+#include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
 
 namespace llvm {
 
@@ -514,8 +516,10 @@ struct VPlanTransforms {
   /// This will cause wasted lanes and is only usefull for hardware
   /// exploration etc.!
   /// TODO: Do not mix with epilogue vect.! It will break!
-  static bool tryToLowerEffectiveVectorUse(VPlan &Plan, VPValue *TmpHeaderMask,
-                                           unsigned StepDivisor);
+  static std::optional<StringRef>
+  tryToLowerEffectiveVectorUse(VPlan &Plan, VPValue *TmpHeaderMask,
+                               unsigned StepDivisor,
+                               LoopVectorizationLegality &Legal);
 };
 
 } // namespace llvm

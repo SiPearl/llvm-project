@@ -48,6 +48,7 @@
 #include "llvm/Support/TypeSize.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
+#include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
 
 using namespace llvm;
 using namespace VPlanPatternMatch;
@@ -6297,6 +6298,7 @@ void VPlanTransforms::createPartialReductions(VPlan &Plan,
 
 static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
                                  bool AllReductionsAllowed,
+                                 bool PointerInductionsAllowed,
                                  VPActiveLaneMaskPHIRecipe *&ALM) {
   // Look for recipes that block step-changing transformations, either by
   // relying on a step of VFxUF or by relying on the fact that a normal
@@ -6314,6 +6316,9 @@ static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
         });
         return false;
       }
+
+      if (isa<VPWidenPointerInductionRecipe>(&R) && !PointerInductionsAllowed)
+        return false;
 
       // Sometimes, out-of-loop reductions rely on the fact that they
       // were able to assume that all-but-the-last iteration always
@@ -6343,25 +6348,33 @@ static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
   return true;
 }
 
-bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
-                                                   VPValue *TmpHeaderMask,
-                                                   unsigned StepDivisor) {
+std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
+    VPlan &Plan, VPValue *TmpHeaderMask, unsigned StepDivisor,
+    LoopVectorizationLegality &Legal) {
   VPRegionBlock *VectorLoop = Plan.getVectorLoopRegion();
-  Type *CIVTy = VectorLoop->getCanonicalIVType();
+  auto *CIV = VectorLoop->getCanonicalIV();
+  Type *CIVTy = CIV->getScalarType();
   VPTypeAnalysis TypeInfo(Plan);
   assert(Plan.hasConstantStep());
   assert(isPowerOf2_32(StepDivisor) &&
          "Divisions by a non-power of 2 would require recalculation of the "
          "VectorTripCount!");
-  VPActiveLaneMaskPHIRecipe *ALM = nullptr;
-  if (!canChangeStepInVPlan(Plan, false, true, ALM))
-    return false;
 
-  if (ALM) {
-    LLVM_DEBUG(dbgs() << "LV: Tail-folding and effective-vector-use lowering "
-                         "at the same time not yet implemented.\n");
-    return false;
-  }
+  if (Legal.hasUncountableEarlyExit())
+    return "Early exits";
+  if (!Legal.canFoldTailByMasking())
+    return "Tail cannot be folded";
+  VPActiveLaneMaskPHIRecipe *ALM = nullptr;
+  if (!canChangeStepInVPlan(Plan, false, true, true, ALM) || ALM)
+    return "Unsurpported recurrence kind";
+  if (Plan.hasScalarVFOnly())
+    return std::nullopt; // "Scalar VPlan";
+
+  using namespace llvm::VPlanPatternMatch;
+  if (!match(VectorLoop->getExitingBasicBlock()->getTerminator(),
+             m_BranchOnCount(m_Specific(CIV->getBackedgeValue()),
+                             m_Specific(&Plan.getVectorTripCount()))))
+    return "Unexpected exit condition (early exits?)";
 
   // Caculate the new step by which the vector loop CIV will increment.
   VPBasicBlock *Preheader = VectorLoop->getPreheaderVPBB();
@@ -6403,7 +6416,7 @@ bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
   // Fix out-of loop reductions: They need to use a select to keep
   // inactive lanes at the start value. Otherwise, they might be poison.
   for (VPRecipeBase &R :
-       *VectorLoop->getSingleSuccessor()->getEntryBasicBlock())
+       *VectorLoop->getSingleSuccessor()->getEntryBasicBlock()) {
     if (auto *FinalRed = dyn_cast<VPInstruction>(&R);
         FinalRed &&
         FinalRed->getOpcode() == VPInstruction::ComputeReductionResult) {
@@ -6413,15 +6426,17 @@ bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
 
       auto *Sum = FinalRed->getOperand(1);
       assert(Sum->getDefiningRecipe()->getParent()->getParent() == VectorLoop);
-      auto *Sel = new VPInstruction(
-          Instruction::Select, {NewHeaderMask, Sum, RedPhi->getStartValue()});
+      auto *Sel =
+          new VPInstruction(Instruction::Select, {NewHeaderMask, Sum, RedPhi});
       Sel->insertAfter(Sum->getDefiningRecipe());
-      FinalRed->setOperand(1, Sel);
+      Sum->replaceAllUsesWith(Sel);
+      Sel->setOperand(1, Sum);
     }
+  }
 
   // Housekeeping for later execution steps.
   TmpHeaderMask->getDefiningRecipe()->eraseFromParent();
   Plan.setVectorIVStep(NewStep);
   assert(!Plan.hasConstantStep());
-  return true;
+  return std::nullopt;
 }
