@@ -244,7 +244,6 @@ exit:
   ret float %add
 }
 
-; FIXME: Recurrences have a unknown bug!
 define void @recurrence(i64 %n, ptr noalias %a, ptr %b, ptr %c) #0 {
 ; IC1-LABEL: define void @recurrence(
 ; IC1-SAME: i64 [[N:%.*]], ptr noalias [[A:%.*]], ptr [[B:%.*]], ptr [[C:%.*]]) #[[ATTR0]] {
@@ -252,34 +251,29 @@ define void @recurrence(i64 %n, ptr noalias %a, ptr %b, ptr %c) #0 {
 ; IC1-NEXT:    [[C_FIRST:%.*]] = load i64, ptr [[C]], align 8
 ; IC1-NEXT:    [[TMP0:%.*]] = call i64 @llvm.vscale.i64()
 ; IC1-NEXT:    [[TMP1:%.*]] = shl nuw i64 [[TMP0]], 1
-; IC1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i64 [[N]], [[TMP1]]
+; IC1-NEXT:    [[UMAX:%.*]] = call i64 @llvm.umax.i64(i64 [[TMP1]], i64 4)
+; IC1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i64 [[N]], [[UMAX]]
 ; IC1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label %[[SCALAR_PH:.*]], label %[[VECTOR_PH:.*]]
 ; IC1:       [[VECTOR_PH]]:
 ; IC1-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[N]], [[TMP1]]
 ; IC1-NEXT:    [[N_VEC:%.*]] = sub i64 [[N]], [[N_MOD_VF]]
-; IC1-NEXT:    [[TRIP_COUNT_MINUS_1:%.*]] = sub i64 [[N]], 1
-; IC1-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TRIP_COUNT_MINUS_1]], i64 0
-; IC1-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; IC1-NEXT:    [[TMP2:%.*]] = call i32 @llvm.vscale.i32()
-; IC1-NEXT:    [[TMP3:%.*]] = mul nuw i32 [[TMP2]], 2
-; IC1-NEXT:    [[TMP13:%.*]] = sub i32 [[TMP3]], 1
-; IC1-NEXT:    [[VECTOR_RECUR_INIT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[C_FIRST]], i32 [[TMP13]]
+; IC1-NEXT:    [[TMP6:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 [[TMP0]], i64 [[N]])
+; IC1-NEXT:    [[VECTOR_RECUR_INIT_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[C_FIRST]], i64 0
+; IC1-NEXT:    [[VECTOR_RECUR_INIT_SPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[VECTOR_RECUR_INIT_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
 ; IC1-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC1:       [[VECTOR_BODY]]:
 ; IC1-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
-; IC1-NEXT:    [[VECTOR_RECUR:%.*]] = phi <vscale x 2 x i64> [ [[VECTOR_RECUR_INIT]], %[[VECTOR_PH]] ], [ [[WIDE_MASKED_LOAD:%.*]], %[[VECTOR_BODY]] ]
-; IC1-NEXT:    [[BROADCAST_SPLATINSERT1:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[INDEX]], i64 0
-; IC1-NEXT:    [[BROADCAST_SPLAT2:%.*]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT1]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; IC1-NEXT:    [[TMP5:%.*]] = call <vscale x 2 x i64> @llvm.stepvector.nxv2i64()
-; IC1-NEXT:    [[VEC_IV:%.*]] = add <vscale x 2 x i64> [[BROADCAST_SPLAT2]], [[TMP5]]
-; IC1-NEXT:    [[TMP6:%.*]] = icmp ule <vscale x 2 x i64> [[VEC_IV]], [[BROADCAST_SPLAT]]
+; IC1-NEXT:    [[VECTOR_RECUR:%.*]] = phi <vscale x 2 x i64> [ [[VECTOR_RECUR_INIT_SPLAT]], %[[VECTOR_PH]] ], [ [[BROADCAST_SPLAT:%.*]], %[[VECTOR_BODY]] ]
 ; IC1-NEXT:    [[TMP4:%.*]] = getelementptr inbounds i64, ptr [[C]], i64 [[INDEX]]
-; IC1-NEXT:    [[WIDE_MASKED_LOAD]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP4]], <vscale x 2 x i1> [[TMP6]], <vscale x 2 x i64> poison)
+; IC1-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP4]], <vscale x 2 x i1> [[TMP6]], <vscale x 2 x i64> poison)
+; IC1-NEXT:    [[LAST_ACTIVE:%.*]] = call i64 @llvm.experimental.vector.extract.last.active.nxv2i64(<vscale x 2 x i64> [[WIDE_MASKED_LOAD]], <vscale x 2 x i1> [[TMP6]], i64 [[C_FIRST]])
+; IC1-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[LAST_ACTIVE]], i64 0
+; IC1-NEXT:    [[BROADCAST_SPLAT]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
 ; IC1-NEXT:    [[TMP7:%.*]] = call <vscale x 2 x i64> @llvm.vector.splice.right.nxv2i64(<vscale x 2 x i64> [[VECTOR_RECUR]], <vscale x 2 x i64> [[WIDE_MASKED_LOAD]], i32 1)
 ; IC1-NEXT:    [[TMP8:%.*]] = add <vscale x 2 x i64> [[TMP7]], splat (i64 42)
 ; IC1-NEXT:    [[TMP9:%.*]] = getelementptr inbounds i64, ptr [[A]], i64 [[INDEX]]
 ; IC1-NEXT:    call void @llvm.masked.store.nxv2i64.p0(<vscale x 2 x i64> [[TMP8]], ptr align 8 [[TMP9]], <vscale x 2 x i1> [[TMP6]])
-; IC1-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP1]]
+; IC1-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP0]]
 ; IC1-NEXT:    [[TMP10:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; IC1-NEXT:    br i1 [[TMP10]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP6:![0-9]+]]
 ; IC1:       [[MIDDLE_BLOCK]]:
@@ -320,52 +314,41 @@ define void @recurrence(i64 %n, ptr noalias %a, ptr %b, ptr %c) #0 {
 ; IC2-NEXT:    [[TMP17:%.*]] = shl nuw i64 [[TMP4]], 1
 ; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[N]], [[TMP17]]
 ; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[N]], [[N_MOD_VF]]
-; IC2-NEXT:    [[TRIP_COUNT_MINUS_1:%.*]] = sub i64 [[N]], 1
-; IC2-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TRIP_COUNT_MINUS_1]], i64 0
-; IC2-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; IC2-NEXT:    [[TMP2:%.*]] = call i32 @llvm.vscale.i32()
-; IC2-NEXT:    [[TMP3:%.*]] = mul nuw i32 [[TMP2]], 2
-; IC2-NEXT:    [[TMP19:%.*]] = sub i32 [[TMP3]], 1
-; IC2-NEXT:    [[VECTOR_RECUR_INIT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[C_FIRST]], i32 [[TMP19]]
+; IC2-NEXT:    [[TMP3:%.*]] = lshr i64 [[TMP17]], 2
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 [[TMP3]], i64 [[N]])
+; IC2-NEXT:    [[VECTOR_RECUR_INIT_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[C_FIRST]], i64 0
+; IC2-NEXT:    [[VECTOR_RECUR_INIT_SPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[VECTOR_RECUR_INIT_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
 ; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC2:       [[VECTOR_BODY]]:
 ; IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
-; IC2-NEXT:    [[VECTOR_RECUR:%.*]] = phi <vscale x 2 x i64> [ [[VECTOR_RECUR_INIT]], %[[VECTOR_PH]] ], [ [[WIDE_MASKED_LOAD6:%.*]], %[[VECTOR_BODY]] ]
-; IC2-NEXT:    [[BROADCAST_SPLATINSERT1:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[INDEX]], i64 0
-; IC2-NEXT:    [[BROADCAST_SPLAT2:%.*]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT1]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; IC2-NEXT:    [[TMP7:%.*]] = call <vscale x 2 x i64> @llvm.stepvector.nxv2i64()
-; IC2-NEXT:    [[VEC_IV:%.*]] = add <vscale x 2 x i64> [[BROADCAST_SPLAT2]], [[TMP7]]
-; IC2-NEXT:    [[DOTSPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TMP4]], i64 0
-; IC2-NEXT:    [[DOTSPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[DOTSPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
-; IC2-NEXT:    [[TMP8:%.*]] = add <vscale x 2 x i64> [[DOTSPLAT]], [[TMP7]]
-; IC2-NEXT:    [[VEC_IV5:%.*]] = add <vscale x 2 x i64> [[BROADCAST_SPLAT2]], [[TMP8]]
-; IC2-NEXT:    [[TMP18:%.*]] = icmp ule <vscale x 2 x i64> [[VEC_IV]], [[BROADCAST_SPLAT]]
-; IC2-NEXT:    [[TMP10:%.*]] = icmp ule <vscale x 2 x i64> [[VEC_IV5]], [[BROADCAST_SPLAT]]
+; IC2-NEXT:    [[VECTOR_RECUR:%.*]] = phi <vscale x 2 x i64> [ [[VECTOR_RECUR_INIT_SPLAT]], %[[VECTOR_PH]] ], [ [[BROADCAST_SPLAT5:%.*]], %[[VECTOR_BODY]] ]
 ; IC2-NEXT:    [[TMP5:%.*]] = getelementptr inbounds i64, ptr [[C]], i64 [[INDEX]]
 ; IC2-NEXT:    [[TMP6:%.*]] = getelementptr inbounds i64, ptr [[TMP5]], i64 [[TMP4]]
-; IC2-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP5]], <vscale x 2 x i1> [[TMP18]], <vscale x 2 x i64> poison)
-; IC2-NEXT:    [[WIDE_MASKED_LOAD6]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP6]], <vscale x 2 x i1> [[TMP10]], <vscale x 2 x i64> poison)
+; IC2-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP5]], <vscale x 2 x i1> [[HALF_VF_MASK]], <vscale x 2 x i64> poison)
+; IC2-NEXT:    [[WIDE_MASKED_LOAD6:%.*]] = call <vscale x 2 x i64> @llvm.masked.load.nxv2i64.p0(ptr align 8 [[TMP6]], <vscale x 2 x i1> [[HALF_VF_MASK]], <vscale x 2 x i64> poison)
+; IC2-NEXT:    [[TMP7:%.*]] = call i64 @llvm.experimental.vector.extract.last.active.nxv2i64(<vscale x 2 x i64> [[WIDE_MASKED_LOAD]], <vscale x 2 x i1> [[HALF_VF_MASK]], i64 [[C_FIRST]])
+; IC2-NEXT:    [[TMP10:%.*]] = call i64 @llvm.experimental.vector.extract.last.active.nxv2i64(<vscale x 2 x i64> [[WIDE_MASKED_LOAD6]], <vscale x 2 x i1> [[HALF_VF_MASK]], i64 [[TMP7]])
+; IC2-NEXT:    [[BROADCAST_SPLATINSERT4:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[TMP10]], i64 0
+; IC2-NEXT:    [[BROADCAST_SPLAT5]] = shufflevector <vscale x 2 x i64> [[BROADCAST_SPLATINSERT4]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
 ; IC2-NEXT:    [[TMP9:%.*]] = call <vscale x 2 x i64> @llvm.vector.splice.right.nxv2i64(<vscale x 2 x i64> [[VECTOR_RECUR]], <vscale x 2 x i64> [[WIDE_MASKED_LOAD]], i32 1)
 ; IC2-NEXT:    [[TMP11:%.*]] = call <vscale x 2 x i64> @llvm.vector.splice.right.nxv2i64(<vscale x 2 x i64> [[WIDE_MASKED_LOAD]], <vscale x 2 x i64> [[WIDE_MASKED_LOAD6]], i32 1)
 ; IC2-NEXT:    [[TMP12:%.*]] = add <vscale x 2 x i64> [[TMP9]], splat (i64 42)
 ; IC2-NEXT:    [[TMP13:%.*]] = add <vscale x 2 x i64> [[TMP11]], splat (i64 42)
 ; IC2-NEXT:    [[TMP14:%.*]] = getelementptr inbounds i64, ptr [[A]], i64 [[INDEX]]
 ; IC2-NEXT:    [[TMP15:%.*]] = getelementptr inbounds i64, ptr [[TMP14]], i64 [[TMP4]]
-; IC2-NEXT:    call void @llvm.masked.store.nxv2i64.p0(<vscale x 2 x i64> [[TMP12]], ptr align 8 [[TMP14]], <vscale x 2 x i1> [[TMP18]])
-; IC2-NEXT:    call void @llvm.masked.store.nxv2i64.p0(<vscale x 2 x i64> [[TMP13]], ptr align 8 [[TMP15]], <vscale x 2 x i1> [[TMP10]])
-; IC2-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP17]]
+; IC2-NEXT:    call void @llvm.masked.store.nxv2i64.p0(<vscale x 2 x i64> [[TMP12]], ptr align 8 [[TMP14]], <vscale x 2 x i1> [[HALF_VF_MASK]])
+; IC2-NEXT:    call void @llvm.masked.store.nxv2i64.p0(<vscale x 2 x i64> [[TMP13]], ptr align 8 [[TMP15]], <vscale x 2 x i1> [[HALF_VF_MASK]])
+; IC2-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP3]]
 ; IC2-NEXT:    [[TMP16:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; IC2-NEXT:    br i1 [[TMP16]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP6:![0-9]+]]
 ; IC2:       [[MIDDLE_BLOCK]]:
 ; IC2-NEXT:    [[CMP_N:%.*]] = icmp eq i64 [[N]], [[N_VEC]]
-; IC2-NEXT:    [[TMP20:%.*]] = xor <vscale x 2 x i1> [[TMP18]], splat (i1 true)
-; IC2-NEXT:    [[TMP21:%.*]] = xor <vscale x 2 x i1> [[TMP10]], splat (i1 true)
+; IC2-NEXT:    [[TMP21:%.*]] = xor <vscale x 2 x i1> [[HALF_VF_MASK]], splat (i1 true)
 ; IC2-NEXT:    [[TMP22:%.*]] = mul nuw i64 [[TMP0]], 2
 ; IC2-NEXT:    [[FIRST_INACTIVE_LANE:%.*]] = call i64 @llvm.experimental.cttz.elts.i64.nxv2i1(<vscale x 2 x i1> [[TMP21]], i1 false)
 ; IC2-NEXT:    [[TMP23:%.*]] = add i64 [[TMP22]], [[FIRST_INACTIVE_LANE]]
-; IC2-NEXT:    [[FIRST_INACTIVE_LANE7:%.*]] = call i64 @llvm.experimental.cttz.elts.i64.nxv2i1(<vscale x 2 x i1> [[TMP20]], i1 false)
-; IC2-NEXT:    [[TMP24:%.*]] = icmp ne i64 [[FIRST_INACTIVE_LANE7]], [[TMP22]]
-; IC2-NEXT:    [[TMP25:%.*]] = select i1 [[TMP24]], i64 [[FIRST_INACTIVE_LANE7]], i64 [[TMP23]]
+; IC2-NEXT:    [[TMP19:%.*]] = icmp ne i64 [[FIRST_INACTIVE_LANE]], [[TMP22]]
+; IC2-NEXT:    [[TMP25:%.*]] = select i1 [[TMP19]], i64 [[FIRST_INACTIVE_LANE]], i64 [[TMP23]]
 ; IC2-NEXT:    [[LAST_ACTIVE_LANE:%.*]] = sub i64 [[TMP25]], 1
 ; IC2-NEXT:    [[TMP26:%.*]] = extractelement <vscale x 2 x i64> [[WIDE_MASKED_LOAD]], i64 [[LAST_ACTIVE_LANE]]
 ; IC2-NEXT:    [[TMP27:%.*]] = sub i64 [[LAST_ACTIVE_LANE]], [[TMP22]]

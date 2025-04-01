@@ -6365,7 +6365,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
   if (!Legal.canFoldTailByMasking())
     return "Tail cannot be folded";
   VPActiveLaneMaskPHIRecipe *ALM = nullptr;
-  if (!canChangeStepInVPlan(Plan, false, true, true, ALM) || ALM)
+  if (!canChangeStepInVPlan(Plan, true, true, true, ALM) || ALM)
     return "Unsurpported recurrence kind";
   if (Plan.hasScalarVFOnly())
     return std::nullopt; // "Scalar VPlan";
@@ -6433,6 +6433,25 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
       Sel->setOperand(1, Sum);
     }
   }
+
+  // Fix recurrences.
+  for (VPRecipeBase &R : VectorLoop->getEntryBasicBlock()->phis())
+    if (auto *FOR = dyn_cast<VPFirstOrderRecurrencePHIRecipe>(&R)) {
+      auto *BackedgeVal = FOR->getBackedgeValue();
+      auto *ExtractLastActive =
+          new VPInstruction(VPInstruction::ExtractLastActive,
+                            {FOR->getStartValue(), BackedgeVal, NewHeaderMask},
+                            {}, {}, {}, "last.active");
+      ExtractLastActive->insertAfter(&FOR->getBackedgeRecipe());
+      FOR->setBackedgeValue(ExtractLastActive);
+
+      for (VPUser *U : BackedgeVal->users())
+        if (auto *I = dyn_cast<VPInstruction>(U);
+            I && I->getParent() == Plan.getMiddleBlock() &&
+            I->getOpcode() == VPInstruction::ExtractLastLane) {
+          I->setOperand(0, ExtractLastActive);
+        }
+    }
 
   // Housekeeping for later execution steps.
   TmpHeaderMask->getDefiningRecipe()->eraseFromParent();
