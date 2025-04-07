@@ -1072,7 +1072,7 @@ static const IntrinsicInterface genericIntrinsicFunction[]{
 
 // TODO: Non-standard intrinsic functions
 //  SHIFT,
-//  COMPL, EQV, NEQV, INT8, JINT, JNINT, KNINT,
+//  COMPL, EQV, NEQV,
 //  QCMPLX, QEXT, QFLOAT, QREAL, DNUM,
 //  INUM, JNUM, KNUM, QNUM, RNUM, RAN, RANF, ILEN,
 //  MCLOCK, SECNDS, COTAN, IBCHNG, ISHA, ISHC, ISHL, IXOR
@@ -1261,6 +1261,8 @@ static const SpecificIntrinsicInterface specificIntrinsicFunction[]{
     {{"jiabs", {{"a", TypePattern{IntType, KindCode::exactKind, 4}}},
          TypePattern{IntType, KindCode::exactKind, 4}},
         "abs"},
+    {{"jint", {{"a", AnyNumeric}}, DefaultInt}, "int"},
+    {{"jnint", {{"a", AnyReal}}, DefaultInt}, "nint"},
     {{"kiabs", {{"a", TypePattern{IntType, KindCode::exactKind, 8}}},
          TypePattern{IntType, KindCode::exactKind, 8}},
         "abs"},
