@@ -393,6 +393,8 @@ static constexpr IntrinsicHandler handlers[]{
     {"command_argument_count", &I::genCommandArgumentCount},
     {"conjg", &I::genConjg},
     {"cosd", &I::genCosd},
+    {"cotan", &I::genCotan},
+    {"cotand", &I::genCotand},
     {"count",
      &I::genCount,
      {{{"mask", asAddr}, {"dim", asValue}, {"kind", asValue}}},
@@ -3599,6 +3601,68 @@ mlir::Value IntrinsicLibrary::genCosd(mlir::Type resultType,
   mlir::Value factor = builder.createConvert(loc, args[0].getType(), dfactor);
   mlir::Value arg = builder.create<mlir::arith::MulFOp>(loc, args[0], factor);
   return getRuntimeCallGenerator("cos", ftype)(builder, loc, {arg});
+}
+
+// COTAN
+mlir::Value IntrinsicLibrary::genCotan(mlir::Type resultType,
+                                       llvm::ArrayRef<mlir::Value> args) {
+  // COTAN(X) = SIN(X) / COS(X)
+  // 	      =  1.0 / TAN(X)
+  assert(args.size() == 1);
+
+  mlir::MLIRContext *context = builder.getContext();
+  mlir::FunctionType ftype =
+      mlir::FunctionType::get(context, {args[0].getType()}, {resultType});
+
+  mlir::Value tan = getRuntimeCallGenerator("tan", ftype)(builder, loc, args);
+
+  if (fir::isa_real(resultType)) {
+    mlir::Value one = genConversion(
+        resultType,
+        builder.createIntegerConstant(loc, builder.getDefaultIntegerType(), 1));
+    return builder.create<mlir::arith::DivFOp>(loc, one, tan);
+  }
+
+  assert(fir::isa_complex(resultType));
+  fir::factory::Complex complexHelper(builder, loc);
+  mlir::Type partType = complexHelper.getComplexPartType(resultType);
+  mlir::Value zero = builder.createRealZeroConstant(loc, partType);
+  mlir::Value one = genConversion(
+      partType,
+      builder.createIntegerConstant(loc, builder.getDefaultIntegerType(), 1));
+
+  mlir::Value oneComplex =
+      fir::factory::Complex{builder, loc}.createComplex(resultType, one, zero);
+  return genDivC(builder, loc, resultType, oneComplex, tan);
+}
+
+// COTAND
+mlir::Value IntrinsicLibrary::genCotand(mlir::Type resultType,
+                                        llvm::ArrayRef<mlir::Value> args) {
+  // COTAND(X) = SIND(X) / COSD(X)
+  // 	      =  1.0 / TAND(X)
+  assert(args.size() == 1);
+
+  mlir::Value tan = genTand(resultType, args);
+
+  if (fir::isa_real(resultType)) {
+    mlir::Value one = genConversion(
+        resultType,
+        builder.createIntegerConstant(loc, builder.getDefaultIntegerType(), 1));
+    return builder.create<mlir::arith::DivFOp>(loc, one, tan);
+  }
+
+  assert(fir::isa_complex(resultType));
+  fir::factory::Complex complexHelper(builder, loc);
+  mlir::Type partType = complexHelper.getComplexPartType(resultType);
+  mlir::Value zero = builder.createRealZeroConstant(loc, partType);
+  mlir::Value one = genConversion(
+      partType,
+      builder.createIntegerConstant(loc, builder.getDefaultIntegerType(), 1));
+
+  mlir::Value oneComplex =
+      fir::factory::Complex{builder, loc}.createComplex(resultType, one, zero);
+  return genDivC(builder, loc, resultType, oneComplex, tan);
 }
 
 // COUNT

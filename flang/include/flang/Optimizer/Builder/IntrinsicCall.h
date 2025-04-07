@@ -222,6 +222,8 @@ struct IntrinsicLibrary {
   fir::ExtendedValue genCharacterCompare(mlir::Type,
                                          llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genCmplx(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genCotan(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  mlir::Value genCotand(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genConjg(mlir::Type, llvm::ArrayRef<mlir::Value>);
   fir::ExtendedValue genCount(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   void genCpuTime(llvm::ArrayRef<fir::ExtendedValue>);
