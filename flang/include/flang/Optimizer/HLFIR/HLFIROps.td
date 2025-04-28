@@ -84,30 +84,29 @@ def hlfir_DeclareOp : hlfir_Op<"declare", [AttrSizedOperandSegments,
    ```
   }];
 
-  let arguments = (ins
-    AnyRefOrBox:$memref,
-    Optional<AnyShapeOrShiftType>:$shape,
-    Variadic<AnyIntegerType>:$typeparams,
-    Optional<fir_DummyScopeType>:$dummy_scope,
-    Builtin_StringAttr:$uniq_name,
-    OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
-    OptionalAttr<cuf_DataAttributeAttr>:$data_attr
-  );
+  let arguments = (ins AnyRefOrBox:$memref,
+      Optional<AnyShapeOrShiftType>:$shape,
+      Variadic<AnyIntegerType>:$typeparams,
+      Optional<fir_DummyScopeType>:$dummy_scope, Builtin_StringAttr:$uniq_name,
+      OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
+      OptionalAttr<cuf_DataAttributeAttr>:$data_attr,
+      Optional<AnyRefOrBoxType>:$coarray_handle);
 
   let results = (outs AnyFortranVariable, AnyRefOrBoxLike);
 
   let assemblyFormat = [{
     $memref (`(` $shape^ `)`)? (`typeparams` $typeparams^)?
-    (`dummy_scope` $dummy_scope^)?
+    (`dummy_scope` $dummy_scope^)? (`coarray_handle` $coarray_handle^)?
     attr-dict `:` functional-type(operands, results)
   }];
 
-  let builders = [
-    OpBuilder<(ins "mlir::Value":$memref, "llvm::StringRef":$uniq_name,
-      CArg<"mlir::Value", "{}">:$shape, CArg<"mlir::ValueRange", "{}">:$typeparams,
+  let builders = [OpBuilder<(ins "mlir::Value":$memref,
+      "llvm::StringRef":$uniq_name, CArg<"mlir::Value", "{}">:$shape,
+      CArg<"mlir::ValueRange", "{}">:$typeparams,
       CArg<"mlir::Value", "{}">:$dummy_scope,
       CArg<"fir::FortranVariableFlagsAttr", "{}">:$fortran_attrs,
-      CArg<"cuf::DataAttributeAttr", "{}">:$data_attr)>];
+      CArg<"cuf::DataAttributeAttr", "{}">:$data_attr,
+      CArg<"mlir::Value", "{}">:$coarray_handle)>];
 
   let extraClassDeclaration = [{
     /// Get the variable original base (same as input). It lacks

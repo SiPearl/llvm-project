@@ -14,11 +14,13 @@
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
+#include "flang/Optimizer/HLFIR/HLFIROps.h"
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Runtime/coarray.h"
 #include "flang/Semantics/scope.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 using namespace Fortran::runtime;
 using namespace Fortran::semantics;
@@ -28,31 +30,39 @@ static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
   return !fir::getBase(exv);
 }
 
-/// Generate call to runtime function that store prif_coarray_handle with addr
-void fir::runtime::saveCoarrayHandle(fir::FirOpBuilder &builder,
-                                     mlir::Location loc, mlir::Value addr,
-                                     mlir::Value handle) {
-  mlir::func::FuncOp func =
-      fir::runtime::getRuntimeFunc<mkRTKey(saveCoarrayHandle)>(loc, builder);
-
-  mlir::Value refHandle = builder.create<fir::BoxAddrOp>(
-      loc, builder.getRefType(handle.getType()), handle);
-  llvm::SmallVector<mlir::Value> args = {addr, refHandle};
-  builder.create<fir::CallOp>(loc, func, args);
-}
-
 /// Generate call to runtime function to retrieve prif_coarray_handle
 /// associated to an addr
 mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
                                            mlir::Location loc,
                                            mlir::Value addr) {
-  mlir::func::FuncOp func =
-      fir::runtime::getRuntimeFunc<mkRTKey(getCoarrayHandle)>(loc, builder);
+  while (true) {
+    mlir::Operation *defOp = addr.getDefiningOp();
+    if (auto op = mlir::dyn_cast<fir::LoadOp>(defOp)) {
+      addr = op.getMemref();
+      break;
+    } else if (auto op = mlir::dyn_cast<fir::EmboxOp>(defOp)) {
+      addr = op.getMemref();
+      break;
+    } else if (auto op = mlir::dyn_cast<fir::EmboxCharOp>(defOp)) {
+      addr = op.getMemref();
+      break;
+    } else if (auto op = mlir::dyn_cast<hlfir::DesignateOp>(defOp)) {
+      addr = op.getMemref();
+    } else {
+      break;
+    }
+  }
 
-  llvm::SmallVector<mlir::Value> args = {addr};
-  // return builder.create<fir::CallOp>(loc, func, args).getResult(0);
-  return builder.createBox(
-      loc, builder.create<fir::CallOp>(loc, func, args).getResult(0));
+  if (auto declare = mlir::dyn_cast<hlfir::DeclareOp>(addr.getDefiningOp())) {
+    mlir::Value coarrayHandle = declare.getCoarrayHandle();
+    if (isStaticallyAbsent(coarrayHandle))
+      fir::emitFatalError(loc, "Unable to find the coarray_handle.", false);
+    if (mlir::isa<fir::ReferenceType>(coarrayHandle.getType()))
+      return builder.create<fir::LoadOp>(loc, coarrayHandle);
+    return coarrayHandle;
+  }
+  addr.dump();
+  TODO(loc, "Retrieve the coarray handle from this operation.");
 }
 
 /// Generate call to runtime function to compute the lastest ucobound.
@@ -61,7 +71,7 @@ void fir::runtime::computeLastUcobound(fir::FirOpBuilder &builder,
                                        mlir::Value lcobounds,
                                        mlir::Value ucobounds) {
   mlir::func::FuncOp func =
-      fir::runtime::getRuntimeFunc<mkRTKey(computeLastUcobound)>(loc, builder);
+      fir::runtime::getRuntimeFunc<mkRTKey(ComputeLastUcobound)>(loc, builder);
   mlir::Value num_images = fir::runtime::getNumImages(builder, loc);
   llvm::SmallVector<mlir::Value> args = {num_images, lcobounds, ucobounds};
   builder.create<fir::CallOp>(loc, func, args);
@@ -71,7 +81,7 @@ void fir::runtime::copy1DArrayToI64Array(fir::FirOpBuilder &builder,
                                          mlir::Location loc, mlir::Value from,
                                          mlir::Value to) {
   mlir::func::FuncOp func =
-      fir::runtime::getRuntimeFunc<mkRTKey(copy1DArrayToI64Array)>(loc,
+      fir::runtime::getRuntimeFunc<mkRTKey(Copy1DArrayToI64Array)>(loc,
                                                                    builder);
   llvm::SmallVector<mlir::Value> args = {from, to};
   builder.create<fir::CallOp>(loc, func, args);
@@ -80,7 +90,7 @@ void fir::runtime::copy1DArrayToI64Array(fir::FirOpBuilder &builder,
 /// Generate Call to runtime prif_num_images
 mlir::Value fir::runtime::getNumImages(fir::FirOpBuilder &builder,
                                        mlir::Location loc) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
 
   mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy);
@@ -100,7 +110,7 @@ mlir::Value fir::runtime::getNumImagesWithTeam(fir::FirOpBuilder &builder,
           : PRIFNAME_SUB("num_images_with_team");
 
   mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
   mlir::func::FuncOp funcOp = builder.createFunction(loc, numImagesName, ftype);
   llvm::SmallVector<mlir::Value> args = {team, result};
@@ -111,7 +121,7 @@ mlir::Value fir::runtime::getNumImagesWithTeam(fir::FirOpBuilder &builder,
 /// Generate Call to runtime prif_this_image_no_coarray
 mlir::Value fir::runtime::getThisImage(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value team) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("this_image_no_coarray"), ftype);
@@ -133,7 +143,7 @@ mlir::Value fir::runtime::getThisImage(fir::FirOpBuilder &builder,
 mlir::Value fir::runtime::getThisImageWithCoarray(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Type resultType,
     mlir::Value coarrayHandle, mlir::Value team, mlir::Value dim) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   llvm::SmallVector<mlir::Value> args;
   mlir::FunctionType ftype;
   mlir::func::FuncOp funcOp;
@@ -163,7 +173,7 @@ mlir::Value fir::runtime::getThisImageWithCoarray(
 mlir::Value fir::runtime::getImageStatus(fir::FirOpBuilder &builder,
                                          mlir::Location loc, mlir::Value image,
                                          mlir::Value team) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::Value result = builder.createTemporary(loc, builder.getI32Type());
 
   if (isStaticallyAbsent(team)) {
@@ -183,7 +193,7 @@ mlir::Value fir::runtime::getImageStatus(fir::FirOpBuilder &builder,
 mlir::Value fir::runtime::getImageIndex(fir::FirOpBuilder &builder,
                                         mlir::Location loc, mlir::Value handle,
                                         mlir::Value sub, mlir::Value team) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
 
   mlir::func::FuncOp funcOp;
@@ -246,7 +256,7 @@ fir::ExtendedValue fir::runtime::genLCoBounds(fir::FirOpBuilder &builder,
                                               mlir::Location loc,
                                               mlir::Value handle, size_t corank,
                                               mlir::Value dim) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
@@ -279,7 +289,7 @@ fir::ExtendedValue fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
                                               mlir::Location loc,
                                               mlir::Value handle, size_t corank,
                                               mlir::Value dim) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
 
   mlir::func::FuncOp funcOp;
   llvm::SmallVector<mlir::Value> localArgs = {handle};
@@ -311,7 +321,7 @@ fir::ExtendedValue fir::runtime::genUCoBounds(fir::FirOpBuilder &builder,
 mlir::Value fir::runtime::genCoshape(fir::FirOpBuilder &builder,
                                      mlir::Location loc, mlir::Value handle,
                                      size_t corank) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::Type resultType = fir::SequenceType::get(
       static_cast<fir::SequenceType::Extent>(corank), builder.getI64Type());
   mlir::Value result =
@@ -333,7 +343,7 @@ void fir::runtime::CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
                               mlir::Value offset,
                               mlir::Value currentImageBuffer,
                               mlir::Value sizeInBytes) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -382,7 +392,7 @@ void fir::runtime::CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
                               mlir::Value offset,
                               mlir::Value currentImageBuffer,
                               mlir::Value sizeInBytes) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -430,7 +440,7 @@ void fir::runtime::genSyncAllStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,
                                        mlir::Value errmsg) {
   mlir::Value nullPtr = builder.createNullConstant(loc);
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("sync_all"), ftype);
@@ -444,7 +454,7 @@ void fir::runtime::genSyncMemoryStatement(fir::FirOpBuilder &builder,
                                           mlir::Location loc, mlir::Value stat,
                                           mlir::Value errmsg) {
   mlir::Value nullPtr = builder.createNullConstant(loc);
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("sync_memory"), ftype);
@@ -460,7 +470,7 @@ void fir::runtime::genSyncImagesStatement(fir::FirOpBuilder &builder,
                                           mlir::Value stat,
                                           mlir::Value errmsg) {
   mlir::Value nullPtr = builder.createNullConstant(loc);
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("sync_images"), ftype);
@@ -474,7 +484,7 @@ void fir::runtime::genSyncTeamStatement(fir::FirOpBuilder &builder,
                                         mlir::Location loc, mlir::Value team,
                                         mlir::Value stat, mlir::Value errmsg) {
   mlir::Value nullPtr = builder.createNullConstant(loc);
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("sync_team"), ftype);
@@ -490,7 +500,7 @@ void fir::runtime::genLockStatement(fir::FirOpBuilder &builder,
                                     mlir::Value acquiredLock,
                                     mlir::Value offset, mlir::Value stat,
                                     mlir::Value errmsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -507,7 +517,7 @@ void fir::runtime::genUnlockStatement(fir::FirOpBuilder &builder,
                                       mlir::Location loc, mlir::Value imageNum,
                                       mlir::Value handle, mlir::Value offset,
                                       mlir::Value stat, mlir::Value errmsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -535,7 +545,7 @@ void genCollectiveSubroutine(fir::FirOpBuilder &builder, mlir::Location loc,
                              mlir::Value A, mlir::Value sourceImage,
                              mlir::Value stat, mlir::Value errmsg,
                              std::string coName) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp = builder.createFunction(loc, coName, ftype);
 
@@ -595,7 +605,7 @@ void fir::runtime::genFormTeamStatement(fir::FirOpBuilder &builder,
                                         mlir::Value teamNumber,
                                         mlir::Value team, mlir::Value newIndex,
                                         mlir::Value stat, mlir::Value errMsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -613,7 +623,7 @@ void fir::runtime::genChangeTeamStatement(fir::FirOpBuilder &builder,
                                           mlir::Location loc, mlir::Value team,
                                           mlir::Value stat,
                                           mlir::Value errMsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("change_team"), ftype);
@@ -628,7 +638,7 @@ void fir::runtime::genChangeTeamStatement(fir::FirOpBuilder &builder,
 void fir::runtime::genEndTeamStatement(fir::FirOpBuilder &builder,
                                        mlir::Location loc, mlir::Value stat,
                                        mlir::Value errMsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("end_team"), ftype);
@@ -642,7 +652,7 @@ void fir::runtime::genEndTeamStatement(fir::FirOpBuilder &builder,
 /// Generate call to runtime subroutine prif_get_team
 mlir::Value fir::runtime::genGetTeam(fir::FirOpBuilder &builder,
                                      mlir::Location loc, mlir::Value level) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("get_team"), ftype);
@@ -661,7 +671,7 @@ mlir::Value fir::runtime::genGetTeam(fir::FirOpBuilder &builder,
 /// Generate call to runtime subroutine prif_team_number
 mlir::Value fir::runtime::genTeamNumber(fir::FirOpBuilder &builder,
                                         mlir::Location loc, mlir::Value team) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("team_number"), ftype);
@@ -680,7 +690,7 @@ void fir::runtime::genAtomicCas(fir::FirOpBuilder &builder, mlir::Location loc,
                                 mlir::Value offset, mlir::Value old,
                                 mlir::Value compare, mlir::Value newV,
                                 mlir::Value stat) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   bool isLogicalType = fir::getBaseTypeOf(newV).isInteger(1);
   mlir::func::FuncOp funcOp =
@@ -698,7 +708,7 @@ void fir::runtime::genAtomicDefine(fir::FirOpBuilder &builder,
                                    mlir::Location loc, mlir::Value imageNum,
                                    mlir::Value handle, mlir::Value offset,
                                    mlir::Value value, mlir::Value stat) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   bool isLogicalType = fir::getBaseTypeOf(value).isInteger(1);
   mlir::func::FuncOp funcOp = builder.createFunction(
@@ -718,7 +728,7 @@ void fir::runtime::genAtomicOp(fir::FirOpBuilder &builder, mlir::Location loc,
                                mlir::Value offset, mlir::Value value,
                                mlir::Value old, mlir::Value stat, int opKind,
                                bool isFetch) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       isFetch ? PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy)
               : PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
@@ -766,7 +776,7 @@ void fir::runtime::genAtomicRef(fir::FirOpBuilder &builder, mlir::Location loc,
                                 mlir::Value imageNum, mlir::Value handle,
                                 mlir::Value offset, mlir::Value value,
                                 mlir::Value stat) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   bool isLogicalType = fir::getBaseTypeOf(value).isInteger(1);
   mlir::func::FuncOp funcOp =
@@ -785,7 +795,7 @@ void fir::runtime::genEventPostStatement(fir::FirOpBuilder &builder,
                                          mlir::Value imageNum,
                                          mlir::Value handle, mlir::Value offset,
                                          mlir::Value stat, mlir::Value errmsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -803,7 +813,7 @@ void fir::runtime::genEventWaitStatement(fir::FirOpBuilder &builder,
                                          mlir::Value eventVarPtr,
                                          mlir::Value untilCount,
                                          mlir::Value stat, mlir::Value errmsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("event_wait"), ftype);
@@ -818,7 +828,7 @@ void fir::runtime::genEventWaitStatement(fir::FirOpBuilder &builder,
 void fir::runtime::genNotifyWaitStatement(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value notifyVarPtr,
     mlir::Value untilCount, mlir::Value stat, mlir::Value errmsg) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("notify_wait"), ftype);
@@ -833,12 +843,11 @@ void fir::runtime::genNotifyWaitStatement(
 void fir::runtime::genEventQuery(fir::FirOpBuilder &builder, mlir::Location loc,
                                  mlir::Value eventVarPtr, mlir::Value count,
                                  mlir::Value stat) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("event_query"), ftype);
 
-  mlir::Value nullPtr = builder.createNullConstant(loc);
   llvm::SmallVector<mlir::Value> localArgs = {eventVarPtr, count, stat};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }

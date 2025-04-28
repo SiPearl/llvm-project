@@ -411,10 +411,10 @@ mlir::Value fir::FirOpBuilder::genTempDeclareOp(
     llvm::ArrayRef<mlir::Value> typeParams,
     fir::FortranVariableFlagsAttr fortranAttrs) {
   auto nameAttr = mlir::StringAttr::get(builder.getContext(), name);
-  return fir::DeclareOp::create(builder, loc, memref.getType(), memref, shape,
-                                typeParams,
-                                /*dummy_scope=*/nullptr, nameAttr, fortranAttrs,
-                                cuf::DataAttributeAttr{});
+  return fir::DeclareOp::create(
+      builder, loc, memref.getType(), memref, shape, typeParams,
+      /*dummy_scope=*/nullptr, nameAttr, fortranAttrs, cuf::DataAttributeAttr{},
+      /*coarray_handle*/ nullptr);
 }
 
 mlir::Value fir::FirOpBuilder::genStackSave(mlir::Location loc) {

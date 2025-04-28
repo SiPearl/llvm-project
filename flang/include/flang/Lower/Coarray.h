@@ -77,18 +77,26 @@ mlir::Value getImageIndexFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
                                  fir::ExtendedValue box,
                                  mlir::Value handle = {});
 
+mlir::Value getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Type ty,
+                           llvm::SmallVector<mlir::Value> extents);
+
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
 //===----------------------------------------------------------------------===//
 
-void genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
-                        mlir::Location loc, const semantics::Symbol &sym,
-                        fir::MutableBoxValue, llvm::SmallVector<mlir::Value>);
+mlir::Type getCoarrayHandleType(fir::FirOpBuilder &builder, mlir::Location loc);
 
 mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                                mlir::Location loc, const semantics::Symbol &sym,
-                               mlir::Type allocTy,
-                               llvm::SmallVector<mlir::Value> extents);
+                               fir::MutableBoxValue,
+                               llvm::SmallVector<mlir::Value>,
+                               mlir::Value errMsgAddr);
+
+std::pair<mlir::Value, mlir::Value>
+genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
+                   mlir::Location loc, const semantics::Symbol &sym,
+                   mlir::Type allocTy, llvm::SmallVector<mlir::Value> extents);
 
 mlir::Value genDeallocateCoarray(Fortran::lower::AbstractConverter &converter,
                                  mlir::Location loc, fir::MutableBoxValue box,

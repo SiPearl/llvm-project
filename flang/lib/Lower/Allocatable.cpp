@@ -516,9 +516,15 @@ private:
                 loc, one, builder.create<mlir::arith::SubIOp>(loc, ub, lb)));
         extents.push_back(extent);
       }
-      Fortran::lower::genAllocateCoarray(converter, loc, alloc.getSymbol(), box,
-                                         extents);
-      postAllocationAction(alloc);
+      genSetType(alloc, box, loc);
+      genSetDeferredLengthParameters(alloc, box);
+      genAllocateObjectBounds(alloc, box);
+      mlir::Value stat = Fortran::lower::genAllocateCoarray(
+          converter, loc, alloc.getSymbol(), box, extents,
+          errorManager.errMsgAddr);
+      fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
+      postAllocationAction(alloc, box);
+      errorManager.assignStat(builder, loc, stat);
       return;
     }
     if (alloc.type.IsPolymorphic())
@@ -530,8 +536,7 @@ private:
       stat = genRuntimeAllocate(builder, loc, box, errorManager);
       setPinnedToFalse();
     } else {
-      stat =
-          genCudaAllocate(builder, loc, box, errorManager, alloc.getSymbol());
+      stat = genCudaAllocate(builder, loc, box, errorManager, alloc.getSymbol());
     }
     fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
     postAllocationAction(alloc, box);
@@ -749,7 +754,8 @@ private:
     // Set up the descriptor for allocation for intrinsic type spec on
     // unlimited polymorphic entity.
     if (typeSpec->AsIntrinsic() &&
-        fir::isUnlimitedPolymorphicType(fir::getBase(box).getType())) {
+        (fir::isUnlimitedPolymorphicType(fir::getBase(box).getType()) ||
+         alloc.hasCoarraySpec())) {
       if (typeSpec->AsIntrinsic()->category() == TypeCategory::Character) {
         genRuntimeInitCharacter(
             builder, loc, box, lenParams[0],

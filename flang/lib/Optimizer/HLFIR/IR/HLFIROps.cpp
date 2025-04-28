@@ -261,13 +261,11 @@ updateDeclaredInputTypeWithVolatility(mlir::Type inputType, mlir::Value memref,
   return std::make_pair(inputType, memref);
 }
 
-void hlfir::DeclareOp::build(mlir::OpBuilder &builder,
-                             mlir::OperationState &result, mlir::Value memref,
-                             llvm::StringRef uniq_name, mlir::Value shape,
-                             mlir::ValueRange typeparams,
-                             mlir::Value dummy_scope,
-                             fir::FortranVariableFlagsAttr fortran_attrs,
-                             cuf::DataAttributeAttr data_attr) {
+void hlfir::DeclareOp::build(
+    mlir::OpBuilder &builder, mlir::OperationState &result, mlir::Value memref,
+    llvm::StringRef uniq_name, mlir::Value shape, mlir::ValueRange typeparams,
+    mlir::Value dummy_scope, fir::FortranVariableFlagsAttr fortran_attrs,
+    cuf::DataAttributeAttr data_attr, mlir::Value coarray_handle) {
   auto nameAttr = builder.getStringAttr(uniq_name);
   mlir::Type inputType = memref.getType();
   bool hasExplicitLbs = hasExplicitLowerBounds(shape);
@@ -279,7 +277,8 @@ void hlfir::DeclareOp::build(mlir::OpBuilder &builder,
   auto [hlfirVariableType, firVarType] =
       getDeclareOutputTypes(inputType, hasExplicitLbs);
   build(builder, result, {hlfirVariableType, firVarType}, memref, shape,
-        typeparams, dummy_scope, nameAttr, fortran_attrs, data_attr);
+        typeparams, dummy_scope, nameAttr, fortran_attrs, data_attr,
+        coarray_handle);
 }
 
 llvm::LogicalResult hlfir::DeclareOp::verify() {

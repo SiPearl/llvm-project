@@ -1924,7 +1924,8 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
                              mlir::Value base, mlir::Value len = {},
                              llvm::ArrayRef<mlir::Value> shape = {},
                              llvm::ArrayRef<mlir::Value> lbounds = {},
-                             bool force = false) {
+                             bool force = false,
+                             mlir::Value coarrayHandle = {}) {
   // In HLFIR, procedure dummy symbols are not added with an hlfir.declare
   // because they are "values", and hlfir.declare is intended for variables. It
   // would add too much complexity to hlfir.declare to support this case, and
@@ -2001,9 +2002,9 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
     mlir::Value dummyScope;
     if (converter.isRegisteredDummySymbol(sym))
       dummyScope = converter.dummyArgsScopeValue();
-    auto newBase =
-        hlfir::DeclareOp::create(builder, loc, base, name, shapeOrShift,
-                                 lenParams, dummyScope, attributes, dataAttr);
+    auto newBase = hlfir::DeclareOp::create(
+        builder, loc, base, name, shapeOrShift, lenParams, dummyScope,
+        attributes, dataAttr, coarrayHandle);
     symMap.addVariableDefinition(sym, newBase, force);
     return;
   }
@@ -2075,7 +2076,8 @@ static void
 genAllocatableOrPointerDeclare(Fortran::lower::AbstractConverter &converter,
                                Fortran::lower::SymMap &symMap,
                                const Fortran::semantics::Symbol &sym,
-                               fir::MutableBoxValue box, bool force = false) {
+                               fir::MutableBoxValue box, bool force = false,
+                               mlir::Value coarrayHandle = {}) {
   if (!converter.getLoweringOptions().getLowerToHighLevelFIR()) {
     symMap.addAllocatableOrPointer(sym, box, force);
     return;
@@ -2092,7 +2094,7 @@ genAllocatableOrPointerDeclare(Fortran::lower::AbstractConverter &converter,
   }
   genDeclareSymbol(converter, symMap, sym, base, explictLength,
                    /*shape=*/{},
-                   /*lbounds=*/{}, force);
+                   /*lbounds=*/{}, force, coarrayHandle);
 }
 
 /// Map a procedure pointer
@@ -2211,13 +2213,21 @@ void Fortran::lower::mapSymbolAttributes(
           TODO(loc,
                "derived type allocatable or pointer with length parameters");
     }
+    // Allocate the coarray handle wich is the coarray descriptor that
+    // describing the entity if this is a coarray.
+    mlir::Value coarrayHandle;
+    if (Fortran::evaluate::IsCoarray(sym)) {
+      coarrayHandle = builder.createTemporary(
+          loc, fir::BoxType::get(
+                   Fortran::lower::getCoarrayHandleType(builder, loc)));
+    }
     fir::MutableBoxValue box = Fortran::lower::createMutableBox(
         converter, loc, var, boxAlloc, nonDeferredLenParams,
         /*alwaysUseBox=*/
         converter.getLoweringOptions().getLowerToHighLevelFIR(),
         Fortran::lower::getAllocatorIdx(var.getSymbol()));
     genAllocatableOrPointerDeclare(converter, symMap, var.getSymbol(), box,
-                                   replace);
+                                   replace, coarrayHandle);
     return;
   }
 
@@ -2512,13 +2522,14 @@ void Fortran::lower::mapSymbolAttributes(
   }
 
   if (Fortran::evaluate::IsCoarray(sym)) {
-    mlir::Type baseType;
+    mlir::Type baseType = fir::unwrapRefType(addr.getType());
     if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(addr.getType()))
       baseType = boxTy.getEleTy();
-    else
-      baseType = fir::unwrapRefType(addr.getType());
-    addr = Fortran::lower::genAllocateCoarray(converter, loc, sym, baseType,
-                                              extents);
+    auto [addrCoarray, coarrayHandle] = Fortran::lower::genAllocateCoarray(
+        converter, loc, sym, baseType, extents);
+    ::genDeclareSymbol(converter, symMap, sym, addrCoarray, len, extents,
+                       lbounds, replace, coarrayHandle);
+    return;
   }
 
   // Allocate or extract raw address for the entity
