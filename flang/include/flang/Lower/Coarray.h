@@ -77,6 +77,10 @@ mlir::Value getImageIndexFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
                                  fir::ExtendedValue box,
                                  mlir::Value handle = {});
 
+mlir::Value genByteOffset(Fortran::lower::AbstractConverter &converter,
+                          const Fortran::semantics::SomeExpr &expr,
+                          mlir::Location loc);
+
 mlir::Value getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
                            mlir::Type ty,
                            llvm::SmallVector<mlir::Value> extents);

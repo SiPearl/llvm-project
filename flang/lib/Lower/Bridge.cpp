@@ -650,8 +650,13 @@ public:
                  mlir::Location loc) {
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
-    Fortran::semantics::SymbolRef sym = coarrayRef.GetFirstSymbol();
-    fir::ExtendedValue addr = getSymbolExtendedValue(sym, nullptr);
+    fir::ExtendedValue addr;
+    if (lowerToHighLevelFIR()) {
+      addr = Fortran::lower::convertExprToAddress(loc, *this, expr,
+                                                  localSymbols, context);
+    } else {
+      TODO(loc, "generate corray expression with PIRF.");
+    }
     mlir::Value handle =
         fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(addr));
 
@@ -662,49 +667,47 @@ public:
         *this, loc, coarrayRef, handle);
     builder->create<fir::StoreOp>(loc, index, imageNum);
 
-    // TODO : offset
-    mlir::Value offset = builder->createTemporary(loc, i32Ty);
-    builder->create<fir::StoreOp>(
-        loc, builder->createIntegerConstant(loc, i32Ty, 0), offset);
+    // Create and allocate destination vvalue.
+    mlir::Type resultType = fir::getBaseTypeOf(addr);
+    mlir::Value dest = builder->createTemporary(loc, resultType);
+    mlir::Value destBox = builder->createBox(loc, dest);
 
     mlir::Type i64Ty = builder->getI64Type();
-    mlir::Type resultType = fir::getBaseTypeOf(addr);
+    // Getting offset from expr
+    mlir::Value offset = Fortran::lower::genByteOffset(*this, expr, loc);
+
     if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
-      auto [remoteStride, extents] =
-          genStrideAndExtents(coarrayRef.base(), loc);
-      mlir::Value currentImageStride, unusedStride;
-      mlir::Type emptyArrayType = fir::SequenceType::get(
-          {static_cast<fir::SequenceType::Extent>(0)}, i64Ty);
-      currentImageStride = builder->createTemporary(loc, emptyArrayType);
+      auto [remoteStride, extents] = genStrideAndExtents(expr, loc);
+      mlir::Value currentImageStride = remoteStride;
 
-      // Getting the element size of the lhs expression
-      mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
-      auto size =
+      size_t size =
           fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getElementTypeOf(addr),
                                               *dl, builder->getKindMap())
               .first;
+
+      // Getting the element size of the lhs expression
+      mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
       auto es = builder->createIntegerConstant(loc, i64Ty, size);
       builder->create<fir::StoreOp>(loc, es, elementSize);
 
-      mlir::Value dest = builder->createTemporary(loc, resultType);
-      fir::runtime::CoarrayGetStridded(*builder, loc, imageNum, handle, offset,
-                                       remoteStride, dest, currentImageStride,
-                                       elementSize, extents);
-      return dest;
+      fir::runtime::CoarrayGetStrided(*builder, loc, imageNum, handle, offset,
+                                      remoteStride, destBox, currentImageStride,
+                                      elementSize, extents);
     } else {
       mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
-      auto size = fir::getTypeSizeAndAlignmentOrCrash(
-                      loc, fir::getBaseTypeOf(addr), *dl, builder->getKindMap())
-                      .first;
+      size_t size =
+          fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getBaseTypeOf(addr),
+                                              *dl, builder->getKindMap())
+              .first;
       auto sib = builder->createIntegerConstant(loc, i64Ty, size);
       builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
 
-      mlir::Value dest = builder->createTemporary(loc, resultType);
-      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset, dest,
+      // Getting the current_image_buffer
+      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset, destBox,
                                sizeInBytes);
-      return dest;
     }
+    return dest;
   }
 
   fir::ExtendedValue
@@ -721,9 +724,7 @@ public:
                       Fortran::lower::StatementContext &context,
                       mlir::Location loc) {
     fir::ExtendedValue addr = genCoarrayExpr(expr, coarrayRef, context, loc);
-    fir::ExtendedValue value =
-        builder->create<fir::LoadOp>(loc, fir::getBase(addr));
-    return value;
+    return builder->create<fir::LoadOp>(loc, fir::getBase(addr));
   }
 
   fir::ExtendedValue
@@ -5023,6 +5024,9 @@ private:
 
     // Helper to generate the code evaluating the right-hand side.
     auto evaluateRhs = [&](Fortran::lower::StatementContext &stmtCtx) {
+      if (auto coarrayRef{Fortran::evaluate::ExtractCoarrayRef(assign.rhs)})
+        return hlfir::Entity{fir::getBase(
+            genCoarrayExprBox(assign.lhs, coarrayRef.value(), stmtCtx, loc))};
       hlfir::Entity rhs = Fortran::lower::convertExprToHLFIR(
           loc, *this, assign.rhs, localSymbols, stmtCtx);
       // Load trivial scalar RHS to allow the loads to be hoisted outside of
@@ -5133,76 +5137,142 @@ private:
   }
 
   std::pair<mlir::Value, mlir::Value>
-  genStrideAndExtents(const Fortran::evaluate::DataRef &dataRef,
+  genStrideAndExtents(const Fortran::semantics::SomeExpr &expr,
                       mlir::Location loc) {
     Fortran::lower::StatementContext stmtCtx;
-    const Fortran::semantics::Symbol &sym = dataRef.GetLastSymbol();
-    std::vector<Fortran::evaluate::Subscript> subscript;
-    if (const auto *ref{
-                   std::get_if<Fortran::evaluate::ArrayRef>(&dataRef.u)}) {
-      subscript = ref->subscript();
-    }
-    hlfir::Entity base{fir::getBase(getSymbolExtendedValue(sym, nullptr))};
-    llvm::SmallVector<std::pair<mlir::Value, mlir::Value>> bounds;
-    auto getBaseBounds = [&](unsigned i) {
-      if (bounds.empty()) {
-        bounds = hlfir::genBounds(loc, *builder, base);
-        assert(!bounds.empty() &&
-               "failed to compute implicit array section bounds");
-      }
-      return bounds[i];
-    };
-
+    std::optional<mlir::DataLayout> dl =
+        fir::support::getOrSetMLIRDataLayout(builder->getModule(),
+                                             /*allowDefaultLayout*/ true);
     mlir::Type i64Ty = builder->getI64Type();
-    mlir::Type idxTy = builder->getIndexType();
-    mlir::Type arrayType = fir::SequenceType::get(
-        {static_cast<fir::SequenceType::Extent>(subscript.size())}, i64Ty);
-    mlir::Type addrType = builder->getRefType(i64Ty);
-    mlir::Value extents = builder->createTemporary(loc, arrayType);
-    mlir::Value strides = builder->createTemporary(loc, arrayType);
-    for (auto ss : llvm::enumerate(subscript)) {
-      mlir::Value idx = builder->createIntegerConstant(loc, idxTy, ss.index());
-      Fortran::common::visit(
-          Fortran::common::visitors{
-              [&](const Fortran::evaluate::Triplet &trip) {
-                mlir::Value lb, ub, stride;
-                if (const auto &lbExpr = trip.lower()) {
-                  if (const auto *lbe = Fortran::semantics::GetExpr(*lbExpr))
-                    lb = fir::getBase(genExprValue(*lbe, stmtCtx));
-                }
-                if (const auto &ubExpr = trip.upper()) {
-                  if (const auto *ube = Fortran::semantics::GetExpr(*ubExpr))
-                    ub = fir::getBase(genExprValue(*ube, stmtCtx));
-                }
-                if (!lb)
-                  lb = getBaseBounds(ss.index()).first;
-                if (!ub)
-                  ub = getBaseBounds(ss.index()).second;
-                if (const auto *strideExpr =
-                        Fortran::semantics::GetExpr(trip.stride())) {
-                  stride = builder->createConvert(
-                      loc, idxTy,
-                      fir::getBase(genExprValue(*strideExpr, stmtCtx)));
-                } else
-                  stride = builder->createIntegerConstant(loc, idxTy, 1);
-                auto extent =
-                    builder->genExtentFromTriplet(loc, lb, ub, stride, i64Ty);
-                // Storing extent into extents at index
-                auto extAddr = builder->create<fir::CoordinateOp>(loc, addrType,
-                                                                  extents, idx);
-                builder->create<fir::StoreOp>(loc, extent, extAddr);
-                // Storing the step into remoteStride at index
-                auto strideAddr = builder->create<fir::CoordinateOp>(
-                    loc, addrType, strides, idx);
-                builder->create<fir::StoreOp>(loc, stride, strideAddr);
-              },
-              [&](const Fortran::evaluate::IndirectSubscriptIntegerExpr
-                      &expr) { // No triplet
-                TODO(loc, "Coarray with indirect subscript.");
-              }},
-          ss.value().u);
+    mlir::Type addrTy = builder->getRefType(i64Ty);
+    if (auto dataRef{Fortran::evaluate::ExtractDataRef(expr)}) {
+      const Fortran::semantics::Symbol *sym = &dataRef->GetFirstSymbol();
+      size_t rank = sym->Rank();
+      if (const auto *ref{
+              std::get_if<Fortran::evaluate::ArrayRef>(&dataRef->u)}) {
+        mlir::Type arrayTy = fir::SequenceType::get(
+            {static_cast<fir::SequenceType::Extent>(rank)}, i64Ty);
+        mlir::Value extents = builder->createTemporary(loc, arrayTy);
+        mlir::Value strides = builder->createTemporary(loc, arrayTy);
+
+        fir::ExtendedValue exvBase = getSymbolExtendedValue(*sym, nullptr);
+        hlfir::Entity base{Fortran::lower::extendedValueToHlfirEntity(
+            loc, *builder, exvBase, ".tmp.base_stride_and_ext")};
+        size_t size =
+            fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exvBase),
+                                         *dl, builder->getKindMap())
+                ->first;
+        llvm::SmallVector<std::pair<mlir::Value, mlir::Value>> bounds;
+        auto getBaseBounds = [&](unsigned i) {
+          if (bounds.empty()) {
+            bounds = hlfir::genBounds(loc, *builder, base);
+            assert(!bounds.empty() &&
+                   "failed to compute implicit array section bounds");
+          }
+          return bounds[i];
+        };
+
+        mlir::Value strideInBytes =
+            builder->createIntegerConstant(loc, i64Ty, size);
+        for (auto ss : llvm::enumerate(ref->subscript())) {
+          mlir::Value idx = builder->createIntegerConstant(
+              loc, builder->getIndexType(), (rank - 1) - ss.index());
+          mlir::Value strideAddr =
+              builder->create<fir::CoordinateOp>(loc, addrTy, strides, idx);
+          mlir::Value extAddr =
+              builder->create<fir::CoordinateOp>(loc, addrTy, extents, idx);
+          Fortran::common::visit(
+              Fortran::common::visitors{
+                  [&](const Fortran::evaluate::Triplet &trip) {
+                    mlir::Value lb, ub, stride;
+                    if (trip.lower().has_value()) {
+                      auto lbExpr = ignoreEvConvert(trip.lower().value());
+                      lb = fir::getBase(genExprValue(lbExpr, stmtCtx));
+                    }
+                    if (trip.upper().has_value()) {
+                      auto ubExpr = ignoreEvConvert(trip.upper().value());
+                      ub = fir::getBase(genExprValue(ubExpr, stmtCtx));
+                    }
+                    if (!lb)
+                      lb = getBaseBounds(ss.index()).first;
+                    if (!ub)
+                      ub = getBaseBounds(ss.index()).second;
+                    auto strideExpr = ignoreEvConvert(trip.stride());
+                    stride = builder->createConvert(
+                        loc, i64Ty,
+                        fir::getBase(genExprValue(strideExpr, stmtCtx)));
+                    // Storing extent into extents at index
+                    auto extent = builder->genExtentFromTriplet(loc, lb, ub,
+                                                                stride, i64Ty);
+                    builder->create<fir::StoreOp>(loc, extent, extAddr);
+                    // Storing the step into remoteStride at index
+                    strideInBytes = builder->create<mlir::arith::MulIOp>(
+                        loc, strideInBytes, stride);
+                    builder->create<fir::StoreOp>(loc, strideInBytes,
+                                                  strideAddr);
+                    mlir::Value extentBase = builder->createConvert(
+                        loc, i64Ty,
+                        hlfir::genExtent(loc, *builder, base, ss.index()));
+                    strideInBytes = builder->create<mlir::arith::MulIOp>(
+                        loc, strideInBytes, extentBase);
+                  },
+                  [&](const Fortran::evaluate::IndirectSubscriptIntegerExpr
+                          &expr) { // No triplet
+                    mlir::Value extent;
+                    if (expr.value().Rank() > 0) {
+                      auto vector =
+                          genExprAddr(ignoreEvConvert(expr.value()), stmtCtx);
+                      extent = builder->createConvert(
+                          loc, i64Ty,
+                          fir::factory::readExtent(*builder, loc, vector,
+                                                   ss.index()));
+                    } else {
+                      extent = builder->createIntegerConstant(
+                          loc, builder->getI64Type(), 1);
+                      builder->create<fir::StoreOp>(loc, extent, extAddr);
+                    }
+                    builder->create<fir::StoreOp>(loc, strideInBytes,
+                                                  strideAddr);
+                    strideInBytes = builder->create<mlir::arith::MulIOp>(
+                        loc, strideInBytes, extent);
+                  }},
+              ss.value().u);
+        }
+        strides = builder->createBox(loc, strides);
+        extents = builder->createBox(loc, extents);
+        return {strides, extents};
+      }
     }
 
+    fir::ExtendedValue exv = Fortran::lower::convertExprToAddress(
+        loc, *this, expr, localSymbols, stmtCtx);
+    size_t size = fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exv),
+                                               *dl, builder->getKindMap())
+                      ->first;
+    mlir::Value strideInBytes =
+        builder->createIntegerConstant(loc, i64Ty, size);
+    hlfir::Entity base = Fortran::lower::convertExprToHLFIR(
+        loc, *this, expr, localSymbols, stmtCtx);
+    size_t rank = exv.rank();
+    mlir::Type arrayTy = fir::SequenceType::get(
+        {static_cast<fir::SequenceType::Extent>(rank)}, i64Ty);
+    mlir::Value extents = builder->createTemporary(loc, arrayTy);
+    mlir::Value strides = builder->createTemporary(loc, arrayTy);
+    for (size_t index = 0; index < rank; index++) {
+      mlir::Value idx = builder->createIntegerConstant(
+          loc, builder->getIndexType(), (rank - 1) - index);
+      mlir::Value strideAddr =
+          builder->create<fir::CoordinateOp>(loc, addrTy, strides, idx);
+      mlir::Value extAddr =
+          builder->create<fir::CoordinateOp>(loc, addrTy, extents, idx);
+
+      mlir::Value extent = builder->createConvert(
+          loc, i64Ty, hlfir::genExtent(loc, *builder, base, index));
+      builder->create<fir::StoreOp>(loc, extent, extAddr);
+      builder->create<fir::StoreOp>(loc, strideInBytes, strideAddr);
+      strideInBytes =
+          builder->create<mlir::arith::MulIOp>(loc, strideInBytes, extent);
+    }
     strides = builder->createBox(loc, strides);
     extents = builder->createBox(loc, extents);
     return {strides, extents};
@@ -5210,72 +5280,151 @@ private:
 
   /// Generate an coarray assignment.
   /// This is an assignment expression with corank > 0.
-  void genCoarrayAssignment(const Fortran::evaluate::Assignment &assign,
-                            const Fortran::evaluate::CoarrayRef &coarrayRef) {
+  void
+  genPutCoarrayAssignment(const Fortran::evaluate::Assignment &assign,
+                          const Fortran::evaluate::CoarrayRef &coarrayRef) {
     // Assignement of a coarray generate a call to prif_put[*] subroutine
     mlir::Location loc = toLocation();
     Fortran::lower::StatementContext stmtCtx;
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
     fir::ExtendedValue lhsExv;
-    if (lowerToHighLevelFIR())
+    if (lowerToHighLevelFIR()) {
       lhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.lhs,
                                                     localSymbols, stmtCtx);
-    else
-      lhsExv = Fortran::lower::createSomeExtendedAddress(loc, *this, assign.lhs,
-                                                         localSymbols, stmtCtx);
-    fir::ExtendedValue rhsExv = genExprBox(loc, assign.rhs, stmtCtx);
-    mlir::Value currentImageBuffer = fir::getBase(rhsExv);
+    } else {
+      TODO(loc, "assignement with a coarray.");
+    }
+    // Getting the current_image_buffer
+    mlir::Value rhs = fir::getBase(genExprAddr(assign.rhs, stmtCtx));
+    mlir::Type ptrTy =
+        mlir::isa<fir::BaseBoxType>(rhs.getType())
+            ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
+            : (mlir::Type)fir::PointerType::get(builder->getNoneType());
+    mlir::Value currentImageBuffer = builder->createTemporary(loc, ptrTy);
+    mlir::Value rhsPtr = builder->createConvert(loc, ptrTy, rhs);
+    builder->create<fir::StoreOp>(loc, rhsPtr, currentImageBuffer);
 
     // Getting the coarray_handle entity from the left expression
     mlir::Value handle =
         fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(lhsExv));
 
     // Computing the image number from the cosubscripts
-    mlir::Value imageNum;
     mlir::Type i32Ty = builder->getI32Type();
-    imageNum = builder->createTemporary(loc, i32Ty);
+    mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
     auto num = Fortran::lower::getImageIndexFromCosubscripts(
         *this, loc, coarrayRef, handle);
     builder->create<fir::StoreOp>(loc, num, imageNum);
 
-    // TODO: offset
-    mlir::Value offset = builder->createTemporary(loc, i32Ty);
-    builder->create<fir::StoreOp>(
-        loc, builder->createIntegerConstant(loc, i32Ty, 0), offset);
+    // Getting offset from the LHS expression
+    mlir::Value offset = Fortran::lower::genByteOffset(*this, assign.lhs, loc);
+
     mlir::Type i64Ty = builder->getI64Type();
     if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
-      // LHS is a CoarrayRef, so this is also an Fortran::evaluate::DataRef
-      auto [remoteStride, extents] =
-          genStrideAndExtents(coarrayRef.base(), loc);
-      mlir::Value currentImageStride, unusedStride;
-      if (auto rhsDataRef{Fortran::evaluate::ExtractDataRef(assign.rhs)}) {
-        currentImageStride = genStrideAndExtents(rhsDataRef.value(), loc).first;
-      } else {
-        mlir::Type emptyArrayType = fir::SequenceType::get(
-            {static_cast<fir::SequenceType::Extent>(0)}, i64Ty);
-        currentImageStride = builder->createTemporary(loc, emptyArrayType);
-      }
+      auto [remoteStride, extents] = genStrideAndExtents(assign.lhs, loc);
+      mlir::Value currentImageStride =
+          genStrideAndExtents(assign.rhs, loc).first;
+
+      size_t size =
+          fir::getTypeSizeAndAlignmentOrCrash(
+              loc, fir::getElementTypeOf(lhsExv), *dl, builder->getKindMap())
+              .first;
 
       // Getting the element size of the lhs expression
       mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
-      auto [size, align] = fir::getTypeSizeAndAlignmentOrCrash(
-          loc, fir::getElementTypeOf(lhsExv), *dl, builder->getKindMap());
       auto es = builder->createIntegerConstant(loc, i64Ty, size);
       builder->create<fir::StoreOp>(loc, es, elementSize);
 
-      fir::runtime::CoarrayPutStridded(
-          *builder, loc, imageNum, handle, offset, remoteStride,
-          currentImageBuffer, currentImageStride, elementSize, extents);
+      fir::runtime::CoarrayPutStrided(*builder, loc, imageNum, handle, offset,
+                                      remoteStride, currentImageBuffer,
+                                      currentImageStride, elementSize, extents);
     } else {
       // Getting the size in bytes of the lhs expression
       mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
-      auto [size, align] = fir::getTypeSizeAndAlignmentOrCrash(
-          loc, fir::getBaseTypeOf(lhsExv), *dl, builder->getKindMap());
+      size_t size =
+          fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getBaseTypeOf(lhsExv),
+                                              *dl, builder->getKindMap())
+              .first;
       auto sib = builder->createIntegerConstant(loc, i64Ty, size);
       builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
       fir::runtime::CoarrayPut(*builder, loc, imageNum, handle, offset,
+                               currentImageBuffer, sizeInBytes);
+    }
+  }
+
+  /// Generate an coarray assignment.
+  /// This is an assignment expression with corank > 0.
+  void
+  genGetCoarrayAssignment(const Fortran::evaluate::Assignment &assign,
+                          const Fortran::evaluate::CoarrayRef &coarrayRef) {
+    // Assignement of a coarray generate a call to prif_get[*] subroutine
+    mlir::Location loc = toLocation();
+    Fortran::lower::StatementContext stmtCtx;
+    std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
+        builder->getModule(), /*allowDefaultLayout*/ true);
+    fir::ExtendedValue rhsExv;
+    if (lowerToHighLevelFIR()) {
+      rhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.rhs,
+                                                    localSymbols, stmtCtx);
+    } else {
+      TODO(loc, "assignement with a coarray.");
+    }
+    // Getting the current_image_buffer
+    mlir::Value lhs = fir::getBase(genExprAddr(assign.lhs, stmtCtx));
+    mlir::Type ptrTy =
+        mlir::isa<fir::BaseBoxType>(lhs.getType())
+            ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
+            : (mlir::Type)fir::PointerType::get(builder->getNoneType());
+    mlir::Value currentImageBuffer = builder->createTemporary(loc, ptrTy);
+    mlir::Value lhsPtr = builder->createConvert(loc, ptrTy, lhs);
+    builder->create<fir::StoreOp>(loc, lhsPtr, currentImageBuffer);
+
+    // Getting the coarray_handle entity from the left expression
+    mlir::Value handle =
+        fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(rhsExv));
+
+    // Computing the image number from the cosubscripts
+    mlir::Type i32Ty = builder->getI32Type();
+    mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
+    auto num = Fortran::lower::getImageIndexFromCosubscripts(
+        *this, loc, coarrayRef, handle);
+    builder->create<fir::StoreOp>(loc, num, imageNum);
+
+    // Getting offset from the LHS expression
+    mlir::Value offset = Fortran::lower::genByteOffset(*this, assign.rhs, loc);
+
+    mlir::Type i64Ty = builder->getI64Type();
+    if (auto *arrayRef{
+            std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)}) {
+      // Handle strides information from subscript
+      auto [remoteStride, extents] = genStrideAndExtents(assign.rhs, loc);
+      mlir::Value currentImageStride =
+          genStrideAndExtents(assign.lhs, loc).first;
+
+      size_t size =
+          fir::getTypeSizeAndAlignmentOrCrash(
+              loc, fir::getElementTypeOf(rhsExv), *dl, builder->getKindMap())
+              .first;
+
+      // Getting the element size of the lhs expression
+      mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
+      auto es = builder->createIntegerConstant(loc, i64Ty, size);
+      builder->create<fir::StoreOp>(loc, es, elementSize);
+
+      fir::runtime::CoarrayGetStrided(*builder, loc, imageNum, handle, offset,
+                                      remoteStride, currentImageBuffer,
+                                      currentImageStride, elementSize, extents);
+    } else {
+      // Getting the size in bytes of the rhs expression
+      mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
+      size_t size =
+          fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getBaseTypeOf(rhsExv),
+                                              *dl, builder->getKindMap())
+              .first;
+      auto sib = builder->createIntegerConstant(loc, i64Ty, size);
+      builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
+      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset,
                                currentImageBuffer, sizeInBytes);
     }
   }
@@ -5285,13 +5434,16 @@ private:
     mlir::Location loc = toLocation();
 
     // Assignment to coarray entities
-    auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(assign.lhs);
-    if (coarrayRef.has_value()) {
-      genCoarrayAssignment(assign, coarrayRef.value());
+    if (auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(assign.lhs)) {
+      genPutCoarrayAssignment(assign, coarrayRef.value());
+      return;
+    } else if (auto coarrayRef =
+                   Fortran::evaluate::ExtractCoarrayRef(assign.rhs)) {
+      genGetCoarrayAssignment(assign, coarrayRef.value());
       return;
     }
+
     if (lowerToHighLevelFIR()) {
-      // TODO: Implement HLFIR data assignment with RHS as a coarray.
       Fortran::common::visit(
           Fortran::common::visitors{
               [&](const Fortran::evaluate::Assignment::Intrinsic &) {

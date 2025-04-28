@@ -15,6 +15,7 @@
 #include "flang/Evaluate/fold.h"
 #include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/Allocatable.h"
+#include "flang/Lower/ConvertCall.h"
 #include "flang/Lower/ConvertExprToHLFIR.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/PFTBuilder.h"
@@ -388,6 +389,85 @@ Fortran::lower::getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
     TODO(loc, "Coarray: element type size not defined.");
   }
   return sizeInBytes;
+}
+
+mlir::Value
+Fortran::lower::genByteOffset(Fortran::lower::AbstractConverter &converter,
+                              const Fortran::semantics::SomeExpr &expr,
+                              mlir::Location loc) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
+      builder.getModule(), /*allowDefaultLayout*/ true);
+  Fortran::lower::StatementContext stmtCtx;
+
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Value offset = builder.createTemporary(loc, i64Ty);
+  if (auto dataRef{Fortran::evaluate::ExtractDataRef(expr)}) {
+    const Fortran::semantics::Symbol *sym = &dataRef->GetLastSymbol();
+    fir::ExtendedValue exvBase =
+        converter.getSymbolExtendedValue(*sym, nullptr);
+    hlfir::Entity base{Fortran::lower::extendedValueToHlfirEntity(
+        loc, builder, exvBase, ".tmp.base_byteoffset")};
+    size_t size =
+        fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exvBase), *dl,
+                                     builder.getKindMap())
+            ->first;
+
+    if (const auto *ref{
+            std::get_if<Fortran::evaluate::ArrayRef>(&dataRef->u)}) {
+      mlir::Value elemLen = builder.createIntegerConstant(loc, i64Ty, size);
+      mlir::Value strideInBytes = elemLen;
+      mlir::Value offsetValue = builder.createIntegerConstant(loc, i64Ty, 0);
+      mlir::Value one = builder.createIntegerConstant(loc, i64Ty, 1);
+      for (auto ss : llvm::enumerate(ref->subscript())) {
+        size_t index = ss.index();
+        mlir::Value lb, ub;
+        mlir::Value lbBase = builder.createConvert(
+            loc, i64Ty, hlfir::genLBound(loc, builder, base, index));
+        mlir::Value extentBase = builder.createConvert(
+            loc, i64Ty, hlfir::genExtent(loc, builder, base, index));
+        Fortran::common::visit(
+            Fortran::common::visitors{
+                [&](const Fortran::evaluate::Triplet &trip) {
+                  if (trip.lower().has_value()) {
+                    auto lbExpr = ignoreEvConvert(trip.lower().value());
+                    lb = builder.createConvert(
+                        loc, i64Ty,
+                        fir::getBase(converter.genExprValue(lbExpr, stmtCtx)));
+                  } else {
+                    lb = lbBase;
+                  }
+                },
+                [&](const Fortran::evaluate::IndirectSubscriptIntegerExpr
+                        &expr) {
+                  if (expr.value().Rank() == 0) {
+                    auto lbExpr = ignoreEvConvert(expr.value());
+                    lb = builder.createConvert(
+                        loc, i64Ty,
+                        fir::getBase(converter.genExprValue(lbExpr, stmtCtx)));
+                  } else {
+                    auto vector = converter.genExprAddr(
+                        ignoreEvConvert(expr.value()), stmtCtx);
+                    lb = builder.createConvert(
+                        loc, i64Ty,
+                        fir::factory::readLowerBound(builder, loc, vector,
+                                                     index, one));
+                  }
+                }},
+            ss.value().u);
+        lb = builder.create<mlir::arith::SubIOp>(loc, lb, lbBase);
+        lb = builder.create<mlir::arith::MulIOp>(loc, lb, strideInBytes);
+        offsetValue = builder.create<mlir::arith::AddIOp>(loc, offsetValue, lb);
+        strideInBytes =
+            builder.create<mlir::arith::MulIOp>(loc, strideInBytes, extentBase);
+      }
+      builder.create<fir::StoreOp>(loc, offsetValue, offset);
+      return offset;
+    }
+  }
+  builder.create<fir::StoreOp>(
+      loc, builder.createIntegerConstant(loc, i64Ty, 0), offset);
+  return offset;
 }
 
 //===----------------------------------------------------------------------===//

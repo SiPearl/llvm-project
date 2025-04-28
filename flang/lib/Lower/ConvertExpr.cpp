@@ -1848,13 +1848,6 @@ public:
   ExtValue lowerIntrinsicArgumentAsCoarrayBox(const Fortran::lower::SomeExpr &expr) {
     mlir::Location loc = getLoc();
     ExtValue exv = genBoxArg(expr);
-    auto exvTy = fir::getBase(exv).getType();
-    if (mlir::isa<mlir::FunctionType>(exvTy)) {
-      auto boxProcTy =
-          builder.getBoxProcType(mlir::cast<mlir::FunctionType>(exvTy));
-      return builder.create<fir::EmboxProcOp>(loc, boxProcTy,
-                                              fir::getBase(exv));
-    }
     mlir::Value box = builder.createBox(loc, exv, exv.isPolymorphic());
     if (Fortran::lower::isParentComponent(expr)) {
       fir::ExtendedValue newExv =
@@ -3901,9 +3894,49 @@ private:
   bool genShapeFromDataRef(const Fortran::semantics::Symbol &x) {
     return false;
   }
-  bool genShapeFromDataRef(const Fortran::evaluate::CoarrayRef &) {
-    TODO(getLoc(), "coarray: reference to a coarray in an expression");
-    return false;
+  bool genShapeFromDataRef(const Fortran::evaluate::CoarrayRef &x) {
+    if (x.Rank() == 0)
+      return false;
+    if (x.base().Rank() > 0)
+      if (genShapeFromDataRef(x.base()))
+        return true;
+    // x has rank and x.base did not produce a shape.
+    if (auto *arrayRef{std::get_if<Fortran::evaluate::ArrayRef>(&x.base().u)}) {
+      ExtValue exv = arrayRef->base().IsSymbol()
+                         ? asScalarRef(getFirstSym(arrayRef->base()))
+                         : asScalarRef(arrayRef->base().GetComponent());
+      mlir::Location loc = getLoc();
+      mlir::IndexType idxTy = builder.getIndexType();
+      llvm::SmallVector<mlir::Value> definedShape =
+          fir::factory::getExtents(loc, builder, exv);
+      mlir::Value one = builder.createIntegerConstant(loc, idxTy, 1);
+      for (auto ss : llvm::enumerate(arrayRef->subscript())) {
+        Fortran::common::visit(
+            Fortran::common::visitors{
+                [&](const Fortran::evaluate::Triplet &trip) {
+                  // For a subscript of triple notation, we compute the
+                  // range of this dimension of the iteration space.
+                  auto lo = [&]() {
+                    if (auto optLo = trip.lower())
+                      return fir::getBase(asScalar(*optLo));
+                    return getLBound(exv, ss.index(), one);
+                  }();
+                  auto hi = [&]() {
+                    if (auto optHi = trip.upper())
+                      return fir::getBase(asScalar(*optHi));
+                    return getUBound(exv, ss.index(), one);
+                  }();
+                  auto step = builder.createConvert(
+                      loc, idxTy, fir::getBase(asScalar(trip.stride())));
+                  auto extent =
+                      builder.genExtentFromTriplet(loc, lo, hi, step, idxTy);
+                  destShape.push_back(extent);
+                },
+                [&](auto) {}},
+            ss.value().u);
+      }
+    }
+    return true;
   }
   bool genShapeFromDataRef(const Fortran::evaluate::Component &x) {
     return x.base().Rank() > 0 ? genShapeFromDataRef(x.base()) : false;
