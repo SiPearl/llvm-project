@@ -276,11 +276,8 @@ void Fortran::lower::genEventPostStatement(
   mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(loc, image, imageNum);
 
-  // TODO: Handle OFFSET value
-  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
-  builder.create<fir::StoreOp>(
-      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
-
+  mlir::Value offset =
+      Fortran::lower::genByteOffset(converter, *eventExpr, loc);
   fir::runtime::genEventPostStatement(builder, loc, imageNum, handle, offset,
                                       statAddr, errMsgAddr);
 }
@@ -370,10 +367,7 @@ void Fortran::lower::genLockStatement(
       builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(loc, remoteImage, refRemoteImage);
 
-  // TODO: Handle OFFSET value
-  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
-  builder.create<fir::StoreOp>(
-      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
+  mlir::Value offset = Fortran::lower::genByteOffset(converter, *lockExpr, loc);
 
   // Handle ACQUIRED_LOCK, STAT and ERRMSG values
   fir::ExtendedValue acquiredLockExpr;
@@ -435,11 +429,7 @@ void Fortran::lower::genUnlockStatement(
       builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(loc, remoteImage, refRemoteImage);
 
-  // TODO: Handle OFFSET value
-  mlir::Value offset = builder.createTemporary(loc, builder.getI64Type());
-  builder.create<fir::StoreOp>(
-      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 0), offset);
-
+  mlir::Value offset = Fortran::lower::genByteOffset(converter, *lockExpr, loc);
   mlir::Value handle =
       fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
   fir::runtime::genUnlockStatement(builder, loc, refRemoteImage, handle, offset,

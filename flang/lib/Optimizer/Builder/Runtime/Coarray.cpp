@@ -39,13 +39,12 @@ mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
     mlir::Operation *defOp = addr.getDefiningOp();
     if (auto op = mlir::dyn_cast<fir::LoadOp>(defOp)) {
       addr = op.getMemref();
-      break;
+    } else if (auto op = mlir::dyn_cast<fir::BoxAddrOp>(defOp)) {
+      addr = op.getVal();
     } else if (auto op = mlir::dyn_cast<fir::EmboxOp>(defOp)) {
       addr = op.getMemref();
-      break;
     } else if (auto op = mlir::dyn_cast<fir::EmboxCharOp>(defOp)) {
       addr = op.getMemref();
-      break;
     } else if (auto op = mlir::dyn_cast<hlfir::DesignateOp>(defOp)) {
       addr = op.getMemref();
     } else {
@@ -357,17 +356,17 @@ void fir::runtime::CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
 }
 
 /// Generate call to runtime subroutine prif_get_stridded
-void fir::runtime::CoarrayGetStridded(
+void fir::runtime::CoarrayGetStrided(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
     mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
     mlir::Value currentImageBuffer, mlir::Value currentImageStride,
     mlir::Value elementSize, mlir::Value extent) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
                     ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("get_stridded"), ftype);
+      builder.createFunction(loc, PRIFNAME_SUB("get_strided"), ftype);
 
   mlir::Value nullPtr = builder.createNullConstant(loc);
   llvm::SmallVector<mlir::Value> localArgs = {imageNum,
@@ -408,17 +407,17 @@ void fir::runtime::CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
 /// Generate call to runtime subroutine prif_put to assigns to elements of a
 /// coarray from a specified image when data to be assigned are contiguous in
 /// memory from both sides.
-void fir::runtime::CoarrayPutStridded(
+void fir::runtime::CoarrayPutStrided(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
     mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
     mlir::Value currentImageBuffer, mlir::Value currentImageStride,
     mlir::Value elementSize, mlir::Value extent) {
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype =
       PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
                     ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("put_stridded"), ftype);
+      builder.createFunction(loc, PRIFNAME_SUB("put_strided"), ftype);
 
   mlir::Value nullPtr = builder.createNullConstant(loc);
   llvm::SmallVector<mlir::Value> localArgs = {imageNum,
