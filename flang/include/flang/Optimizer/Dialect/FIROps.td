@@ -3187,6 +3187,9 @@ def fir_DeclareOp : fir_Op<"declare", [AttrSizedOperandSegments,
     It must always be provided for characters and parametrized derived types
     when memref is not a box value or address.
 
+    The coarray_handle argument is a box to the derived type provided by the PRIF
+    implementation. It represents a reference to a coarray descriptor.
+
     Example:
 
     CHARACTER(n), OPTIONAL, TARGET :: c(10:, 20:)
@@ -3204,21 +3207,19 @@ def fir_DeclareOp : fir_Op<"declare", [AttrSizedOperandSegments,
    ```
   }];
 
-  let arguments = (ins
-    AnyRefOrBox:$memref,
-    Optional<AnyShapeOrShiftType>:$shape,
-    Variadic<AnyIntegerType>:$typeparams,
-    Optional<fir_DummyScopeType>:$dummy_scope,
-    Builtin_StringAttr:$uniq_name,
-    OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
-    OptionalAttr<cuf_DataAttributeAttr>:$data_attr
-  );
+  let arguments = (ins AnyRefOrBox:$memref,
+      Optional<AnyShapeOrShiftType>:$shape,
+      Variadic<AnyIntegerType>:$typeparams,
+      Optional<fir_DummyScopeType>:$dummy_scope, Builtin_StringAttr:$uniq_name,
+      OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
+      OptionalAttr<cuf_DataAttributeAttr>:$data_attr,
+      Optional<AnyRefOrBoxType>:$coarray_handle);
 
   let results = (outs AnyRefOrBox);
 
   let assemblyFormat = [{
     $memref (`(` $shape^ `)`)? (`typeparams` $typeparams^)?
-    (`dummy_scope` $dummy_scope^)?
+    (`dummy_scope` $dummy_scope^)? (`coarray_handle` $coarray_handle^)?
     attr-dict `:` functional-type(operands, results)
   }];
 

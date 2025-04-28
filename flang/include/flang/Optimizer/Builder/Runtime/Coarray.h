@@ -50,10 +50,6 @@ typedef enum atomic_op_t {
   ATOMIC_XOR = 4
 } atomic_op_t;
 
-/// Generate call to runtime function that store prif_coarray_handle with addr
-void saveCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
-                       mlir::Value addr, mlir::Value handle);
-
 /// Generate call to runtime function to retrieve prif_coarray_handle
 /// associated to an addr
 mlir::Value getCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,

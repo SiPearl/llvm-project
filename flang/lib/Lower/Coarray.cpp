@@ -15,12 +15,14 @@
 #include "flang/Evaluate/fold.h"
 #include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/Allocatable.h"
+#include "flang/Lower/ConvertExprToHLFIR.h"
 #include "flang/Lower/ConvertType.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/StatementContext.h"
 #include "flang/Lower/Support/Utils.h"
 #include "flang/Lower/SymbolMap.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
+#include "flang/Optimizer/Builder/HLFIRTools.h"
 #include "flang/Optimizer/Builder/MutableBox.h"
 #include "flang/Optimizer/Builder/Runtime/Allocatable.h"
 #include "flang/Optimizer/Builder/Runtime/Coarray.h"
@@ -28,6 +30,7 @@
 #include "flang/Optimizer/Builder/Runtime/Pointer.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
+#include "flang/Optimizer/HLFIR/HLFIROps.h"
 #include "flang/Optimizer/Support/DataLayout.h"
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Support/Utils.h"
@@ -363,20 +366,43 @@ mlir::Value Fortran::lower::getImageIndexFromCosubscripts(
   return fir::runtime::getImageIndex(builder, loc, handle, cosubscripts);
 }
 
+// Compute the size in bytes of a given mlir::Type.
+mlir::Value
+Fortran::lower::getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
+                               mlir::Type ty,
+                               llvm::SmallVector<mlir::Value> extents) {
+  mlir::Type i64Ty = builder.getI64Type();
+  std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
+      builder.getModule(), /*allowDefaultLayout*/ true);
+  mlir::Value sizeInBytes = builder.createTemporary(loc, i64Ty);
+  if (auto sizeAndAlign =
+          fir::getTypeSizeAndAlignment(loc, ty, *dl, builder.getKindMap())) {
+    mlir::Value typeSize =
+        builder.createIntegerConstant(loc, i64Ty, sizeAndAlign.value().first);
+    for (mlir::Value extent : extents) {
+      typeSize = builder.create<mlir::arith::MulIOp>(
+          loc, typeSize, builder.createConvert(loc, i64Ty, extent));
+    }
+    builder.create<fir::StoreOp>(loc, typeSize, sizeInBytes);
+  } else {
+    TODO(loc, "Coarray: element type size not defined.");
+  }
+  return sizeInBytes;
+}
+
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
 //===----------------------------------------------------------------------===//
 
-mlir::Type getCoarrayHandleType(fir::FirOpBuilder &builder,
-                                mlir::Location loc) {
+mlir::Type Fortran::lower::getCoarrayHandleType(fir::FirOpBuilder &builder,
+                                                mlir::Location loc) {
   // Defining the coarray handle type
   std::string handleDTName = PRIFTYPE("prif_coarray_handle");
   fir::RecordType handleTy =
       fir::RecordType::get(builder.getContext(), handleDTName);
-  mlir::Type ptrTy = fir::LLVMPointerType::get(
-      builder.getContext(),
-      mlir::FunctionType::get(builder.getContext(), {}, {}));
-  handleTy.finalize({}, {{"info", ptrTy}});
+  mlir::Type infoTy =
+      fir::BoxType::get(fir::PointerType::get(builder.getNoneType()));
+  handleTy.finalize({}, {{"info", infoTy}});
 
   // Checking if the type information was generated
   fir::TypeInfoOp dt;
@@ -400,13 +426,14 @@ mlir::Type getCoarrayHandleType(fir::FirOpBuilder &builder,
   return handleTy;
 }
 
+/// Generate call to PointerNullifyIntrinsic or AllocatableInitIntrinsic to
 static mlir::Value
 genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
                               mlir::Value sizeInBytes, mlir::Value lcobounds,
                               mlir::Value ucobounds, mlir::Value allocMem,
                               mlir::Value stat, mlir::Value errMsg) {
   // Generate call to prif_allocate_coarray with the correct mangling name
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
                                            ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
@@ -415,9 +442,9 @@ genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
 
   // Allocate instance of prif_coarray_handle type based on the PRIF
   // specification.
-  mlir::Type handleTy = getCoarrayHandleType(builder, loc);
+  mlir::Type handleTy = Fortran::lower::getCoarrayHandleType(builder, loc);
   mlir::Value coarrayHandle =
-      builder.createBox(loc, builder.createHeapTemporary(loc, handleTy));
+      builder.createBox(loc, builder.createTemporary(loc, handleTy));
 
   // TODO: Handle FINAL_FUNC argument ("coarray_cleanup")
   mlir::Value finalFunc = builder.createTemporary(loc, ptrTy);
@@ -432,80 +459,67 @@ genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
 }
 
 /// Generate call to prif_allocate_coarray runtime subroutine based on
-// a fir::MutableBoxValue
-void Fortran::lower::genAllocateCoarray(
-    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
-    const Fortran::semantics::Symbol &sym, fir::MutableBoxValue box,
-    llvm::SmallVector<mlir::Value> extents) {
-  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
-
-  // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol
-  auto [lcobounds, ucobounds] =
-      Fortran::lower::genCoarrayCoBounds(converter, loc, sym);
-
-  // Handle SIZE_IN_BYTES
-  mlir::Type i64Ty = builder.getI64Type();
-  std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
-      builder.getModule(), /*allowDefaultLayout*/ true);
-  mlir::Value sizeInBytes = builder.createTemporary(loc, i64Ty);
-  mlir::Value typeSize = builder.createIntegerConstant(
-      loc, i64Ty,
-      fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getElementTypeOf(box), *dl,
-                                          builder.getKindMap())
-          .first);
-  for (mlir::Value extent : extents) {
-    typeSize = builder.create<mlir::arith::MulIOp>(loc, typeSize, extent);
-  }
-  builder.create<fir::StoreOp>(loc, typeSize, sizeInBytes);
-
-  // TODO: Handle STAT and ERRMSG
-  mlir::Value stat = builder.create<fir::AbsentOp>(
-      loc, builder.getRefType(builder.getI32Type()));
-  mlir::Value errMsg = builder.create<fir::AbsentOp>(
-      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
-
-  mlir::Value coarrayHandle =
-      genAllocateCoarrayRuntimeCall(builder, loc, sizeInBytes, lcobounds,
-                                    ucobounds, fir::getBase(box), stat, errMsg);
-
-  // Saving the coarray_handle.
-  fir::runtime::saveCoarrayHandle(builder, loc, box.getAddr(), coarrayHandle);
-}
-
-/// Generate call to prif_allocate_coarray runtime subroutine
+/// fir::MutableBoxValue and return a stat value.
 mlir::Value Fortran::lower::genAllocateCoarray(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
-    const Fortran::semantics::Symbol &sym, mlir::Type allocType,
-    llvm::SmallVector<mlir::Value> extents) {
+    const Fortran::semantics::Symbol &sym, fir::MutableBoxValue box,
+    llvm::SmallVector<mlir::Value> extents, mlir::Value errMsgAddr) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
   // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol
   auto [lcobounds, ucobounds] =
       Fortran::lower::genCoarrayCoBounds(converter, loc, sym);
 
   // Allocate reference for allocated_memory
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
+
+  // FIXME ? createBox on errMsgAddr ?
+  mlir::Value statAddr = builder.createTemporary(loc, builder.getI32Type());
+  mlir::Value sizeInBytes =
+      Fortran::lower::getSizeInBytes(builder, loc, box.getEleTy(), extents);
+  mlir::Value coarrayHandle =
+      genAllocateCoarrayRuntimeCall(builder, loc, sizeInBytes, lcobounds,
+                                    ucobounds, allocMem, statAddr, errMsgAddr);
+
+  allocMem = builder.create<fir::LoadOp>(loc, allocMem);
+  // Update the base_addr to the value. The allocation of the coarray is
+  // performed during prif_allocate_coarray and we want an operation that
+  // updates just the base_addr of the give box.
+  fir::runtime::genPointerAssociateScalar(builder, loc, fir::getBase(box),
+                                          allocMem);
+
+  // Storing coarrayHandle to the variable declaration
+  if (auto declare =
+          mlir::dyn_cast<hlfir::DeclareOp>(box.getAddr().getDefiningOp())) {
+    coarrayHandle = builder.createBox(loc, coarrayHandle);
+    builder.create<fir::StoreOp>(loc, coarrayHandle,
+                                 declare.getCoarrayHandle());
+  }
+  return builder.create<fir::LoadOp>(loc, statAddr);
+}
+
+/// Generate call to prif_allocate_coarray runtime subroutine
+std::pair<mlir::Value, mlir::Value> Fortran::lower::genAllocateCoarray(
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+    const Fortran::semantics::Symbol &sym, mlir::Type allocType,
+    llvm::SmallVector<mlir::Value> extents) {
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol
+  auto [lcobounds, ucobounds] =
+      Fortran::lower::genCoarrayCoBounds(converter, loc, sym);
+
+  // Allocate reference for allocated_memory
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
 
   // Handle SIZE_IN_BYTES
-  mlir::Type i64Ty = builder.getI64Type();
-  std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
-      builder.getModule(), /*allowDefaultLayout*/ true);
-  mlir::Value sizeInBytes = builder.createTemporary(loc, i64Ty);
   mlir::Type elemType = fir::unwrapSeqOrBoxedSeqType(allocType);
-  if (auto sizeAndAlign = fir::getTypeSizeAndAlignment(loc, elemType, *dl,
-                                                       builder.getKindMap())) {
-    mlir::Value typeSize =
-        builder.createIntegerConstant(loc, i64Ty, sizeAndAlign.value().first);
-    for (mlir::Value extent : extents) {
-      typeSize = builder.create<mlir::arith::MulIOp>(
-          loc, typeSize, builder.createConvert(loc, i64Ty, extent));
-    }
-    builder.create<fir::StoreOp>(loc, typeSize, sizeInBytes);
-  } else {
-    TODO(loc, "Coarray: element type size not defined.");
-  }
+  mlir::Value sizeInBytes =
+      Fortran::lower::getSizeInBytes(builder, loc, elemType, extents);
 
-  // TODO: Handle STAT and ERRMSG
+  // Handle STAT and ERRMSG
   mlir::Value stat = builder.create<fir::AbsentOp>(
       loc, builder.getRefType(builder.getI32Type()));
   mlir::Value errMsg = builder.create<fir::AbsentOp>(
@@ -514,11 +528,10 @@ mlir::Value Fortran::lower::genAllocateCoarray(
   mlir::Value coarrayHandle = genAllocateCoarrayRuntimeCall(
       builder, loc, sizeInBytes, lcobounds, ucobounds, allocMem, stat, errMsg);
 
-  // Saving the coarray_handle.
   allocMem =
-      builder.create<fir::LoadOp>(loc, builder.getRefType(allocType), allocMem);
-  fir::runtime::saveCoarrayHandle(builder, loc, allocMem, coarrayHandle);
-  return allocMem;
+      builder.create<fir::LoadOp>(loc, builder.getRefType(allocType), allocMem)
+          .getResult();
+  return {allocMem, builder.createBox(loc, coarrayHandle)};
 }
 
 mlir::Value Fortran::lower::genDeallocateCoarray(
@@ -538,7 +551,7 @@ mlir::Value Fortran::lower::genDeallocateCoarray(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     mlir::Value coarrayAddr, mlir::Value errMsgAddr) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
-  mlir::Type ptrTy = mlir::LLVM::LLVMPointerType::get(builder.getContext());
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("deallocate_coarray"), ftype);
@@ -555,8 +568,6 @@ mlir::Value Fortran::lower::genDeallocateCoarray(
   llvm::SmallVector<mlir::Value> localArgs = {coarrayHandle, stat, nullPtr,
                                               errMsgAddr};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
-  // TODO: Calling freeMemOp on the coarray_handle
-  // freeCoarrayHandle(builder, loc, coarrayAddr);
   return builder.create<fir::LoadOp>(loc, stat);
 }
 

@@ -3177,7 +3177,7 @@ static mlir::Value getAddrFromBox(fir::FirOpBuilder &builder,
 void IntrinsicLibrary::genAtomicCasCoarray(llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 5);
   // Handle coarray_handle and IMAGE_NUM
-  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value atomAddr = getBase(args[0]);
   mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
   mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(
@@ -3205,7 +3205,7 @@ void IntrinsicLibrary::genAtomicDefine(
     llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 3);
   // Handle coarray_handle and IMAGE_NUM
-  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value atomAddr = getBase(args[0]);
   mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
   mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(
@@ -3236,7 +3236,7 @@ void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
                          ? builder.create<fir::AbsentOp>(
                                loc, builder.getRefType(builder.getI32Type()))
                          : fir::getBase(statExv);
-  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value atomAddr = getBase(args[0]);
   mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
   mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(
@@ -3258,7 +3258,7 @@ void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
 void IntrinsicLibrary::genAtomicRef(llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 3);
   // Handle coarray_handle and IMAGE_NUM
-  mlir::Value atomAddr = getAddrFromBox(builder, loc, args[0], false);
+  mlir::Value atomAddr = getBase(args[0]);
   mlir::Value handle = fir::runtime::getCoarrayHandle(builder, loc, atomAddr);
   mlir::Value imageNum = builder.createTemporary(loc, builder.getI32Type());
   builder.create<fir::StoreOp>(
@@ -3964,9 +3964,8 @@ IntrinsicLibrary::genCoshape(mlir::Type resultType,
   assert(args.size() == 2);
 
   // Handle the coarray handle
-  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
   mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+      fir::runtime::getCoarrayHandle(builder, loc, fir::getBase(args[0]));
   mlir::Value result =
       fir::runtime::genCoshape(builder, loc, handle, args[0].corank());
   llvm::SmallVector<mlir::Value, 1> extents{builder.createIntegerConstant(
@@ -6669,9 +6668,8 @@ IntrinsicLibrary::genImageIndex(mlir::Type resultType,
                                 llvm::ArrayRef<fir::ExtendedValue> args) {
   assert(args.size() == 2 || args.size() == 3);
 
-  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
   mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+      fir::runtime::getCoarrayHandle(builder, loc, fir::getBase(args[0]));
 
   mlir::Value team;
   fir::ExtendedValue subExv = args[1];
@@ -8578,9 +8576,8 @@ IntrinsicLibrary::genThisImage(mlir::Type resultType,
   // FIXME: Need to check the lowering of TEAM argument.
   // TEAM lowered as a box or an address ?
   if (!coarrayIsAbsent) {
-    mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
     mlir::Value handle =
-        fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+        fir::runtime::getCoarrayHandle(builder, loc, fir::getBase(args[0]));
     mlir::Value dim;
     mlir::Type thisImageType;
     if (!dimIsAbsent) {
@@ -8733,9 +8730,8 @@ IntrinsicLibrary::genLcobound(mlir::Type resultType,
   assert(args.size() == 2 || args.size() == 3);
 
   // Handle the coarray handle
-  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
   mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+      fir::runtime::getCoarrayHandle(builder, loc, fir::getBase(args[0]));
   mlir::Value dim;
   const bool dimIsAbsent = args.size() == 2 || isStaticallyAbsent(args, 1);
   if (!dimIsAbsent) {
@@ -8756,9 +8752,8 @@ IntrinsicLibrary::genUcobound(mlir::Type resultType,
   assert(args.size() == 2 || args.size() == 3);
 
   // Handle the coarray handle
-  mlir::Value coarrayAddr = getAddrFromBox(builder, loc, args[0], false);
   mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+      fir::runtime::getCoarrayHandle(builder, loc, fir::getBase(args[0]));
   mlir::Value dim;
   const bool dimIsAbsent = args.size() == 2 || isStaticallyAbsent(args, 1);
   if (!dimIsAbsent) {

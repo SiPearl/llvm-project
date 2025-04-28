@@ -23,22 +23,14 @@ FORTRAN_EXTERN_C_BEGIN
 namespace Fortran::runtime {
 class Descriptor;
 
-// Map each coarray_handle pointer to the coarray base_addr
-// FIXME: Improving storing of the coarray handle
-static std::map<void *, Descriptor &> map_coarray_handle;
-
-void RTNAME(saveCoarrayHandle)(void *base_addr, Descriptor &coarray_handle);
-
-Descriptor &RTNAME(getCoarrayHandle)(void *base_addr);
-
-void RTNAME(computeLastUcobound)(
+void RTNAME(ComputeLastUcobound)(
     int num_images, Descriptor &lcobounds, Descriptor &ucobounds);
 
-void RTNAME(copy1DArrayToI64Array)(
+void RTNAME(Copy1DArrayToI64Array)(
     const Descriptor &from, const Descriptor &to);
 } // namespace Fortran::runtime
 
-// FIXME: Improving this part with a compiler flag later ?
+// FIXME: Removing all declaration later
 // Unimplemented prif runtime functions
 #define DECLARE_UNIMPLEMENTED_PRIF(func_name, ...) \
   void _QMprifPprif_##func_name(__VA_ARGS__) { \
