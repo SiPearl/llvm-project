@@ -335,6 +335,23 @@ mlir::Value fir::runtime::genCoshape(fir::FirOpBuilder &builder,
   return result;
 }
 
+/// Generate Call to runtime prif_size_bytes from any fortran value/entity
+// and try to get the coarray_handle from this variable.
+mlir::Value fir::runtime::genSizeBytes(fir::FirOpBuilder &builder,
+                                       mlir::Location loc, mlir::Value A) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("size_bytes"), ftype);
+
+  mlir::Value result = builder.createTemporary(loc, builder.getI64Type());
+  mlir::Value coarrayHandle = fir::runtime::getCoarrayHandle(builder, loc, A);
+  llvm::SmallVector<mlir::Value> localArgs =
+      fir::runtime::createArguments(builder, loc, ftype, coarrayHandle, result);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return result;
+}
+
 /// Generate call to runtime subroutine prif_get to fetches data in a
 /// coarray from a specified image when data to be copied are contiguous in
 /// memory from both sides.
