@@ -249,7 +249,7 @@ fir::FortranVariableOpInterface
 hlfir::genDeclare(mlir::Location loc, fir::FirOpBuilder &builder,
                   const fir::ExtendedValue &exv, llvm::StringRef name,
                   fir::FortranVariableFlagsAttr flags, mlir::Value dummyScope,
-                  cuf::DataAttributeAttr dataAttr) {
+                  cuf::DataAttributeAttr dataAttr, mlir::Value coarrayHandle) {
 
   mlir::Value base = fir::getBase(exv);
   assert(fir::conformsWithPassByRef(base.getType()) &&
@@ -278,9 +278,9 @@ hlfir::genDeclare(mlir::Location loc, fir::FirOpBuilder &builder,
                          box.nonDeferredLenParams().end());
       },
       [](const auto &) {});
-  auto declareOp =
-      hlfir::DeclareOp::create(builder, loc, base, name, shapeOrShift,
-                               lenParams, dummyScope, flags, dataAttr);
+  auto declareOp = hlfir::DeclareOp::create(builder, loc, base, name,
+                                            shapeOrShift, lenParams, dummyScope,
+                                            flags, dataAttr, coarrayHandle);
   return mlir::cast<fir::FortranVariableOpInterface>(declareOp.getOperation());
 }
 
