@@ -20,6 +20,7 @@
 #include "flang/Semantics/scope.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace Fortran::runtime;
@@ -545,7 +546,9 @@ void genCollectiveSubroutine(fir::FirOpBuilder &builder, mlir::Location loc,
                              mlir::Value stat, mlir::Value errmsg,
                              std::string coName) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::Type boxNoneTy = fir::BoxType::get(builder.getNoneType());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(boxNoneTy, ptrTy, ptrTy, ptrTy, ptrTy);
   mlir::func::FuncOp funcOp = builder.createFunction(loc, coName, ftype);
 
   mlir::Value nullPtr = builder.createNullConstant(loc);
@@ -588,6 +591,162 @@ void fir::runtime::genCoMin(fir::FirOpBuilder &builder, mlir::Location loc,
     genCollectiveSubroutine(builder, loc, A, resultImage, stat, errmsg,
                             PRIFNAME_SUB("co_min"));
   }
+}
+
+/// Generate call to runtime subroutine prif_get_context
+mlir::Value getContextData(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value coarrayHandle) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp = builder.createFunction(loc, "get_context", ftype);
+
+  mlir::Value cdata = builder.createTemporary(loc, ptrTy);
+  llvm::SmallVector<mlir::Value> localArgs =
+      fir::runtime::createArguments(builder, loc, ftype, coarrayHandle, cdata);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return builder.create<fir::LoadOp>(loc, cdata).getResult();
+}
+
+void genOperationWrapperRuntimeCall(fir::FirOpBuilder &builder,
+                                    mlir::Location loc,
+                                    mlir::func::FuncOp funcOp, mlir::Value arg1,
+                                    mlir::Value arg2_and_out, mlir::Type baseTy,
+                                    mlir::Value addr_arg2_and_out = {}) {
+  llvm::SmallVector<mlir::Value> opArgs;
+  mlir::Type resultType = funcOp.getFunctionType().getResult(0);
+  // Create arguments list
+  if (auto boxCharType = mlir::dyn_cast<fir::BoxCharType>(baseTy)) {
+    mlir::Type lenType = builder.getCharacterLengthType();
+    auto refType = builder.getRefType(boxCharType.getEleTy());
+    auto unboxed =
+        builder.create<fir::UnboxCharOp>(loc, refType, lenType, arg2_and_out);
+    mlir::Value ref_arg2 =
+        builder.createConvert(loc, refType, unboxed.getResult(0));
+    auto unboxed_len = unboxed.getResult(1);
+    opArgs = fir::runtime::createArguments(builder, loc,
+                                           funcOp.getFunctionType(), ref_arg2,
+                                           unboxed_len, arg1, arg2_and_out);
+  } else {
+    opArgs = fir::runtime::createArguments(
+        builder, loc, funcOp.getFunctionType(), arg1, arg2_and_out);
+  }
+
+  mlir::Value result =
+      builder.create<fir::CallOp>(loc, funcOp, opArgs).getResult(0);
+
+  // Storing result
+  if (!mlir::dyn_cast<fir::BoxCharType>(resultType))
+    builder.create<fir::StoreOp>(loc, result, addr_arg2_and_out);
+}
+
+// Generate operation wrapper just like describe in PRIF specification
+mlir::Value genOperationWrapper(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value operation) {
+  // Character procedure tuple
+  if (auto extractValue = mlir::dyn_cast_or_null<fir::ExtractValueOp>(
+          operation.getDefiningOp())) {
+    auto insertVal1 = mlir::dyn_cast<fir::InsertValueOp>(
+        extractValue.getAdt().getDefiningOp());
+    auto insertVal2 =
+        mlir::dyn_cast<fir::InsertValueOp>(insertVal1.getAdt().getDefiningOp());
+    operation = insertVal2.getVal();
+  }
+
+  // Getting originel funcOp
+  mlir::func::FuncOp oldFuncOp;
+  mlir::Type argTy, elemTy;
+  mlir::ModuleOp module =
+      operation.getDefiningOp()->getParentOfType<mlir::ModuleOp>();
+  if (auto embox =
+          mlir::dyn_cast_or_null<fir::EmboxProcOp>(operation.getDefiningOp())) {
+    auto addrOfOp =
+        mlir::dyn_cast<fir::AddrOfOp>(embox.getFunc().getDefiningOp());
+    mlir::SymbolRefAttr symbolAttr = addrOfOp.getSymbolAttr();
+    oldFuncOp = module.lookupSymbol<mlir::func::FuncOp>(symbolAttr);
+    argTy = oldFuncOp.getFunctionType().getResult(0);
+    elemTy = fir::unwrapRefType(argTy);
+  }
+
+  // Declaration of the new wrapper function operation
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType funcType = mlir::FunctionType::get(
+      builder.getContext(),
+      /*inputs*/ {argTy, argTy, builder.getI64Type(), ptrTy},
+      /*result*/ {});
+  auto funcName = "co_reduce_operation_wrapper_" + oldFuncOp.getName();
+  mlir::func::FuncOp funcOp =
+      module.lookupSymbol<mlir::func::FuncOp>(funcName.str());
+  if (!funcOp) { // new function
+    funcOp = builder.createFunction(loc, funcName.str(), funcType);
+
+    // generating the body of the function.
+    mlir::OpBuilder::InsertPoint saveInsertPoint = builder.saveInsertionPoint();
+    builder.setInsertionPointToStart(funcOp.addEntryBlock());
+
+    auto args = funcOp.getArguments();
+    mlir::Value arg1 = args[0];
+    mlir::Value arg2_and_out = args[1];
+    mlir::Value count = args[2];
+
+    mlir::IndexType idxTy = builder.getIndexType();
+    if (mlir::isa<fir::SequenceType>(arg1.getType())) {
+      mlir::Value one = builder.createIntegerConstant(loc, idxTy, 1);
+      auto loop = builder.create<fir::DoLoopOp>(loc, one, count, /*step*/ one);
+
+      // Begin Loop code
+      mlir::OpBuilder::InsertPoint loopEndPt = builder.saveInsertionPoint();
+      builder.setInsertionPointToStart(loop.getBody());
+      mlir::Value index = loop.getInductionVar();
+      mlir::Value addr1 =
+          builder.create<fir::CoordinateOp>(loc, elemTy, arg1, index);
+      mlir::Value elem1 = builder.create<fir::LoadOp>(loc, addr1);
+      mlir::Value addr2 =
+          builder.create<fir::CoordinateOp>(loc, elemTy, arg2_and_out, index);
+      mlir::Value elem2 = builder.create<fir::LoadOp>(loc, addr2);
+
+      genOperationWrapperRuntimeCall(builder, loc, oldFuncOp, elem1, elem2,
+                                     argTy, addr2);
+
+      // End of loop
+      builder.restoreInsertionPoint(loopEndPt);
+    } else {
+      genOperationWrapperRuntimeCall(builder, loc, oldFuncOp, arg1,
+                                     arg2_and_out, argTy);
+    }
+    builder.create<mlir::func::ReturnOp>(loc);
+    builder.restoreInsertionPoint(saveInsertPoint);
+  }
+
+  mlir::SymbolRefAttr symbolRef =
+      mlir::SymbolRefAttr::get(builder.getContext(), funcOp.getSymNameAttr());
+  mlir::Value addrOfOp =
+      builder.create<fir::AddrOfOp>(loc, funcType, symbolRef);
+  mlir::Type boxTy = fir::BoxProcType::get(builder.getContext(), funcType);
+  mlir::Value boxproc = builder.create<fir::EmboxProcOp>(loc, boxTy, addrOfOp);
+  mlir::Value refBoxProc =
+      builder.create<fir::AllocaOp>(loc, boxproc.getType());
+  builder.create<fir::StoreOp>(loc, boxproc, refBoxProc);
+  return refBoxProc;
+}
+
+/// Generate call to runtime subroutine prif_co_reduce
+void fir::runtime::genCoReduce(fir::FirOpBuilder &builder, mlir::Location loc,
+                               mlir::Value A, mlir::Value operation,
+                               mlir::Value resultImage, mlir::Value stat,
+                               mlir::Value errmsg) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::Type boxNoneTy = fir::BoxType::get(builder.getNoneType());
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(boxNoneTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, boxNoneTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("co_reduce"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  mlir::Value opWrapper = genOperationWrapper(builder, loc, operation);
+  llvm::SmallVector<mlir::Value> localArgs = fir::runtime::createArguments(
+      builder, loc, ftype, A, opWrapper, /*cdata*/ nullPtr, resultImage, stat,
+      nullPtr, errmsg);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
 /// Generate call to runtime subroutine prif_co_sum_
