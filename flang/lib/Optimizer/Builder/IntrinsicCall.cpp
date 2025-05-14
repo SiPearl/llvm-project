@@ -483,6 +483,14 @@ static constexpr IntrinsicHandler handlers[]{
        {"stat", asAddr, handleDynamicOptional},
        {"errmsg", asBox, handleDynamicOptional}}},
      /*isElemental*/ false},
+    {"co_reduce",
+     &I::genCoReduce,
+     {{{"a", asBox},
+       {"operation", asBox},
+       {"result_image", asAddr, handleDynamicOptional},
+       {"stat", asAddr, handleDynamicOptional},
+       {"errmsg", asBox, handleDynamicOptional}}},
+     /*isElemental*/ false},
     {"co_sum",
      &I::genCoSum,
      {{{"a", asBox},
@@ -3892,6 +3900,30 @@ void IntrinsicLibrary::genCoMin(llvm::ArrayRef<fir::ExtendedValue> args) {
           : fir::getBase(args[3]);
   fir::runtime::genCoMin(builder, loc, fir::getBase(args[0]), remoteImage,
                          status, errmsg);
+}
+
+// CO_REDUCE
+void IntrinsicLibrary::genCoReduce(llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 5);
+  mlir::Value absentInt =
+      builder
+          .create<fir::AbsentOp>(loc, builder.getRefType(builder.getI32Type()))
+          .getResult();
+  mlir::Value operation = fir::getBase(args[1]);
+  mlir::Value resultImage =
+      isStaticallyAbsent(args[2]) ? absentInt : fir::getBase(args[2]);
+  mlir::Value status =
+      isStaticallyAbsent(args[3]) ? absentInt : fir::getBase(args[3]);
+  mlir::Value errmsg =
+      isStaticallyAbsent(args[4])
+          ? builder
+                .create<fir::AbsentOp>(loc,
+                                       fir::BoxType::get(builder.getNoneType()))
+                .getResult()
+          : fir::getBase(args[4]);
+
+  fir::runtime::genCoReduce(builder, loc, fir::getBase(args[0]), operation,
+                            resultImage, status, errmsg);
 }
 
 // CO_SUM

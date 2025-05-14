@@ -177,6 +177,11 @@ void genCoMax(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
 void genCoMin(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
               mlir::Value resultImage, mlir::Value stat, mlir::Value errmsg);
 
+/// Generate call to runtime subroutine prif_co_reduce
+void genCoReduce(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
+                 mlir::Value operation, mlir::Value resultImage,
+                 mlir::Value stat, mlir::Value errmsg);
+
 /// Generate call to runtime subroutine prif_co_sum_
 void genCoSum(fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value A,
               mlir::Value resultImage, mlir::Value stat, mlir::Value errmsg);
