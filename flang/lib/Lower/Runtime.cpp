@@ -357,11 +357,16 @@ void Fortran::lower::genLockStatement(
       std::get<Fortran::parser::LockVariable>(stmt.t));
   mlir::Value lockVarAddr =
       fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
+  mlir::Value handle;
   if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
+    lockVarAddr = fir::getBase(converter.getSymbolExtendedValue(
+        coref.value().GetLastSymbol(), nullptr));
+    handle = fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
     remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
-        converter, loc, coref.value(), lockVarAddr);
+        converter, loc, coref.value(), handle);
   } else {
     remoteImage = fir::runtime::getThisImage(builder, loc);
+    handle = fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
   }
   mlir::Value refRemoteImage =
       builder.createTemporary(loc, builder.getI32Type());
@@ -395,8 +400,6 @@ void Fortran::lower::genLockStatement(
         loc, fir::ReferenceType::get(builder.getI1Type()));
   }
 
-  mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
   fir::runtime::genLockStatement(builder, loc, refRemoteImage, handle,
                                  acquiredLock, offset, statAddr, errMsgAddr);
 }
@@ -419,10 +422,15 @@ void Fortran::lower::genUnlockStatement(
       std::get<Fortran::parser::LockVariable>(stmt.t));
   mlir::Value lockVarAddr =
       fir::getBase(converter.genExprAddr(loc, lockExpr, stmtCtx));
+  mlir::Value handle;
   if (auto coref{evaluate::ExtractCoarrayRef(lockExpr)}) {
+    lockVarAddr = fir::getBase(converter.getSymbolExtendedValue(
+        coref.value().GetLastSymbol(), nullptr));
+    handle = fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
     remoteImage = Fortran::lower::getImageIndexFromCosubscripts(
-        converter, loc, coref.value(), lockVarAddr);
+        converter, loc, coref.value(), handle);
   } else {
+    handle = fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
     remoteImage = fir::runtime::getThisImage(builder, loc);
   }
   mlir::Value refRemoteImage =
@@ -430,8 +438,6 @@ void Fortran::lower::genUnlockStatement(
   builder.create<fir::StoreOp>(loc, remoteImage, refRemoteImage);
 
   mlir::Value offset = Fortran::lower::genByteOffset(converter, *lockExpr, loc);
-  mlir::Value handle =
-      fir::runtime::getCoarrayHandle(builder, loc, lockVarAddr);
   fir::runtime::genUnlockStatement(builder, loc, refRemoteImage, handle, offset,
                                    statAddr, errMsgAddr);
 }
