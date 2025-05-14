@@ -1949,7 +1949,7 @@ void Fortran::lower::genDeclareSymbol(
     Fortran::lower::AbstractConverter &converter,
     Fortran::lower::SymMap &symMap, const Fortran::semantics::Symbol &sym,
     const fir::ExtendedValue &exv, fir::FortranVariableFlagsEnum extraFlags,
-    bool force) {
+    bool force, mlir::Value coarrayHandle) {
   if (converter.getLoweringOptions().getLowerToHighLevelFIR() &&
       (!Fortran::semantics::IsProcedure(sym) ||
        Fortran::semantics::IsPointer(sym.GetUltimate())) &&
@@ -1975,8 +1975,9 @@ void Fortran::lower::genDeclareSymbol(
       base = genPackArray(converter, sym, exv);
       dummyScope = converter.dummyArgsScopeValue();
     }
-    hlfir::EntityWithAttributes declare = hlfir::genDeclare(
-        loc, builder, base, name, attributes, dummyScope, dataAttr);
+    hlfir::EntityWithAttributes declare =
+        hlfir::genDeclare(loc, builder, base, name, attributes, dummyScope,
+                          dataAttr, coarrayHandle);
     symMap.addVariableDefinition(sym, declare.getIfVariableInterface(), force);
     return;
   }
@@ -2028,12 +2029,13 @@ static void genBoxDeclare(Fortran::lower::AbstractConverter &converter,
                           mlir::Value box, llvm::ArrayRef<mlir::Value> lbounds,
                           llvm::ArrayRef<mlir::Value> explicitParams,
                           llvm::ArrayRef<mlir::Value> explicitExtents,
-                          bool replace = false) {
+                          bool replace = false,
+                          mlir::Value coarrayHandle = {}) {
   if (converter.getLoweringOptions().getLowerToHighLevelFIR()) {
     fir::BoxValue boxValue{box, lbounds, explicitParams, explicitExtents};
     Fortran::lower::genDeclareSymbol(
         converter, symMap, sym, std::move(boxValue),
-        fir::FortranVariableFlagsEnum::None, replace);
+        fir::FortranVariableFlagsEnum::None, replace, coarrayHandle);
     return;
   }
   symMap.addBoxSymbol(sym, box, lbounds, explicitParams, explicitExtents,
@@ -2206,8 +2208,15 @@ void Fortran::lower::mapSymbolAttributes(
         lowerExplicitExtents(converter, loc, ba, lbounds, explicitExtents,
                              symMap, stmtCtx);
       }
+      mlir::Value coarrayHandle;
+      if (Fortran::evaluate::IsCoarray(sym)) {
+        // FIXME: Adding call to prif_alias_create ?
+        // This will fail later because the coarrayHandle doesn't exist.
+        coarrayHandle =
+            builder.genAbsentOp(loc, fir::BoxType::get(builder.getNoneType()));
+      }
       genBoxDeclare(converter, symMap, sym, dummyArg, lbounds, explicitParams,
-                    explicitExtents, replace);
+                    explicitExtents, replace, coarrayHandle);
       return;
     }
   }

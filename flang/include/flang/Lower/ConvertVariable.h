@@ -177,7 +177,7 @@ void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
                       const fir::ExtendedValue &exv,
                       fir::FortranVariableFlagsEnum extraFlags =
                           fir::FortranVariableFlagsEnum::None,
-                      bool force = false);
+                      bool force = false, mlir::Value coarrayHandle = {});
 
 /// Given the Fortran type of a Cray pointee, return the fir.box type used to
 /// track the cray pointee as Fortran pointer.
