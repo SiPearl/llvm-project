@@ -107,6 +107,10 @@ fir::ExtendedValue genUCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value genCoshape(fir::FirOpBuilder &builder, mlir::Location loc,
                        mlir::Value handle, size_t corank);
 
+/// Generate Call to runtime prif_size_bytes
+mlir::Value genSizeBytes(fir::FirOpBuilder &builder, mlir::Location loc,
+                         mlir::Value A);
+
 /// Generate call to runtime subroutine prif_get to fetches data in a
 /// coarray from a specified image when data to be copied are contiguous in
 /// memory from both sides.
