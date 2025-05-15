@@ -211,6 +211,90 @@ void Fortran::lower::genFormTeamStatement(
   fir::runtime::genFormTeamStatement(builder, loc, teamNumber, team, newIndex,
                                      stat, errMsg);
 }
+//===----------------------------------------------------------------------===//
+// CRITICAL construct
+//===----------------------------------------------------------------------===//
+
+mlir::Value
+Fortran::lower::genCriticalCorarrayHandle(AbstractConverter &converter) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  // FIXME : The real size for critical type after PRIF spec updated
+  mlir::Value sizeInBytes =
+      Fortran::lower::getSizeInBytes(builder, loc, builder.getI64Type(), {});
+  mlir::Value lcobounds = builder.createBox(
+      loc, builder.createIntegerConstant(loc, builder.getI64Type(), 1));
+  mlir::Value ucobounds =
+      builder.createBox(loc, fir::runtime::getNumImages(builder, loc));
+
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
+  mlir::Value none = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+
+  mlir::Value coarrayHandle = genAllocateCoarrayRuntimeCall(
+      builder, loc, sizeInBytes, lcobounds, ucobounds, allocMem, none, none);
+  mlir::Value criticalCoarray = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  return hlfir::genDeclare(loc, builder, criticalCoarray,
+                           ".tmp.critical.coarray", {}, nullptr, {},
+                           coarrayHandle)
+      .getBase();
+}
+
+void Fortran::lower::genCriticalStmt(AbstractConverter &converter,
+                                     pft::Evaluation &eval,
+                                     const Fortran::parser::CriticalStmt &stmt,
+                                     mlir::Value coarrayAddr) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  mlir::Value errMsg, stat;
+  // Handle STAT and ERRMSG values
+  Fortran::lower::StatementContext stmtCtx;
+  const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList =
+      std::get<std::list<Fortran::parser::StatOrErrmsg>>(stmt.t);
+  for (const Fortran::parser::StatOrErrmsg &statOrErr : statOrErrList) {
+    std::visit(
+        Fortran::common::visitors{
+            [&](const Fortran::parser::StatVariable &statVar) {
+              const auto *expr = Fortran::semantics::GetExpr(statVar);
+              stat = fir::getBase(converter.genExprAddr(loc, *expr, stmtCtx));
+            },
+            [&](const Fortran::parser::MsgVariable &errMsgVar) {
+              const auto *expr = Fortran::semantics::GetExpr(errMsgVar);
+              errMsg = fir::getBase(converter.genExprBox(loc, *expr, stmtCtx));
+            },
+        },
+        statOrErr.u);
+  }
+
+  if (isStaticallyAbsent(stat))
+    stat = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  if (isStaticallyAbsent(errMsg))
+    errMsg = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+
+  mlir::Value coarrayHandle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  fir::runtime::genCriticalStatement(builder, loc, coarrayHandle, stat, errMsg);
+}
+
+void Fortran::lower::genEndCriticalStmt(
+    AbstractConverter &converter, pft::Evaluation &eval,
+    const Fortran::parser::EndCriticalStmt &stmt, mlir::Value coarrayAddr) {
+  mlir::Location loc = converter.getCurrentLocation();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  mlir::Value coarrayHandle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
+  fir::runtime::genEndCriticalStatement(builder, loc, coarrayHandle);
+  mlir::Value none = builder.create<fir::AbsentOp>(
+      loc, fir::BoxType::get(mlir::NoneType::get(builder.getContext())));
+  Fortran::lower::genDeallocateCoarray(converter, loc, coarrayAddr, none);
+}
 
 //===----------------------------------------------------------------------===//
 // COARRAY utils 
@@ -506,12 +590,10 @@ mlir::Type Fortran::lower::getCoarrayHandleType(fir::FirOpBuilder &builder,
   return handleTy;
 }
 
-/// Generate call to PointerNullifyIntrinsic or AllocatableInitIntrinsic to
-static mlir::Value
-genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
-                              mlir::Value sizeInBytes, mlir::Value lcobounds,
-                              mlir::Value ucobounds, mlir::Value allocMem,
-                              mlir::Value stat, mlir::Value errMsg) {
+mlir::Value Fortran::lower::genAllocateCoarrayRuntimeCall(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value sizeInBytes,
+    mlir::Value lcobounds, mlir::Value ucobounds, mlir::Value allocMem,
+    mlir::Value stat, mlir::Value errMsg) {
   // Generate call to prif_allocate_coarray with the correct mangling name
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
   mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,

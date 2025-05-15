@@ -1026,3 +1026,33 @@ void fir::runtime::genEventQuery(fir::FirOpBuilder &builder, mlir::Location loc,
   llvm::SmallVector<mlir::Value> localArgs = {eventVarPtr, count, stat};
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
+
+/// Generate call to runtime subroutine prif_critical
+void fir::runtime::genCriticalStatement(fir::FirOpBuilder &builder,
+                                        mlir::Location loc,
+                                        mlir::Value coarrayHandle,
+                                        mlir::Value stat, mlir::Value errmsg) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("critical"), ftype);
+
+  mlir::Value nullPtr = builder.createNullConstant(loc);
+  llvm::SmallVector<mlir::Value> localArgs = fir::runtime::createArguments(
+      builder, loc, ftype, coarrayHandle, stat, errmsg, nullPtr);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate call to runtime subroutine prif_end_critical
+void fir::runtime::genEndCriticalStatement(fir::FirOpBuilder &builder,
+                                           mlir::Location loc,
+                                           mlir::Value coarrayHandle) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("end_critical"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs =
+      fir::runtime::createArguments(builder, loc, ftype, coarrayHandle);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
