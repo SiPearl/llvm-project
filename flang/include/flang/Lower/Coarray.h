@@ -19,6 +19,8 @@ struct ChangeTeamConstruct;
 struct ChangeTeamStmt;
 struct EndChangeTeamStmt;
 struct FormTeamStmt;
+struct CriticalStmt;
+struct EndCriticalStmt;
 } // namespace parser
 
 namespace evaluate {
@@ -45,6 +47,17 @@ void genEndChangeTeamStmt(AbstractConverter &, pft::Evaluation &eval,
                           const parser::EndChangeTeamStmt &);
 void genFormTeamStatement(AbstractConverter &, pft::Evaluation &eval,
                           const parser::FormTeamStmt &);
+
+//===----------------------------------------------------------------------===//
+// CRITICAL construct
+//===----------------------------------------------------------------------===//
+
+mlir::Value genCriticalCorarrayHandle(AbstractConverter &);
+void genCriticalStmt(AbstractConverter &, pft::Evaluation &eval,
+                     const parser::CriticalStmt &, mlir::Value coarrayAddr);
+void genEndCriticalStmt(AbstractConverter &, pft::Evaluation &eval,
+                        const parser::EndCriticalStmt &,
+                        mlir::Value coarrayAddr);
 
 //===----------------------------------------------------------------------===//
 // COARRAY utils 
@@ -90,6 +103,12 @@ mlir::Value getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
 //===----------------------------------------------------------------------===//
 
 mlir::Type getCoarrayHandleType(fir::FirOpBuilder &builder, mlir::Location loc);
+
+mlir::Value
+genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
+                              mlir::Value sizeInBytes, mlir::Value lcobounds,
+                              mlir::Value ucobounds, mlir::Value allocMem,
+                              mlir::Value stat, mlir::Value errMsg);
 
 mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                                mlir::Location loc, const semantics::Symbol &sym,

@@ -3793,14 +3793,25 @@ private:
   }
 
   void genFIR(const Fortran::parser::CriticalConstruct &criticalConstruct) {
+    Fortran::lower::StatementContext stmtCtx;
     setCurrentPositionAt(criticalConstruct);
-    TODO(toLocation(), "coarray: CriticalConstruct");
-  }
-  void genFIR(const Fortran::parser::CriticalStmt &) {
-    TODO(toLocation(), "coarray: CriticalStmt");
-  }
-  void genFIR(const Fortran::parser::EndCriticalStmt &) {
-    TODO(toLocation(), "coarray: EndCriticalStmt");
+    pushActiveConstruct(getEval(), stmtCtx);
+    mlir::Value criticalCoarray = genCriticalCorarrayHandle(*this);
+    for (Fortran::lower::pft::Evaluation &e :
+         getEval().getNestedEvaluations()) {
+      if (auto stmt = e.getIf<Fortran::parser::CriticalStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        genCriticalStmt(*this, getEval(), *stmt, criticalCoarray);
+      } else if (auto stmt = e.getIf<Fortran::parser::EndCriticalStmt>()) {
+        maybeStartBlock(e.block);
+        setCurrentPosition(e.position);
+        genEndCriticalStmt(*this, getEval(), *stmt, criticalCoarray);
+      } else {
+        genFIR(e);
+      }
+    }
+    popActiveConstruct();
   }
 
   void genFIR(const Fortran::parser::SelectRankConstruct &selectRankConstruct) {
@@ -5990,6 +6001,8 @@ private:
   void genFIR(const Fortran::parser::OmpEndLoopDirective &) {} // nop
   void genFIR(const Fortran::parser::SelectTypeStmt &) {}      // nop
   void genFIR(const Fortran::parser::TypeGuardStmt &) {}       // nop
+  void genFIR(const Fortran::parser::CriticalStmt &stmt) {}    // nop
+  void genFIR(const Fortran::parser::EndCriticalStmt &stmt) {} // nop
 
   /// Generate FIR for Evaluation \p eval.
   void genFIR(Fortran::lower::pft::Evaluation &eval,
