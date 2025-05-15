@@ -676,4 +676,8 @@ def AnyBoxedArray
     : TypeConstraint<And<[BoxOrClassType.predicate, IsArrayBoxPred]>,
                      "any boxed array">;
 
+def ArrayOrIntegerType : TypeConstraint<Or<[fir_SequenceType.predicate,
+    AnyIntegerLike.predicate]>,
+    "fir.array or any integer">;
+
 #endif // FIR_DIALECT_FIR_TYPES
