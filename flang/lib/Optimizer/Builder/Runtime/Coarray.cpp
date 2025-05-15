@@ -1027,6 +1027,43 @@ void fir::runtime::genEventQuery(fir::FirOpBuilder &builder, mlir::Location loc,
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
 
+/// Generate call to runtime subroutine prif_alias_create
+mlir::Value fir::runtime::genAliasCreate(fir::FirOpBuilder &builder,
+                                         mlir::Location loc,
+                                         mlir::Value sourceHandle,
+                                         mlir::Value aliasLcobounds,
+                                         mlir::Value aliasUcobounds,
+                                         mlir::Type handleTy) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("alias_create"), ftype);
+
+  // Allocate instance of prif_coarray_handle type.
+  mlir::Value aliasHandle =
+      builder.createBox(loc, builder.createTemporary(loc, handleTy));
+
+  llvm::SmallVector<mlir::Value> localArgs = fir::runtime::createArguments(
+      builder, loc, ftype, sourceHandle, aliasLcobounds, aliasUcobounds,
+      aliasHandle);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  return aliasHandle;
+}
+
+/// Generate call to runtime subroutine prif_alias_destroy
+void fir::runtime::genAliasDestroy(fir::FirOpBuilder &builder,
+                                   mlir::Location loc,
+                                   mlir::Value aliasHandle) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("alias_destroy"), ftype);
+
+  llvm::SmallVector<mlir::Value> localArgs =
+      fir::runtime::createArguments(builder, loc, ftype, aliasHandle);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
 /// Generate call to runtime subroutine prif_critical
 void fir::runtime::genCriticalStatement(fir::FirOpBuilder &builder,
                                         mlir::Location loc,
