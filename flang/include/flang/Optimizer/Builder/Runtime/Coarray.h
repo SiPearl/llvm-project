@@ -255,6 +255,15 @@ void genEventQuery(fir::FirOpBuilder &builder, mlir::Location loc,
                    mlir::Value eventVarPtr, mlir::Value count,
                    mlir::Value stat);
 
+/// Generate call to runtime subroutine prif_alias_create
+mlir::Value genAliasCreate(fir::FirOpBuilder &builder, mlir::Location loc,
+                    mlir::Value sourceHandle, mlir::Value aliasLcobounds,
+                    mlir::Value aliasUcobounds, mlir::Type handleTy);
+
+/// Generate call to runtime subroutine prif_alias_destroy
+void genAliasDestroy(fir::FirOpBuilder &builder, mlir::Location loc,
+                     mlir::Value aliasHandle);
+
 /// Generate call to runtime subroutine prif_critical
 void genCriticalStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                      mlir::Value coarrayHandle, mlir::Value stat,
