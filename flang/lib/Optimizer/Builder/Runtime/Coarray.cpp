@@ -87,6 +87,49 @@ void fir::runtime::copy1DArrayToI64Array(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, func, args);
 }
 
+/// Generate Call to runtime prif_init
+mlir::Value fir::runtime::genInitCoarray(fir::FirOpBuilder &builder,
+                                         mlir::Location loc) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("init"), ftype);
+  llvm::SmallVector<mlir::Value> args =
+      fir::runtime::createArguments(builder, loc, ftype, result);
+  builder.create<fir::CallOp>(loc, funcOp, args);
+  return builder.create<fir::LoadOp>(loc, result);
+}
+
+/// Generate Call to runtime prif_stop or error_stop
+void fir::runtime::genStopCoarray(fir::FirOpBuilder &builder,
+                                  mlir::Location loc, mlir::Value quiet,
+                                  mlir::Value stopCodeInt,
+                                  mlir::Value stopCodeChar, bool isError) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp = builder.createFunction(
+      loc, isError ? PRIFNAME_SUB("error_stop") : PRIFNAME_SUB("stop"), ftype);
+
+  if (isStaticallyAbsent(quiet)) {
+    quiet = builder.createTemporary(loc, builder.getI1Type());
+    mlir::Value t =
+        builder.createIntegerConstant(loc, builder.getI1Type(), true);
+    builder.create<fir::StoreOp>(loc, t, quiet);
+  }
+  if (isStaticallyAbsent(stopCodeInt)) {
+    stopCodeInt = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(builder.getNoneType()));
+  }
+  if (isStaticallyAbsent(stopCodeChar)) {
+    stopCodeChar = builder.create<fir::AbsentOp>(
+        loc, fir::BoxType::get(builder.getNoneType()));
+  }
+  llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+      builder, loc, ftype, quiet, stopCodeInt, stopCodeChar);
+  builder.create<fir::CallOp>(loc, funcOp, args);
+}
+
 /// Generate Call to runtime prif_num_images
 mlir::Value fir::runtime::getNumImages(fir::FirOpBuilder &builder,
                                        mlir::Location loc) {

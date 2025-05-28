@@ -62,6 +62,14 @@ void computeLastUcobound(fir::FirOpBuilder &builder, mlir::Location loc,
 void copy1DArrayToI64Array(fir::FirOpBuilder &builder, mlir::Location loc,
                            mlir::Value from, mlir::Value to);
 
+/// Generate Call to runtime prif_init
+mlir::Value genInitCoarray(fir::FirOpBuilder &builder, mlir::Location loc);
+
+/// Generate Call to runtime prif_stop
+void genStopCoarray(fir::FirOpBuilder &builder, mlir::Location loc,
+                    mlir::Value quiet = {}, mlir::Value stopCodeInt = {},
+                    mlir::Value stopCodeChar = {}, bool isError = false);
+
 /// Generate Call to runtime prif_num_images
 mlir::Value getNumImages(fir::FirOpBuilder &builder, mlir::Location loc);
 

@@ -107,6 +107,7 @@ void Fortran::lower::genStopStatement(
   mlir::func::FuncOp callee;
   mlir::FunctionType calleeType;
   // First operand is stop code (zero if absent)
+  mlir::Value stopCodeInt, stopCodeChar;
   if (const auto &code =
           std::get<std::optional<Fortran::parser::StopCode>>(stmt.t)) {
     auto expr =
@@ -123,6 +124,7 @@ void Fortran::lower::genStopStatement(
               builder.createConvert(loc, calleeType.getInput(0), x.getAddr()));
           operands.push_back(
               builder.createConvert(loc, calleeType.getInput(1), x.getLen()));
+          stopCodeChar = x.getAddr();
         },
         [&](fir::UnboxedValue x) {
           callee = fir::runtime::getRuntimeFunc<mkRTKey(StopStatement)>(
@@ -131,6 +133,7 @@ void Fortran::lower::genStopStatement(
           mlir::Value cast =
               builder.createConvert(loc, calleeType.getInput(0), x);
           operands.push_back(cast);
+          stopCodeInt = x;
         },
         [&](auto) {
           mlir::emitError(loc, "unhandled expression in STOP");
@@ -149,16 +152,24 @@ void Fortran::lower::genStopStatement(
       loc, calleeType.getInput(operands.size()), isError));
 
   // Third operand indicates QUIET (default to false).
+  mlir::Value q;
   if (const auto &quiet =
           std::get<std::optional<Fortran::parser::ScalarLogicalExpr>>(stmt.t)) {
     const SomeExpr *expr = Fortran::semantics::GetExpr(*quiet);
     assert(expr && "failed getting typed expression");
-    mlir::Value q = fir::getBase(converter.genExprValue(*expr, stmtCtx));
+    q = fir::getBase(converter.genExprValue(*expr, stmtCtx));
     operands.push_back(
         builder.createConvert(loc, calleeType.getInput(operands.size()), q));
+    q = fir::getBase(converter.genExprAddr(*expr, stmtCtx));
+    q = builder.createBox(loc, q);
   } else {
     operands.push_back(builder.createIntegerConstant(
         loc, calleeType.getInput(operands.size()), 0));
+  }
+
+  if (converter.getLoweringOptions().getCoarrayFeature()) {
+    fir::runtime::genStopCoarray(builder, loc, q, stopCodeInt, stopCodeChar,
+                                 isError);
   }
 
   builder.create<fir::CallOp>(loc, callee, operands);
@@ -252,6 +263,7 @@ void Fortran::lower::genEventPostStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::EventPostStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   Fortran::lower::StatementContext stmtCtx;
 
@@ -287,6 +299,7 @@ void Fortran::lower::genEventWaitStatement(
     const Fortran::parser::EventWaitStmt &stmt) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   Fortran::lower::StatementContext stmtCtx;
 
   // Handle STAT ,ERRMSG and UNTIL_COUNT
@@ -349,6 +362,7 @@ void Fortran::lower::genLockStatement(
     const Fortran::parser::LockStmt &stmt) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   Fortran::lower::StatementContext stmtCtx;
 
   // Handle LOCK_VAR and REMOTE_IMAGE values
@@ -409,6 +423,7 @@ void Fortran::lower::genUnlockStatement(
     const Fortran::parser::UnlockStmt &stmt) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   Fortran::lower::StatementContext stmtCtx;
 
   // Handle STAT and ERRMSG values
@@ -446,6 +461,7 @@ void Fortran::lower::genSyncAllStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::SyncAllStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
 
   // Handle STAT and ERRMSG values
   const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList = stmt.v;
@@ -494,6 +510,7 @@ void Fortran::lower::genSyncMemoryStatement(
     Fortran::lower::AbstractConverter &converter,
     const Fortran::parser::SyncMemoryStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
 
   // Handle STAT and ERRMSG values
   const std::list<Fortran::parser::StatOrErrmsg> &statOrErrList = stmt.v;

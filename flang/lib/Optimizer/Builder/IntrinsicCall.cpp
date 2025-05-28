@@ -3183,6 +3183,7 @@ static mlir::Value getAddrFromBox(fir::FirOpBuilder &builder,
 
 // ATOMIC_CAS
 void IntrinsicLibrary::genAtomicCasCoarray(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 5);
   // Handle coarray_handle and IMAGE_NUM
   mlir::Value atomAddr = getBase(args[0]);
@@ -3211,6 +3212,7 @@ void IntrinsicLibrary::genAtomicCasCoarray(llvm::ArrayRef<fir::ExtendedValue> ar
 // ATOMIC_DEFINE
 void IntrinsicLibrary::genAtomicDefine(
     llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 3);
   // Handle coarray_handle and IMAGE_NUM
   mlir::Value atomAddr = getBase(args[0]);
@@ -3237,6 +3239,7 @@ void IntrinsicLibrary::genAtomicDefine(
 // ATOMIC_OP
 template <int op, bool is_fetch>
 void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(!is_fetch ? (args.size() == 3) : (args.size() == 4));
   // Handle optional STAT argument
   fir::ExtendedValue statExv = args.size() == 3 ? args[2] : args[3];
@@ -3264,6 +3267,7 @@ void IntrinsicLibrary::genAtomicOp(llvm::ArrayRef<fir::ExtendedValue> args) {
 
 // ATOMIC_REF
 void IntrinsicLibrary::genAtomicRef(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 3);
   // Handle coarray_handle and IMAGE_NUM
   mlir::Value atomAddr = getBase(args[1]);
@@ -3838,6 +3842,7 @@ mlir::Value IntrinsicLibrary::genCmplx(mlir::Type resultType,
 
 // CO_BROADCAST
 void IntrinsicLibrary::genCoBroadcast(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 4);
   mlir::Value refNone =
       builder
@@ -3860,6 +3865,7 @@ void IntrinsicLibrary::genCoBroadcast(llvm::ArrayRef<fir::ExtendedValue> args) {
 
 // CO_MAX
 void IntrinsicLibrary::genCoMax(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 4);
   mlir::Value refNone =
       builder
@@ -3882,6 +3888,7 @@ void IntrinsicLibrary::genCoMax(llvm::ArrayRef<fir::ExtendedValue> args) {
 
 // CO_MIN
 void IntrinsicLibrary::genCoMin(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 4);
   mlir::Value refNone =
       builder
@@ -3904,6 +3911,7 @@ void IntrinsicLibrary::genCoMin(llvm::ArrayRef<fir::ExtendedValue> args) {
 
 // CO_REDUCE
 void IntrinsicLibrary::genCoReduce(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 5);
   mlir::Value absentInt =
       builder
@@ -3928,6 +3936,7 @@ void IntrinsicLibrary::genCoReduce(llvm::ArrayRef<fir::ExtendedValue> args) {
 
 // CO_SUM
 void IntrinsicLibrary::genCoSum(llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 4);
   mlir::Value refNone =
       builder
@@ -6698,6 +6707,7 @@ IntrinsicLibrary::genIndex(mlir::Type resultType,
 fir::ExtendedValue
 IntrinsicLibrary::genImageIndex(mlir::Type resultType,
                                 llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 2 || args.size() == 3);
 
   mlir::Value handle =
@@ -6725,6 +6735,7 @@ IntrinsicLibrary::genImageIndex(mlir::Type resultType,
 // IMAGE_STATUS
 mlir::Value IntrinsicLibrary::genImageStatus(mlir::Type resultType,
                                              llvm::ArrayRef<mlir::Value> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 2);
   return fir::runtime::getImageStatus(builder, loc, args[0], args[1]);
 }
@@ -7647,6 +7658,7 @@ IntrinsicLibrary::genNull(mlir::Type, llvm::ArrayRef<fir::ExtendedValue> args) {
 fir::ExtendedValue
 IntrinsicLibrary::genNumImages(mlir::Type resultType,
                                llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   auto numArgs = args.size();
   assert(numArgs == 0 || numArgs == 1);
 
@@ -8594,6 +8606,7 @@ IntrinsicLibrary::genTeamNumber(mlir::Type,
 fir::ExtendedValue
 IntrinsicLibrary::genThisImage(mlir::Type resultType,
                                llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() >= 1 && args.size() <= 3);
   const bool coarrayIsAbsent = args.size() == 1;
   const bool dimIsAbsent = args.size() < 3;
@@ -8759,6 +8772,7 @@ IntrinsicLibrary::genUbound(mlir::Type resultType,
 fir::ExtendedValue
 IntrinsicLibrary::genLcobound(mlir::Type resultType,
                               llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 2 || args.size() == 3);
 
   // Handle the coarray handle
@@ -8781,6 +8795,7 @@ IntrinsicLibrary::genLcobound(mlir::Type resultType,
 fir::ExtendedValue
 IntrinsicLibrary::genUcobound(mlir::Type resultType,
                               llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
   assert(args.size() == 2 || args.size() == 3);
 
   // Handle the coarray handle

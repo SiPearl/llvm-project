@@ -10,6 +10,7 @@
 #include "flang/Lower/EnvironmentDefault.h"
 #include "flang/Optimizer/Builder/BoxValue.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
+#include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/EnvironmentDefaults.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
@@ -23,8 +24,8 @@ using namespace Fortran::runtime;
 /// Create a `int main(...)` that calls the Fortran entry point
 void fir::runtime::genMain(
     fir::FirOpBuilder &builder, mlir::Location loc,
-    const std::vector<Fortran::lower::EnvironmentDefault> &defs,
-    bool initCuda) {
+    const std::vector<Fortran::lower::EnvironmentDefault> &defs, bool initCuda,
+    bool initCoarrayEnv) {
   auto *context = builder.getContext();
   auto argcTy = builder.getDefaultIntegerType();
   auto ptrTy = mlir::LLVM::LLVMPointerType::get(context);
@@ -69,8 +70,12 @@ void fir::runtime::genMain(
         loc, RTNAME_STRING(CUFInit), mlir::FunctionType::get(context, {}, {}));
     builder.create<fir::CallOp>(loc, initFn);
   }
+  if (initCoarrayEnv)
+    fir::runtime::genInitCoarray(builder, loc);
 
   builder.create<fir::CallOp>(loc, qqMainFn);
+  if (initCoarrayEnv)
+    fir::runtime::genStopCoarray(builder, loc);
   builder.create<fir::CallOp>(loc, stopFn);
 
   mlir::Value ret = builder.createIntegerConstant(loc, argcTy, 0);

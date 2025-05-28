@@ -1120,6 +1120,10 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
       diags.Report(diagID);
     }
   }
+  // -fcoarray
+  if (args.hasArg(clang::driver::options::OPT_fcoarray))
+    res.getLoweringOpts().setCoarrayFeature(1);
+
   return diags.getNumErrors() == numErrorsBefore;
 }
 

@@ -66,6 +66,7 @@ void Fortran::lower::genChangeTeamStmt(
     Fortran::lower::pft::Evaluation &,
     const Fortran::parser::ChangeTeamStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
   mlir::Value errMsg, stat, team;
@@ -108,6 +109,7 @@ void Fortran::lower::genEndChangeTeamStmt(
     Fortran::lower::pft::Evaluation &,
     const Fortran::parser::EndChangeTeamStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
   mlir::Value errMsg, stat;
@@ -145,6 +147,7 @@ void Fortran::lower::genFormTeamStatement(
     Fortran::lower::pft::Evaluation &,
     const Fortran::parser::FormTeamStmt &stmt) {
   mlir::Location loc = converter.getCurrentLocation();
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
   mlir::Value errMsg, stat, newIndex, teamNumber, team;
@@ -358,6 +361,12 @@ Fortran::lower::genCoSubscripts(Fortran::lower::AbstractConverter &converter,
     }
   }
   return imageIndex;
+}
+
+void Fortran::lower::checkCoarrayFeatureEnabled(AbstractConverter &converter,
+                                                mlir::Location loc) {
+  if (!converter.getLoweringOptions().getCoarrayFeature())
+    mlir::emitError(loc, "Coarrays disabled, use '-fcoarray' to enable");
 }
 
 std::pair<mlir::Value, mlir::Value>
@@ -626,6 +635,7 @@ mlir::Value Fortran::lower::genAllocateCoarray(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::semantics::Symbol &sym, fir::MutableBoxValue box,
     llvm::SmallVector<mlir::Value> extents, mlir::Value errMsgAddr) {
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
   // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol
@@ -666,6 +676,7 @@ std::pair<mlir::Value, mlir::Value> Fortran::lower::genAllocateCoarray(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::semantics::Symbol &sym, mlir::Type allocType,
     llvm::SmallVector<mlir::Value> extents) {
+  Fortran::lower::checkCoarrayFeatureEnabled(converter, loc);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
   // Handle LCOBOUNDS and UCOBOUNDS form the Fortran::semantics::Symbol

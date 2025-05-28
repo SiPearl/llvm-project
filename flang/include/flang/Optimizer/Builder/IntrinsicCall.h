@@ -586,6 +586,12 @@ struct IntrinsicLibrary {
 
   void setResultMustBeFreed() { resultMustBeFreed = true; }
 
+  // Check support of coarray features
+  void checkCoarrayEnabled() {
+    if (converter && !converter->getLoweringOptions().getCoarrayFeature())
+      mlir::emitError(loc, "Coarrays disabled, use '-fcoarray' to enable.");
+  }
+
   fir::FirOpBuilder &builder;
   mlir::Location loc;
   bool resultMustBeFreed = false;
