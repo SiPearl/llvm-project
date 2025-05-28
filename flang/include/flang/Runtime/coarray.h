@@ -12,8 +12,8 @@
 #include "flang/Common/ISO_Fortran_binding_wrapper.h"
 #include "flang/Runtime/c-or-cpp.h"
 #include "flang/Runtime/entry-names.h"
-#include <iostream>
 #include <map>
+#include <stdio.h>
 #include <stdlib.h>
 #include <tuple>
 #include <vector>
@@ -29,97 +29,6 @@ void RTNAME(ComputeLastUcobound)(
 void RTNAME(Copy1DArrayToI64Array)(
     const Descriptor &from, const Descriptor &to);
 } // namespace Fortran::runtime
-
-// FIXME: Removing all declaration later
-// Unimplemented prif runtime functions
-#define DECLARE_UNIMPLEMENTED_PRIF(func_name, ...) \
-  void _QMprifPprif_##func_name(__VA_ARGS__) { \
-    std::fprintf(stderr, "unimplemented feature : prif_" #func_name "\n"); \
-    std::exit(EXIT_FAILURE); \
-  }
-
-DECLARE_UNIMPLEMENTED_PRIF(init, void *)
-DECLARE_UNIMPLEMENTED_PRIF(stop, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(fail_image, void)
-DECLARE_UNIMPLEMENTED_PRIF(this_image_no_coarray, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(this_image_with_coarray, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(this_image_with_dim, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(num_images, void *)
-DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(num_images_with_team_number, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(image_index, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    image_index_with_team, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    image_index_with_team_number, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(image_status, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(coshape, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(lcobound_no_dim, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(lcobound_with_dim, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(ucobound_no_dim, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(ucobound_with_dim, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(allocate_coarray, void *, void *, void *, void *,
-    void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(deallocate_coarray, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(sync_memory, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(sync_all, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(sync_images, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(sync_team, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    lock, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    unlock, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    get, void *, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(get_stridded, void *, void *, void *, void *, void *,
-    void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    put, void *, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(put_stridded, void *, void *, void *, void *, void *,
-    void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(co_broadcast, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(co_max, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    co_max_character, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(co_min, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    co_min_character, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(co_sum, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(atomic_add, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(atomic_and, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(atomic_or, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(atomic_xor, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_fetch_add, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_fetch_and, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_fetch_or, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_fetch_xor, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_cas_int, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_cas_logical, void *, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_define_int, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_define_logical, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_ref_int, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    atomic_ref_logical, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    form_team, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(get_team, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(team_number, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(change_team, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(end_team, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(
-    event_post, void *, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(event_query, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(event_wait, void *, void *, void *, void *, void *)
-DECLARE_UNIMPLEMENTED_PRIF(notify_wait, void *, void *, void *, void *, void *)
 
 FORTRAN_EXTERN_C_END
 

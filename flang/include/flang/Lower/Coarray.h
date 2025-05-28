@@ -63,6 +63,11 @@ void genEndCriticalStmt(AbstractConverter &, pft::Evaluation &eval,
 // COARRAY utils 
 //===----------------------------------------------------------------------===//
 
+/// Check if CoarrayFeature from LoweringOptions is enabled.
+/// Emit an error if not.
+void checkCoarrayFeatureEnabled(AbstractConverter &converter,
+                                mlir::Location loc);
+
 // Compute the colower and coupper bounds for a coarray and return an array of
 // bounds.
 std::pair<mlir::Value, mlir::Value>

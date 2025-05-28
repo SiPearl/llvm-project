@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Runtime/coarray.h"
+#include "flang-rt/runtime/descriptor.h"
 #include "flang-rt/runtime/type-info.h"
 
 namespace Fortran::runtime {
