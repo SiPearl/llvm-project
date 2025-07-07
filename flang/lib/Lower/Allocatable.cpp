@@ -496,32 +496,11 @@ private:
     genAllocateObjectInit(box, allocatorIdx);
     if (alloc.hasCoarraySpec()) {
       Fortran::lower::StatementContext stmtCtx;
-      llvm::SmallVector<mlir::Value> extents;
-      mlir::Value one =
-          builder.createIntegerConstant(loc, builder.getI32Type(), 1);
-      for (const auto &iter : llvm::enumerate(alloc.getShapeSpecs())) {
-        mlir::Value lb;
-        const auto &bounds = iter.value().t;
-        if (const std::optional<Fortran::parser::BoundExpr> &lbExpr =
-                std::get<0>(bounds))
-          lb = fir::getBase(converter.genExprValue(
-              loc, Fortran::semantics::GetExpr(*lbExpr), stmtCtx));
-        else
-          lb = one;
-        mlir::Value ub = fir::getBase(converter.genExprValue(
-            loc, Fortran::semantics::GetExpr(std::get<1>(bounds)), stmtCtx));
-        mlir::Value extent = builder.createConvert(
-            loc, builder.getI64Type(),
-            builder.create<mlir::arith::AddIOp>(
-                loc, one, builder.create<mlir::arith::SubIOp>(loc, ub, lb)));
-        extents.push_back(extent);
-      }
       genSetType(alloc, box, loc);
       genSetDeferredLengthParameters(alloc, box);
       genAllocateObjectBounds(alloc, box);
       mlir::Value stat = Fortran::lower::genAllocateCoarray(
-          converter, loc, alloc.getSymbol(), box, extents,
-          errorManager.errMsgAddr);
+          converter, loc, alloc.getSymbol(), box, errorManager.errMsgAddr);
       fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
       postAllocationAction(alloc, box);
       errorManager.assignStat(builder, loc, stat);
