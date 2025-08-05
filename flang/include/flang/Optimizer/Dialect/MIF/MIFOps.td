@@ -48,7 +48,7 @@ def mif_StopOp : mif_Op<"stop", [AttrSizedOperandSegments]> {
 
   let arguments = (ins Optional<BoolLike>:$quiet,
       Optional<AnyIntegerType>:$stop_code_int,
-      Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$stop_code_char,
+      Optional<AnyRefOrBoxType>:$stop_code_char,
       UnitAttr:$is_error);
 
   let hasVerifier = 1;
@@ -73,7 +73,7 @@ def mif_NumImagesOp
     - `num_images(team)`
     - `num_images(team_number)`
 
-    Argumemnts:
+    Arguments:
     - `team` : Shall be a scalar of type `team_type` from the `ISO_FORTRAN_ENV`
             module with a value that identifies the current or ancestor team.
     - `team_number` :  Shall be an integer scalar. It shall identify the
@@ -112,7 +112,7 @@ def mif_ThisImageOp : mif_Op<"this_image", [AttrSizedOperandSegments]> {
     - Case(1) : The result of `this_image([team])` is a scalar with a value 
           equal to the index of the image in the current or specified team.
     - Case(2) : The result of `this_image(coarray [,team])` is the sequence of 
-          cosubscript vales for `coarray`.
+          cosubscript values for `coarray`.
     - Case(3) : The result of `this_image(coarray, dim [,team])` is the value of
           cosubscript `dim` in the sequence of cosubscript values for `coarray`.
 
@@ -175,12 +175,14 @@ def mif_ImageStatusOp : mif_Op<"image_status", []> {
       - `team`(optional) : Shall be a scalar of type `team_type` from 
         ISO_FORTRAN_ENV. If `team` is absent, the team specified is the
         current team.
-    Result: The values of the image indices of the known stopped images
-      in the specified team, in numerically increasing order.
+    Result: The result value is STAT_FAILED_IMAGE from the intrinsic module ISO_FORTRAN_ENV
+      if the specified image is known to has failed, STAT_STOPPED_IMAGE from the intrinsic
+      module ISO_FORTRAN_ENV if that image is known to have initiated normal termination,
+      and zero otherwise.
   }];
 
   let arguments = (ins Optional<AnyRefOrBoxType>:$team);
-  let results = (outs fir_SequenceType);
+  let results = (outs AnyIntegerType);
 }
 
 //===----------------------------------------------------------------------===//
@@ -193,8 +195,6 @@ def mif_ImageIndexOp : mif_Op<"image_index", [AttrSizedOperandSegments]> {
     Arguments:
       - `coarray`: Shall be a coarray of any type.
       - `sub`: rank-one integer array of size equal to the corank of `coarray`.
-        Shall be a valid sequence of cosubscripts for `coarray` in the team 
-        specified by `team` or `team_number`, or in the current team.
       - `team`: Shall be a scalar of type `team_type` from ISO_FORTRAN_ENV.
       - `team_number`: It shall identify the initial team or a sibling team 
         of the current team.
@@ -204,8 +204,10 @@ def mif_ImageIndexOp : mif_Op<"image_index", [AttrSizedOperandSegments]> {
     - Case(2) : `call image_index(coarray, sub, team)`
     - Case(3) : `call image_index(coarray, sub, team_number)`
     
-    Result: Return an integer scalar which represent the image index from `sub`
-      for `coarray`.
+    Result: If the value of `sub` is a valid sequence of cosubscripts for `coarray` in the
+      team specified by `team` or `team_number`, or the current team if neither `team` nor
+      `team_number` appears, the result is the index of the corresponding image in that team.
+      Otherwise, the result is zero.
   }];
 
   let arguments = (ins fir_BoxType:$coarray,
@@ -222,7 +224,7 @@ def mif_LcoboundOp : mif_Op<"lcobound", [NoMemoryEffect]> {
     This operation returns the lower cobound(s) associated with a coarray.
     Arguments: 
       - `coarray`: Shall be a coarray of any type.
-      - `dim` : Shall be an integer scalar. Its value shall be in the range of
+      - `dim`(optional) : Shall be an integer scalar. Its value shall be in the range of
           `1 <= DIM <= N`, where `N` is the corank of the coarray.
     Results:
       - Case(1): If `dim` is present, the result is an integer scalar equal to
@@ -231,7 +233,8 @@ def mif_LcoboundOp : mif_Op<"lcobound", [NoMemoryEffect]> {
         the corank of the indicated coarray.
   }];
 
-  let arguments = (ins fir_BoxType:$coarray);
+  let arguments = (ins fir_BoxType:$coarray,
+                       Optional<AnyInteger>:$dim);
   let results = (outs fir_SequenceType);
 }
 
@@ -241,7 +244,7 @@ def mif_UcoboundOp : mif_Op<"ucobound", [NoMemoryEffect]> {
     This operation returns the upper cobound(s) associated with a coarray.
     Arguments: 
       - `coarray`: Shall be a coarray of any type.
-      - `dim` : Shall be an integer scalar. Its value shall be in the range of
+      - `dim`(optional) : Shall be an integer scalar. Its value shall be in the range of
           `1 <= DIM <= N`, where `N` is the corank of the coarray.
     Results:
       - Case(1): If `dim` is present, the result is an integer scalar equal to
@@ -250,7 +253,8 @@ def mif_UcoboundOp : mif_Op<"ucobound", [NoMemoryEffect]> {
         the corank of the indicated coarray.
   }];
 
-  let arguments = (ins fir_BoxType:$coarray);
+  let arguments = (ins fir_BoxType:$coarray,
+                       Optional<AnyInteger>:$dim);
   let results = (outs fir_SequenceType);
 }
 
@@ -285,11 +289,11 @@ def mif_AllocateOp
                        fir_SequenceType:$ucobound,
                        I64:$size_in_bytes, 
                        FuncType:$final_func,
-                       Arg<AnyRefOrBoxType, "", [MemWrite]>:$coarray_desc,
-                       Arg<AnyRefOrBoxType, "", [MemWrite]>:$allocated_memory,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
 
-  let results = (outs AnyIntegerType:$stat);
+  let results = (outs fir_BoxType:$coarray_desc, 
+                      AnyRefOrBoxType:$allocated_memory,
+                      AnyIntegerType:$stat);
 
   let hasVerifier = 1;
 }
@@ -298,11 +302,10 @@ def mif_DeallocateOp
     : mif_Op<"deallocate", [MemoryEffects<[MemFree<DefaultResource>]>]> {
   let summary = "Perform the deallocation of a coarray";
   let description = [{
-    The coarray.deallocate will releases memory allocated of an allocatable
-    coarray.
+    This call releases memory allocated by `mif_AllocateOp` for a coarray.
   }];
   let arguments = (ins Arg<AnyRefOrBoxType, "", [MemRead]>:$coarray,
-      Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
+                       Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 
   let hasVerifier = 1;
@@ -310,20 +313,24 @@ def mif_DeallocateOp
 
 def mif_AliasCreateOp : mif_Op<"alias_create", []> {
   let summary = "Create a new coarray descriptor aliased.";
+  let description = [{
+    Arguments: 
+      `alias_lcobounds` and `alias_ucobounds` are the new cobounds to be used 
+      for the new alias.
+    Result : Is a new coarray that aliases the data in the existing coarray
+      in argument.
+  }];
   
-  let arguments = (ins AnyRefOrBoxType:$coarray_desc,
-                       fir_SequenceType:$lcobounds, 
-                       fir_SequenceType:$ucobound);
+  let arguments = (ins AnyRefOrBoxType:$coarray,
+                       fir_SequenceType:$alias_lcobounds, 
+                       fir_SequenceType:$alias_ucobound);
   let results = (outs fir_BoxType);
 }
 
 def mif_AliasDestroyOp : mif_Op<"alias_destroy", []> {
   let summary = "Delete an alias descriptor.";
   
-  let arguments = (ins AnyRefOrBoxType:$coarray_desc,
-                       fir_SequenceType:$lcobounds, 
-                       fir_SequenceType:$ucobound);
-  let results = (outs fir_BoxType);
+  let arguments = (ins AnyRefOrBoxType:$coarray);
 }
 
 //===----------------------------------------------------------------------===//
@@ -363,7 +370,8 @@ def mif_SyncTeamOp : mif_Op<"sync_team", []> {
   let summary =
       "Performs a synchronization of the team, identified by `team_value`";
 
-  let arguments = (ins Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
+  let arguments = (ins fir_BoxType:$team,
+                   ins Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
 
@@ -390,7 +398,7 @@ def mif_LockOp : mif_Op<"lock", [AttrSizedOperandSegments]> {
   }];
 
   let arguments = (ins AnyIntegerType:$image_num, fir_BoxType:$lock_var,
-      Optional<fir_BoxType>:$acquired_lock,
+      Arg<Optional<AnyLogicalLike>, "", [MemWrite]>:$acquired_lock,
       Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -470,7 +478,7 @@ def mif_EventWaitOp : mif_Op<"event_wait", [AttrSizedOperandSegments]> {
     Arguments: 
       - `event_var`: Shall be a coarray of type EVENT_TYPE from the intrinsic
         module ISO_FORTRAN_ENV.
-      - `until_count` : Shall be an integer scalar and indicate the count of 
+      - `until_count`(optional) : Shall be an integer scalar and indicate the count of 
         the given event variable to be waited for.
   }];
 
@@ -497,13 +505,13 @@ def mif_NotifyWaitOp : mif_Op<"notify_wait", [AttrSizedOperandSegments]> {
   let summary = "Wait on notification of an incoming put operation.";
   let description = [{
     Arguments: 
-      - `event_var`: Shall be a coarray of type EVENT_TYPE from the intrinsic
+      - `notify_var`: Shall be a coarray of type NOTIFY_TYPE from the intrinsic
         module ISO_FORTRAN_ENV.
-      - `until_count` : Shall be an integer scalar and indicate the count of 
-        the given event variable to be waited for.
+      - `until_count`(optional) : Shall be an integer scalar and indicate the count of 
+        the given notify variable to be waited for.
   }];
 
-  let arguments = (ins fir_BoxType:$event_var,
+  let arguments = (ins fir_BoxType:$notify_var,
       Optional<AnyIntegerType>:$until_count,
       Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
@@ -528,9 +536,9 @@ def mif_FormTeamOp : mif_Op<"form_team", [AttrSizedOperandSegments]> {
     
     Arguments: 
       - `team_number`: Shall be a positive integer.
-      - `team_var` : Shall be a coarray of type TEAM_TYPE from the intrinsic
+      - `team_var` : Shall be a variable of type TEAM_TYPE from the intrinsic
         module ISO_FORTRAN_ENV.
-      - `new_index`: Shall be an integer that correspond to the index that
+      - `new_index`(optional): Shall be an integer that correspond to the index that
         the calling image will have in the new team.
   }];
 
@@ -544,9 +552,8 @@ def mif_FormTeamOp : mif_Op<"form_team", [AttrSizedOperandSegments]> {
 def mif_ChangeTeamOp : mif_Op<"change_team", []> {
   let summary = "Changes the current team.";
   let description = [{
-    Fortran provide CHANGE TEAM construct to changes the current team and
-    CHAND TEAM operation will change the current team to the specified new
-    team. 
+    The CHANGE TEAM construct changes the current team to the specified new
+    team, which must be a child team of the current team.  
   }];
 
   let arguments = (ins fir_BoxType:$team,
@@ -557,9 +564,9 @@ def mif_ChangeTeamOp : mif_Op<"change_team", []> {
 def mif_EndTeamOp : mif_Op<"end_team", []> {
   let summary = "Changes the current team to the parent team.";
   let description = [{
-    Fortran provide CHANGE TEAM construct to changes the current team.
-    Executing END TEAM operation restores the current team to the original team
-    that was current for the CHANGE TEAM operation.
+    The END TEAM operation completes the CHANGE TEAM construct and 
+    restores the current team to the team that was current before 
+    the CHANGE TEAM construct. 
   }];
 
   let arguments = (ins Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
@@ -569,11 +576,11 @@ def mif_EndTeamOp : mif_Op<"end_team", []> {
 def mif_GetTeamOp : mif_Op<"get_team", []> {
   let summary = "Get the team value for the current or ancestor team.";
   let description = [{
-    This operation get the team value for the current or ancestor team.
+    This operation gets the team value for the current or an ancestor team.
+    `level`(optional): If provided, must equal one of the following constants : 
+    `INITIAL_TEAM`, `PARENT_TEAM` or `CURRENT_TEAM` from the module ISO_FORTRAN_ENV.
     If `level` isn't present or has the value `CURRENT_TEAM` the returned
-    value is the current team.
-    `level` cane take one of the following constants : `INITIAL_TEAM`, 
-    `PARENT_TEAM` or `CURRENT_TEAM` from the module ISO_FORTRAN_ENV.
+    value is the current team.     
   }];
 
   let arguments = (ins Optional<AnyIntegerType>:$level);
@@ -584,7 +591,7 @@ def mif_TeamNumberOp : mif_Op<"team_number", []> {
   let summary = "Get the team number";
   let description = [{
     Argument: `team` is optional and shall be a scalar of type TEAM_TYPE from 
-    module ISO_FORTRAN_ENV and the vlaue idenfies the current or an ancestor team. 
+    module ISO_FORTRAN_ENV and the value identifies the current or an ancestor team. 
     If `team` is absent, the team specified is the current team.
   }];
 
@@ -602,13 +609,14 @@ def mif_AtomicAddOp : mif_Op<"atomic_add", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
         from module ISO_FORTRAN_ENV.
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND. 
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -619,13 +627,14 @@ def mif_AtomicAndOp : mif_Op<"atomic_and", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
         from module ISO_FORTRAN_ENV.
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND. 
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -636,13 +645,14 @@ def mif_AtomicOrOp : mif_Op<"atomic_or", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
         from module ISO_FORTRAN_ENV.
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND. 
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -653,13 +663,14 @@ def mif_AtomicXorOp : mif_Op<"atomic_xor", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
         from module ISO_FORTRAN_ENV.
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND. 
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -670,16 +681,17 @@ def mif_AtomicCasOp : mif_Op<"atomic_cas", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom`, `old`, `new` and `compared`: Shall be a coarray of type integer with kind
-         ATOMIC_INT_KIND or ATOMIC_LOGICAL_KIND from module ISO_FORTRAN_ENV. They need to 
-         have the same type and kind.
+      - `atom`: Shall be a coarray of type integer with kind
+         ATOMIC_INT_KIND or ATOMIC_LOGICAL_KIND from module ISO_FORTRAN_ENV
+      - `old`, `new` and `compared`: Shall be a scalar integer with kind ATOMIC_LOGICAL_KIND. 
+         They need to have the same type and kind as `atom`.
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemWrite]>:$old,
-                       Arg<fir_BoxType, "", [MemRead]>:$compare,
-                       Arg<fir_BoxType, "", [MemRead]>:$new_val,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemWrite]>:$old,
+                       Arg<AnyIntegerType, "", [MemRead]>:$compare,
+                       Arg<AnyIntegerType, "", [MemRead]>:$new_val,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -690,13 +702,14 @@ def mif_AtomicDefineOp : mif_Op<"atomic_define", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND 
         or ATOMIC_LOGICAL_KIND from module ISO_FORTRAN_ENV.
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -707,13 +720,14 @@ def mif_AtomicRefOp : mif_Op<"atomic_ref", []> {
     Arguments: 
       - `image_num`: Shall be an integer that correspond to the image index of 
         `atom` where the operation need to be performed. 
-      - `atom` and `value`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `atom`: Shall be a coarray of type integer with kind ATOMIC_INT_KIND 
+      - `value`: Shall be a scalar integer with kind ATOMIC_INT_KIND 
         or ATOMIC_LOGICAL_KIND from module ISO_FORTRAN_ENV.
   }];
 
   let arguments = (ins AnyIntegerType:$image_num,
-                       fir_BoxType:$atom,
-                       Arg<fir_BoxType, "", [MemRead]>:$value,
+                       AnyIntegerType:$atom,
+                       Arg<AnyIntegerType, "", [MemRead]>:$value,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -725,12 +739,12 @@ def mif_AtomicRefOp : mif_Op<"atomic_ref", []> {
 def mif_CoBroadcastOp : mif_Op<"co_broadcast", [AttrSizedOperandSegments]> {
   let summary = "Broadcast value to images.";
   let description = [{
-    The coarray.co_broadcast operation performs the computation of the sum
+    The co_broadcast operation performs the computation of the sum
     across images.
   }];
 
   let arguments = (ins fir_BoxType:$a,
-                       Optional<AnyIntegerType>:$source_image,
+                       AnyIntegerType:$source_image,
                        Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
   let results = (outs AnyIntegerType:$stat);
 }
@@ -738,7 +752,7 @@ def mif_CoBroadcastOp : mif_Op<"co_broadcast", [AttrSizedOperandSegments]> {
 def mif_CoMaxOp : mif_Op<"co_max", [AttrSizedOperandSegments]> {
   let summary = "Compute maximum value across images.";
   let description = [{
-    The coarray.co_max operation performs the computation of the maximum 
+    The co_max operation performs the computation of the maximum 
     across images.
   }];
 
@@ -751,7 +765,7 @@ def mif_CoMaxOp : mif_Op<"co_max", [AttrSizedOperandSegments]> {
 def mif_CoMinOp : mif_Op<"co_min", [AttrSizedOperandSegments]> {
   let summary = "Compute minimum value across images.";
   let description = [{
-    The coarray.co_min operation performs the computation of the minimum
+    The co_min operation performs the computation of the minimum
     across images.
   }];
 
@@ -764,11 +778,11 @@ def mif_CoMinOp : mif_Op<"co_min", [AttrSizedOperandSegments]> {
 def mif_CoReduceOp : mif_Op<"co_reduce", [AttrSizedOperandSegments]> {
   let summary = "Generalized reduction across images.";
   let description = [{
-    The coarray.co_sum operation performs the reduction across images.
+    The co_sum operation performs the reduction across images.
     The `operation` argument shall be a function with exactly two arguments.
     Each arguments and the result shall be scalar, nonallocatable, noncoarray, 
     nonpointer, nonpolymorphic data and with the same type and kind as the 
-    argument `a` of the operation coarray.co_reduce.
+    argument `a` of the operation co_reduce.
   }];
 
   let arguments = (ins fir_BoxType:$a,
@@ -781,7 +795,7 @@ def mif_CoReduceOp : mif_Op<"co_reduce", [AttrSizedOperandSegments]> {
 def mif_CoSumOp : mif_Op<"co_sum", [AttrSizedOperandSegments]> {
   let summary = "Compute sum across images.";
   let description = [{
-    The coarray.co_sum operation performs the computation of the sum
+    The co_sum operation performs the computation of the sum
     across images.
   }];
 
