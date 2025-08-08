@@ -319,7 +319,8 @@ mlir::Value fir::runtime::getImageIndexFromBox(fir::FirOpBuilder &builder,
       handle = fir::runtime::getCoarrayHandle(builder, loc, coarrayAddr);
     }
     // Computation of the image_index
-    return fir::runtime::getImageIndex(builder, loc, handle, cosubscripts);
+    return fir::runtime::genInitialTeamIndex(builder, loc, handle,
+                                             cosubscripts);
   }
   return {};
 }
@@ -1356,4 +1357,37 @@ void fir::runtime::genFailedStoppedImages(fir::FirOpBuilder &builder,
   llvm::SmallVector<mlir::Value> localArgs =
       fir::runtime::createArguments(builder, loc, ftype, team, resultBox);
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}
+
+/// Generate Call to runtime prif_initial_team_index*
+mlir::Value fir::runtime::genInitialTeamIndex(fir::FirOpBuilder &builder,
+                                              mlir::Location loc,
+                                              mlir::Value handle,
+                                              mlir::Value sub, mlir::Value team,
+                                              mlir::Value stat) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::func::FuncOp funcOp;
+  llvm::SmallVector<mlir::Value> args;
+
+  mlir::Value result = builder.create<fir::AllocaOp>(loc, builder.getI32Type());
+  if (isStaticallyAbsent(stat)) {
+    stat = builder.create<fir::AbsentOp>(
+        loc, builder.getRefType(builder.getI32Type()));
+  }
+  if (isStaticallyAbsent(team)) {
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp =
+        builder.createFunction(loc, PRIFNAME_SUB("initial_team_index"), ftype);
+    args = {handle, sub, result, stat};
+  } else {
+    std::string imageIndexName =
+        fir::unwrapPassByRefType(team.getType()).isInteger()
+            ? PRIFNAME_SUB("initial_team_index_with_team")
+            : PRIFNAME_SUB("initial_team_index_with_team_number");
+    mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, imageIndexName, ftype);
+    args = {handle, sub, team, result, stat};
+  }
+  builder.create<fir::CallOp>(loc, funcOp, args);
+  return builder.create<fir::LoadOp>(loc, result);
 }

@@ -294,5 +294,9 @@ void genFailedStoppedImages(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value resultBox, mlir::Value team,
                             bool isFailed);
 
+/// Generate Call to runtime prif_initial_team_index*
+mlir::Value genInitialTeamIndex(fir::FirOpBuilder &builder, mlir::Location loc,
+                                mlir::Value handle, mlir::Value sub,
+                                mlir::Value team = {}, mlir::Value stat = {});
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H

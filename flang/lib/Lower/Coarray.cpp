@@ -478,7 +478,7 @@ mlir::Value Fortran::lower::getImageIndexFromCosubscripts(
   cosubscripts = builder.createBox(loc, cosubscripts);
 
   // Computation of the image_index
-  return fir::runtime::getImageIndex(builder, loc, handle, cosubscripts);
+  return fir::runtime::genInitialTeamIndex(builder, loc, handle, cosubscripts);
 }
 
 // Compute the size in bytes.
