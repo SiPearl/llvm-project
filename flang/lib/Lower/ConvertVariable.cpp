@@ -2194,6 +2194,7 @@ void Fortran::lower::mapSymbolAttributes(
   const bool isResult = Fortran::semantics::IsFunctionResult(sym);
   const bool replace = isDummy || isResult;
   fir::factory::CharacterExprHelper charHelp{builder, loc};
+  mlir::Value coarrayHandle;
 
   if (Fortran::semantics::IsProcedure(sym)) {
     if (isUnusedEntryDummy) {
@@ -2261,7 +2262,6 @@ void Fortran::lower::mapSymbolAttributes(
     }
     // Allocate the coarray handle wich is the coarray descriptor that
     // describing the entity if this is a coarray.
-    mlir::Value coarrayHandle;
     if (Fortran::evaluate::IsCoarray(sym)) {
       std::string globalName = converter.mangleName(sym) + "_coarray_handle";
       if (auto global = builder.getNamedGlobal(globalName)) {
@@ -2297,6 +2297,26 @@ void Fortran::lower::mapSymbolAttributes(
 
   if (isDummy) {
     mlir::Value dummyArg = symMap.lookupSymbol(sym).getAddr();
+    if (Fortran::evaluate::IsCoarray(sym)) {
+      std::string globalName = converter.mangleName(sym) + "_coarray_handle";
+      fir::GlobalOp global = builder.getNamedGlobal(globalName);
+      if (!global) {
+        mlir::Type handleTy = fir::BoxType::get(
+            Fortran::lower::getCoarrayHandleType(builder, loc));
+        global = builder.createGlobal(loc, handleTy, globalName,
+                                      builder.createLinkOnceLinkage());
+        createGlobalInitialization(builder, global, [&](fir::FirOpBuilder &b) {
+          auto box = fir::factory::createUnallocatedBox(builder, loc, handleTy,
+                                                        std::nullopt);
+          b.create<fir::HasValueOp>(loc, box);
+        });
+      }
+      coarrayHandle = builder
+                          .create<fir::AddrOfOp>(loc, global.resultType(),
+                                                 global.getSymbol())
+                          .getResult();
+    }
+
     if (lowerToBoxValue(sym, dummyArg, converter)) {
       llvm::SmallVector<mlir::Value> lbounds;
       llvm::SmallVector<mlir::Value> explicitExtents;
@@ -2356,27 +2376,6 @@ void Fortran::lower::mapSymbolAttributes(
         lowerExplicitLowerBounds(converter, loc, ba, lbounds, symMap, stmtCtx);
         lowerExplicitExtents(converter, loc, ba, lbounds, explicitExtents,
                              symMap, stmtCtx);
-      }
-      mlir::Value coarrayHandle;
-      if (Fortran::evaluate::IsCoarray(sym)) {
-        std::string globalName = converter.mangleName(sym) + "_coarray_handle";
-        fir::GlobalOp global = builder.getNamedGlobal(globalName);
-        if (!global) {
-          mlir::Type handleTy = fir::BoxType::get(
-              Fortran::lower::getCoarrayHandleType(builder, loc));
-          global = builder.createGlobal(loc, handleTy, globalName,
-                                        builder.createLinkOnceLinkage());
-          createGlobalInitialization(
-              builder, global, [&](fir::FirOpBuilder &b) {
-                auto box = fir::factory::createUnallocatedBox(
-                    builder, loc, handleTy, std::nullopt);
-                b.create<fir::HasValueOp>(loc, box);
-              });
-        }
-        coarrayHandle = builder
-                            .create<fir::AddrOfOp>(loc, global.resultType(),
-                                                   global.getSymbol())
-                            .getResult();
       }
       genBoxDeclare(converter, symMap, sym, dummyArg, lbounds, explicitParams,
                     explicitExtents, replace, coarrayHandle);
@@ -2606,7 +2605,7 @@ void Fortran::lower::mapSymbolAttributes(
     }
   }
 
-  if (Fortran::evaluate::IsCoarray(sym)) {
+  if (Fortran::evaluate::IsCoarray(sym) && !isDummy) {
     if (auto seqTy = fir::unwrapUntilSeqType(addr.getType())) {
       if (!arg && fir::sequenceWithNonConstantShape(seqTy)) {
         TODO(loc, "Allocation of coarray with non constant shape.");
@@ -2679,7 +2678,7 @@ void Fortran::lower::mapSymbolAttributes(
   }
 
   ::genDeclareSymbol(converter, symMap, sym, addr, len, extents, lbounds,
-                     replace);
+                     replace, coarrayHandle);
   return;
 }
 
