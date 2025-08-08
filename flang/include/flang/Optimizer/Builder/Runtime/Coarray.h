@@ -123,29 +123,37 @@ mlir::Value genSizeBytes(fir::FirOpBuilder &builder, mlir::Location loc,
 /// coarray from a specified image when data to be copied are contiguous in
 /// memory from both sides.
 void CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
-                mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
-                mlir::Value currentImageBuffer, mlir::Value sizeInBytes);
+                mlir::Value imageNum, mlir::Value coarrayAddr,
+                mlir::Value coarrayHandle, mlir::Value offset,
+                mlir::Value currentImageBuffer, mlir::Value sizeInBytes,
+                mlir::Value stat, mlir::Value errmsg);
 /// Generate call to runtime subroutine prif_get_strided
 void CoarrayGetStrided(fir::FirOpBuilder &builder, mlir::Location loc,
-                       mlir::Value imageNum, mlir::Value handle,
-                       mlir::Value offset, mlir::Value remoteStride,
-                       mlir::Value currentImageBuffer,
+                       mlir::Value imageNum, mlir::Value coarrayAddr,
+                       mlir::Value coarrayHandle, mlir::Value offset,
+                       mlir::Value remoteStride, mlir::Value currentImageBuffer,
                        mlir::Value currentImageStride, mlir::Value elementSize,
-                       mlir::Value extent);
+                       mlir::Value extent, mlir::Value stat,
+                       mlir::Value errmsg);
 
 /// Generate call to runtime subroutine prif_put to assigns to elements of a
 /// coarray from a specified image when data to be assigned are contiguous in
 /// memory from both sides.
 void CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
-                mlir::Value imageNum, mlir::Value handle, mlir::Value offset,
-                mlir::Value currentImageBuffer, mlir::Value sizeInBytes);
+                mlir::Value imageNum, mlir::Value coarrayAddr,
+                mlir::Value coarrayHandle, mlir::Value offset,
+                mlir::Value currentImageBuffer, mlir::Value sizeInBytes,
+                mlir::Value notifyPtr, mlir::Value notifyHandle,
+                mlir::Value notifyOffset, mlir::Value stat, mlir::Value errmsg);
 /// Generate call to runtime subroutine prif_get_strided
 void CoarrayPutStrided(fir::FirOpBuilder &builder, mlir::Location loc,
-                       mlir::Value imageNum, mlir::Value handle,
-                       mlir::Value offset, mlir::Value remoteStride,
-                       mlir::Value currentImageBuffer,
+                       mlir::Value imageNum, mlir::Value coarrayAddr,
+                       mlir::Value coarrayHandle, mlir::Value offset,
+                       mlir::Value remoteStride, mlir::Value currentImageBuffer,
                        mlir::Value currentImageStride, mlir::Value elementSize,
-                       mlir::Value extent);
+                       mlir::Value extent, mlir::Value notifyPtr,
+                       mlir::Value notifyHandle, mlir::Value notifyOffset,
+                       mlir::Value stat, mlir::Value errmsg);
 
 /// Generate call to runtime subroutine prif_sync_all
 void genSyncAllStatement(fir::FirOpBuilder &builder, mlir::Location loc,

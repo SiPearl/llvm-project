@@ -86,8 +86,9 @@ mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
       return builder.create<fir::LoadOp>(loc, coarrayHandle);
     return coarrayHandle;
   }
-  addr.dump();
-  TODO(loc, "Retrieve the coarray handle from this operation.");
+  // No coarray descriptor attached to this variable.
+  // Need to call indirect subroutine defined by PRIF later.
+  return mlir::Value{};
 }
 
 /// Generate call to runtime function to compute the lastest ucobound.
@@ -428,70 +429,143 @@ mlir::Value fir::runtime::genSizeBytes(fir::FirOpBuilder &builder,
 /// coarray from a specified image when data to be copied are contiguous in
 /// memory from both sides.
 void fir::runtime::CoarrayGet(fir::FirOpBuilder &builder, mlir::Location loc,
-                              mlir::Value imageNum, mlir::Value handle,
-                              mlir::Value offset,
+                              mlir::Value imageNum, mlir::Value coarrayAddr,
+                              mlir::Value coarrayHandle, mlir::Value offset,
                               mlir::Value currentImageBuffer,
-                              mlir::Value sizeInBytes) {
+                              mlir::Value sizeInBytes, mlir::Value stat,
+                              mlir::Value errmsg) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype =
-      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
-  mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("get"), ftype);
-
-  mlir::Value nullPtr = builder.createNullConstant(loc);
-  llvm::SmallVector<mlir::Value> localArgs = {
-      imageNum,    handle,  offset,  currentImageBuffer,
-      sizeInBytes, nullPtr, nullPtr, nullPtr};
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  mlir::func::FuncOp funcOp;
+  mlir::FunctionType ftype;
+  llvm::SmallVector<mlir::Value> args;
+  if (isStaticallyAbsent(coarrayHandle)) {
+    ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, PRIFNAME_SUB("get_indirect"), ftype);
+    args = {imageNum, coarrayAddr, currentImageBuffer, sizeInBytes, stat,
+            errmsg,   errmsg};
+  } else {
+    ftype =
+        PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, PRIFNAME_SUB("get"), ftype);
+    args = {imageNum,    coarrayHandle, offset, currentImageBuffer,
+            sizeInBytes, stat,          errmsg, errmsg};
+  }
+  builder.create<fir::CallOp>(loc, funcOp, args);
 }
 
 /// Generate call to runtime subroutine prif_get_stridded
 void fir::runtime::CoarrayGetStrided(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
-    mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
-    mlir::Value currentImageBuffer, mlir::Value currentImageStride,
-    mlir::Value elementSize, mlir::Value extent) {
+    mlir::Value coarrayAddr, mlir::Value coarrayHandle, mlir::Value offset,
+    mlir::Value remoteStride, mlir::Value currentImageBuffer,
+    mlir::Value currentImageStride, mlir::Value elementSize, mlir::Value extent,
+    mlir::Value stat, mlir::Value errmsg) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype =
-      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
-                    ptrTy, ptrTy, ptrTy);
-  mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("get_strided"), ftype);
-
-  mlir::Value nullPtr = builder.createNullConstant(loc);
-  llvm::SmallVector<mlir::Value> localArgs = {imageNum,
-                                              handle,
-                                              offset,
-                                              remoteStride,
-                                              currentImageBuffer,
-                                              currentImageStride,
-                                              elementSize,
-                                              extent,
-                                              nullPtr,
-                                              nullPtr,
-                                              nullPtr};
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  mlir::func::FuncOp funcOp;
+  mlir::FunctionType ftype;
+  llvm::SmallVector<mlir::Value> args;
+  if (isStaticallyAbsent(coarrayHandle)) {
+    ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                          ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, PRIFNAME_SUB("get_strided_indirect"),
+                                    ftype);
+    args = {imageNum,
+            coarrayAddr,
+            remoteStride,
+            currentImageBuffer,
+            currentImageStride,
+            elementSize,
+            extent,
+            stat,
+            errmsg,
+            errmsg};
+  } else {
+    ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                          ptrTy, ptrTy, ptrTy, ptrTy);
+    funcOp = builder.createFunction(loc, PRIFNAME_SUB("get_strided"), ftype);
+    args = {imageNum,
+            coarrayHandle,
+            offset,
+            remoteStride,
+            currentImageBuffer,
+            currentImageStride,
+            elementSize,
+            extent,
+            stat,
+            errmsg,
+            errmsg};
+  }
+  builder.create<fir::CallOp>(loc, funcOp, args);
 }
 
 /// Generate call to runtime subroutine prif_put to assigns to elements of a
 /// coarray from a specified image when data to be assigned are contiguous in
 /// memory from both sides.
 void fir::runtime::CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
-                              mlir::Value imageNum, mlir::Value handle,
-                              mlir::Value offset,
+                              mlir::Value imageNum, mlir::Value coarrayAddr,
+                              mlir::Value coarrayHandle, mlir::Value offset,
                               mlir::Value currentImageBuffer,
-                              mlir::Value sizeInBytes) {
+                              mlir::Value sizeInBytes, mlir::Value notifyAddr,
+                              mlir::Value notifyHandle,
+                              mlir::Value notifyOffset, mlir::Value stat,
+                              mlir::Value errmsg) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype =
-      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
-  mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("put"), ftype);
-
-  mlir::Value nullPtr = builder.createNullConstant(loc);
-  llvm::SmallVector<mlir::Value> localArgs = {
-      imageNum,    handle,  offset,  currentImageBuffer,
-      sizeInBytes, nullPtr, nullPtr, nullPtr};
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  mlir::func::FuncOp funcOp;
+  mlir::FunctionType ftype;
+  llvm::SmallVector<mlir::Value> args;
+  if (isStaticallyAbsent(notifyAddr)) {
+    if (isStaticallyAbsent(coarrayHandle)) {
+      ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+      funcOp = builder.createFunction(loc, PRIFNAME_SUB("put_indirect"), ftype);
+      args = {imageNum, coarrayAddr, currentImageBuffer, sizeInBytes, stat,
+              errmsg,   errmsg};
+    } else {
+      ftype =
+          PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+      funcOp = builder.createFunction(loc, PRIFNAME_SUB("put"), ftype);
+      args = {imageNum,    coarrayHandle, offset, currentImageBuffer,
+              sizeInBytes, stat,          errmsg, errmsg};
+    }
+  } else {
+    if (isStaticallyAbsent(coarrayHandle)) {
+      if (isStaticallyAbsent(notifyHandle)) {
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_indirect_with_notify_indirect"), ftype);
+        args = {imageNum,    coarrayAddr, currentImageBuffer,
+                sizeInBytes, notifyAddr,  stat,
+                errmsg,      errmsg};
+      } else {
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_indirect_with_notify"), ftype);
+        args = {imageNum,    coarrayAddr,  currentImageBuffer,
+                sizeInBytes, notifyHandle, notifyOffset,
+                stat,        errmsg,       errmsg};
+      }
+    } else {
+      if (isStaticallyAbsent(notifyHandle)) {
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_with_notify_indirect"), ftype);
+        args = {imageNum,    coarrayHandle, offset, currentImageBuffer,
+                sizeInBytes, notifyAddr,    stat,   errmsg,
+                errmsg};
+      } else {
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy, ptrTy);
+        funcOp =
+            builder.createFunction(loc, PRIFNAME_SUB("put_with_notify"), ftype);
+        args = {imageNum,    coarrayHandle, offset,       currentImageBuffer,
+                sizeInBytes, notifyHandle,  notifyOffset, stat,
+                errmsg,      errmsg};
+      }
+    }
+  }
+  builder.create<fir::CallOp>(loc, funcOp, args);
 }
 
 /// Generate call to runtime subroutine prif_put to assigns to elements of a
@@ -499,29 +573,122 @@ void fir::runtime::CoarrayPut(fir::FirOpBuilder &builder, mlir::Location loc,
 /// memory from both sides.
 void fir::runtime::CoarrayPutStrided(
     fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value imageNum,
-    mlir::Value handle, mlir::Value offset, mlir::Value remoteStride,
-    mlir::Value currentImageBuffer, mlir::Value currentImageStride,
-    mlir::Value elementSize, mlir::Value extent) {
+    mlir::Value coarrayAddr, mlir::Value coarrayHandle, mlir::Value offset,
+    mlir::Value remoteStride, mlir::Value currentImageBuffer,
+    mlir::Value currentImageStride, mlir::Value elementSize, mlir::Value extent,
+    mlir::Value notifyAddr, mlir::Value notifyHandle, mlir::Value notifyOffset,
+    mlir::Value stat, mlir::Value errmsg) {
+  mlir::FunctionType ftype;
+  mlir::func::FuncOp funcOp;
+  llvm::SmallVector<mlir::Value> args;
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype =
-      PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
-                    ptrTy, ptrTy, ptrTy);
-  mlir::func::FuncOp funcOp =
-      builder.createFunction(loc, PRIFNAME_SUB("put_strided"), ftype);
-
-  mlir::Value nullPtr = builder.createNullConstant(loc);
-  llvm::SmallVector<mlir::Value> localArgs = {imageNum,
-                                              handle,
-                                              offset,
-                                              remoteStride,
-                                              currentImageBuffer,
-                                              currentImageStride,
-                                              elementSize,
-                                              extent,
-                                              nullPtr,
-                                              nullPtr,
-                                              nullPtr};
-  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+  if (isStaticallyAbsent(notifyAddr)) {
+    if (isStaticallyAbsent(coarrayHandle)) {
+      // prif_put_strided_indirect
+      ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                            ptrTy, ptrTy, ptrTy);
+      funcOp = builder.createFunction(loc, PRIFNAME_SUB("put_strided_indirect"),
+                                      ftype);
+      args = {imageNum,
+              coarrayAddr,
+              remoteStride,
+              currentImageBuffer,
+              currentImageStride,
+              elementSize,
+              extent,
+              stat,
+              errmsg,
+              errmsg};
+    } else {
+      // prif_put_strided
+      ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                            ptrTy, ptrTy, ptrTy, ptrTy);
+      funcOp = builder.createFunction(loc, PRIFNAME_SUB("put_strided"), ftype);
+      args = {imageNum,
+              coarrayHandle,
+              offset,
+              remoteStride,
+              currentImageBuffer,
+              currentImageStride,
+              elementSize,
+              extent,
+              stat,
+              errmsg,
+              errmsg};
+    }
+  } else {
+    if (isStaticallyAbsent(coarrayHandle)) {
+      if (isStaticallyAbsent(notifyHandle)) {
+        // prif_put_strided_indirect_with_notify_indirect
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy, ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_strided_indirect_with_notify_indirect"),
+            ftype);
+        args = {imageNum,
+                coarrayAddr,
+                remoteStride,
+                currentImageBuffer,
+                currentImageStride,
+                elementSize,
+                extent,
+                notifyAddr,
+                stat,
+                errmsg,
+                errmsg};
+      } else {
+        // prif_put_strided_indirect_with_notify
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_strided_indirect_with_notify"), ftype);
+        args = {
+            imageNum,           coarrayAddr, remoteStride, currentImageBuffer,
+            currentImageStride, elementSize, extent,       notifyHandle,
+            notifyOffset,       stat,        errmsg,       errmsg};
+      }
+    } else {
+      if (isStaticallyAbsent(notifyHandle)) {
+        // prif_put_strided_with_notify_indirect
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_strided_with_notify_indirect"), ftype);
+        args = {imageNum,
+                coarrayHandle,
+                offset,
+                remoteStride,
+                currentImageBuffer,
+                currentImageStride,
+                elementSize,
+                extent,
+                notifyAddr,
+                stat,
+                errmsg,
+                errmsg};
+      } else {
+        // prif_put_strided_with_notify
+        ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy,
+                              ptrTy, ptrTy, ptrTy, ptrTy, ptrTy, ptrTy);
+        funcOp = builder.createFunction(
+            loc, PRIFNAME_SUB("put_strided_with_notify"), ftype);
+        args = {imageNum,
+                coarrayHandle,
+                offset,
+                remoteStride,
+                currentImageBuffer,
+                currentImageStride,
+                elementSize,
+                extent,
+                notifyHandle,
+                notifyOffset,
+                stat,
+                errmsg,
+                errmsg};
+      }
+    }
+  }
+  builder.create<fir::CallOp>(loc, funcOp, args);
 }
 
 /// Generate call to runtime subroutine prif_sync_all

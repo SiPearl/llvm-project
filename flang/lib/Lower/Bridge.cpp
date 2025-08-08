@@ -668,13 +668,9 @@ public:
                  mlir::Location loc) {
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
-    fir::ExtendedValue addr;
-    if (lowerToHighLevelFIR()) {
-      addr = Fortran::lower::convertExprToAddress(loc, *this, expr,
-                                                  localSymbols, context);
-    } else {
-      TODO(loc, "generate corray expression with PIRF.");
-    }
+    fir::ExtendedValue addr = Fortran::lower::convertExprToAddress(
+        loc, *this, expr, localSymbols, context);
+    mlir::Value coarrayAddr = fir::getBase(addr);
     mlir::Value handle =
         fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(addr));
 
@@ -712,6 +708,28 @@ public:
     }
     destBox = fir::getBase(fir::factory::createBoxValue(*builder, loc, dest));
 
+    // handle STAT from the CoarrayRef
+    mlir::Value stat;
+    auto statExpr = coarrayRef.stat();
+    if (statExpr.has_value()) {
+      if (auto statRef{Fortran::evaluate::ExtractDataRef(statExpr.value())}) {
+        stat = fir::getBase(
+            getSymbolExtendedValue(statRef->GetLastSymbol(), nullptr));
+      }
+    }
+    if (!stat) {
+      stat = builder
+                 ->create<fir::AbsentOp>(
+                     loc, builder->getRefType(builder->getI32Type()))
+                 .getResult();
+    }
+
+    // Absent ERRMSG (No specifier for ERRMSG into the image-selector)
+    mlir::Value errmsg = builder
+                             ->create<fir::AbsentOp>(
+                                 loc, fir::BoxType::get(builder->getNoneType()))
+                             .getResult();
+
     mlir::Value offset = Fortran::lower::genByteOffset(*this, expr, loc);
     mlir::Type i64Ty = builder->getI64Type();
     if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
@@ -729,9 +747,9 @@ public:
       auto es = builder->createIntegerConstant(loc, i64Ty, size);
       builder->create<fir::StoreOp>(loc, es, elementSize);
 
-      fir::runtime::CoarrayGetStrided(*builder, loc, imageNum, handle, offset,
-                                      remoteStride, destBox, currentImageStride,
-                                      elementSize, extents);
+      fir::runtime::CoarrayGetStrided(
+          *builder, loc, imageNum, coarrayAddr, handle, offset, remoteStride,
+          destBox, currentImageStride, elementSize, extents, stat, errmsg);
     } else {
       mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
       size_t size =
@@ -742,8 +760,8 @@ public:
       builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
 
       // Getting the current_image_buffer
-      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset, destBox,
-                               sizeInBytes);
+      fir::runtime::CoarrayGet(*builder, loc, imageNum, coarrayAddr, handle,
+                               offset, destBox, sizeInBytes, stat, errmsg);
     }
     return dest;
   }
@@ -5499,181 +5517,201 @@ private:
 
   /// Generate an coarray assignment.
   /// This is an assignment expression with corank > 0.
-  void
-  genPutCoarrayAssignment(const Fortran::evaluate::Assignment &assign,
-                          const Fortran::evaluate::CoarrayRef &coarrayRef) {
-    // Assignement of a coarray generate a call to prif_put[*] subroutine
-    mlir::Location loc = toLocation();
+  void genCoarrayAssignment(mlir::Location loc,
+                            const Fortran::evaluate::Assignment &assign) {
     Fortran::lower::StatementContext stmtCtx;
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
-    fir::ExtendedValue lhsExv, rhsExv;
-    if (lowerToHighLevelFIR()) {
-      lhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.lhs,
-                                                    localSymbols, stmtCtx);
-      rhsExv = genExprAddr(assign.rhs, stmtCtx);
-    } else {
-      TODO(loc, "assignement with a coarray.");
-    }
-    // Getting the current_image_buffer
-    mlir::Value currentImageBuffer;
-    mlir::Value rhs = fir::getBase(rhsExv);
+    // CoarrayRef expression from LHS or RHS
+    auto rhsCoarrayRef = Fortran::evaluate::ExtractCoarrayRef(assign.rhs);
+    auto lhsCoarrayRef = Fortran::evaluate::ExtractCoarrayRef(assign.lhs);
+    fir::ExtendedValue rhsExv =
+        rhsCoarrayRef.has_value() && !lhsCoarrayRef.has_value()
+            ? Fortran::lower::convertExprToAddress(loc, *this, assign.rhs,
+                                                   localSymbols, stmtCtx)
+            : genExprAddr(assign.rhs, stmtCtx);
+    fir::ExtendedValue lhsExv =
+        lhsCoarrayRef.has_value()
+            ? Fortran::lower::convertExprToAddress(loc, *this, assign.lhs,
+                                                   localSymbols, stmtCtx)
+            : genExprAddr(assign.lhs, stmtCtx);
     mlir::Type rhsBaseTy = fir::getBaseTypeOf(rhsExv);
     mlir::Type lhsBaseTy = fir::getBaseTypeOf(lhsExv);
     fir::SequenceType maybeLhsSeqType = mlir::dyn_cast<fir::SequenceType>(lhsBaseTy);
     fir::SequenceType maybeRhsSeqType = mlir::dyn_cast<fir::SequenceType>(rhsBaseTy);
-    if (!maybeRhsSeqType && maybeLhsSeqType) {
-      mlir::Value initialValue =
-          fir::isa_char(rhs.getType())
-              ? rhs
-              : fir::getBase(genExprBox(loc, assign.rhs, stmtCtx));
-      currentImageBuffer = genScalarToArray(loc, initialValue, lhsExv, stmtCtx);
-    } else {
-      mlir::Type ptrTy =
-          mlir::isa<fir::BaseBoxType>(rhs.getType())
-              ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
-              : (mlir::Type)fir::PointerType::get(builder->getNoneType());
-      mlir::Value rhsPtr = builder->createConvert(loc, ptrTy, rhs);
-      currentImageBuffer = builder->createTemporary(loc, ptrTy);
-      builder->create<fir::StoreOp>(loc, rhsPtr, currentImageBuffer);
-    }
 
-    // Getting the coarray_handle entity from the left expression
-    mlir::Value handle =
-        fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(lhsExv));
+    // Getting the coarray descriptor reference.
+    mlir::Value coarrayHandle = lhsCoarrayRef.has_value()
+                                    ? fir::runtime::getCoarrayHandle(
+                                          *builder, loc, fir::getBase(lhsExv))
+                                    : fir::runtime::getCoarrayHandle(
+                                          *builder, loc, fir::getBase(rhsExv));
+    mlir::Value coarrayAddr =
+        lhsCoarrayRef.has_value() ? fir::getBase(lhsExv) : fir::getBase(rhsExv);
 
-    // Computing the image number from the cosubscripts
-    mlir::Type i32Ty = builder->getI32Type();
-    mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
+    // Computing the image number from cosubscripts
+    mlir::Value imageNum = builder->createTemporary(loc, builder->getI32Type());
     auto num = Fortran::lower::getImageIndexFromCosubscripts(
-        *this, loc, coarrayRef, handle);
+        *this, loc,
+        lhsCoarrayRef.has_value() ? lhsCoarrayRef.value()
+                                  : rhsCoarrayRef.value(),
+        coarrayHandle);
     builder->create<fir::StoreOp>(loc, num, imageNum);
 
-    // Getting offset from the LHS expression
-    mlir::Value offset = Fortran::lower::genByteOffset(*this, assign.lhs, loc);
-
-    mlir::Type i64Ty = builder->getI64Type();
-    if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
-      // Handle strides information from subscript
-      auto [remoteStride, extents] = genStrideAndExtents(assign.lhs, loc);
-      mlir::Value currentImageStride = (!maybeRhsSeqType && maybeLhsSeqType) 
-        ? genStrideAndExtents(fir::factory::createBoxValue(*builder, loc, currentImageBuffer), loc).first 
-        : genStrideAndExtents(assign.rhs, loc).first;
-
-      size_t size =
-          fir::getTypeSizeAndAlignmentOrCrash(
-              loc, fir::getElementTypeOf(lhsExv), *dl, builder->getKindMap())
-              .first;
-
-      // Getting the element size of the lhs expression
-      mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
-      auto es = builder->createIntegerConstant(loc, i64Ty, size);
-      builder->create<fir::StoreOp>(loc, es, elementSize);
-
-      fir::runtime::CoarrayPutStrided(*builder, loc, imageNum, handle, offset,
-                                      remoteStride, currentImageBuffer,
-                                      currentImageStride, elementSize, extents);
-    } else {
-      // Getting the size in bytes of the lhs expression
-      mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
-      size_t size =
-          fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getBaseTypeOf(lhsExv),
-                                              *dl, builder->getKindMap())
-              .first;
-      auto sib = builder->createIntegerConstant(loc, i64Ty, size);
-      builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
-      fir::runtime::CoarrayPut(*builder, loc, imageNum, handle, offset,
-                               currentImageBuffer, sizeInBytes);
+    // Getting offset from the coarray  expression
+    mlir::Value offset;
+    if (coarrayHandle) {
+      offset = lhsCoarrayRef.has_value()
+                   ? Fortran::lower::genByteOffset(*this, assign.lhs, loc)
+                   : Fortran::lower::genByteOffset(*this, assign.rhs, loc);
     }
-  }
 
-  /// Generate an coarray assignment.
-  /// This is an assignment expression with corank > 0.
-  void
-  genGetCoarrayAssignment(const Fortran::evaluate::Assignment &assign,
-                          const Fortran::evaluate::CoarrayRef &coarrayRef) {
-    // Assignement of a coarray generate a call to prif_get[*] subroutine
-    mlir::Location loc = toLocation();
-    Fortran::lower::StatementContext stmtCtx;
-    std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
-        builder->getModule(), /*allowDefaultLayout*/ true);
-    fir::ExtendedValue rhsExv, lhsExv;
-    if (lowerToHighLevelFIR()) {
-      rhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.rhs,
-                                                    localSymbols, stmtCtx);
-      lhsExv = genExprAddr(assign.lhs, stmtCtx);
-    } else {
-      TODO(loc, "assignement with a coarray.");
-    }
-    // Getting the current_image_buffer
+    // Getting the current_image_buffer, which is a buffer that either contains
+    // the surce data to be copied (PUT) or is the destination memory data to be
+    // retrivied (GET).
     mlir::Value currentImageBuffer;
-    mlir::Value lhs = fir::getBase(lhsExv);
-    mlir::Type rhsBaseTy = fir::getBaseTypeOf(rhsExv);
-    mlir::Type lhsBaseTy = fir::getBaseTypeOf(lhsExv);
-    fir::SequenceType maybeLhsSeqType = mlir::dyn_cast<fir::SequenceType>(lhsBaseTy);
-    fir::SequenceType maybeRhsSeqType = mlir::dyn_cast<fir::SequenceType>(rhsBaseTy);
-    if (maybeRhsSeqType && !maybeLhsSeqType) {
+    if (lhsCoarrayRef.has_value() && (maybeLhsSeqType && !maybeRhsSeqType)) {
       mlir::Value initialValue =
-          fir::isa_char(lhs.getType())
-              ? lhs
+          fir::isa_char(fir::getBase(rhsExv).getType())
+              ? fir::getBase(rhsExv)
+              : fir::getBase(genExprBox(loc, assign.rhs, stmtCtx));
+      currentImageBuffer = genScalarToArray(loc, initialValue, lhsExv, stmtCtx);
+    } else if (rhsCoarrayRef.has_value() &&
+               (maybeRhsSeqType && !maybeLhsSeqType)) {
+      mlir::Value initialValue =
+          fir::isa_char(fir::getBase(lhsExv).getType())
+              ? fir::getBase(lhsExv)
               : fir::getBase(genExprBox(loc, assign.lhs, stmtCtx));
       currentImageBuffer = genScalarToArray(loc, initialValue, rhsExv, stmtCtx);
     } else {
+      mlir::Type sourceTy = lhsCoarrayRef.has_value()
+                                ? fir::getBase(lhsExv).getType()
+                                : fir::getBase(rhsExv).getType();
       mlir::Type ptrTy =
-          mlir::isa<fir::BaseBoxType>(lhs.getType())
+          mlir::isa<fir::BaseBoxType>(sourceTy)
               ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
               : (mlir::Type)fir::PointerType::get(builder->getNoneType());
       currentImageBuffer = builder->createTemporary(loc, ptrTy);
-      mlir::Value lhsPtr = builder->createConvert(loc, ptrTy, lhs);
-      builder->create<fir::StoreOp>(loc, lhsPtr, currentImageBuffer);
+      mlir::Value ptr = builder->createConvert(loc, ptrTy,
+                                               lhsCoarrayRef.has_value()
+                                                   ? fir::getBase(rhsExv)
+                                                   : fir::getBase(lhsExv));
+      builder->create<fir::StoreOp>(loc, ptr, currentImageBuffer);
     }
 
-    // Getting the coarray_handle entity from the left expression
-    mlir::Value handle =
-        fir::runtime::getCoarrayHandle(*builder, loc, fir::getBase(rhsExv));
+    // handle STAT from the CoarrayRef
+    auto statExpr = lhsCoarrayRef.has_value() ? lhsCoarrayRef.value().stat()
+                                              : rhsCoarrayRef.value().stat();
+    mlir::Value stat;
+    if (statExpr.has_value()) {
+      if (auto statRef{Fortran::evaluate::ExtractDataRef(statExpr.value())}) {
+        stat = fir::getBase(
+            getSymbolExtendedValue(statRef->GetLastSymbol(), nullptr));
+      }
+    }
+    if (!stat) {
+      stat = builder
+                 ->create<fir::AbsentOp>(
+                     loc, builder->getRefType(builder->getI32Type()))
+                 .getResult();
+    }
 
-    // Computing the image number from the cosubscripts
-    mlir::Type i32Ty = builder->getI32Type();
-    mlir::Value imageNum = builder->createTemporary(loc, i32Ty);
-    auto num = Fortran::lower::getImageIndexFromCosubscripts(
-        *this, loc, coarrayRef, handle);
-    builder->create<fir::StoreOp>(loc, num, imageNum);
-
-    // Getting offset from the LHS expression
-    mlir::Value offset = Fortran::lower::genByteOffset(*this, assign.rhs, loc);
+    // Absent ERRMSG (No specifier for ERRMSG into the image-selector)
+    mlir::Value errmsg = builder
+                             ->create<fir::AbsentOp>(
+                                 loc, fir::BoxType::get(builder->getNoneType()))
+                             .getResult();
 
     mlir::Type i64Ty = builder->getI64Type();
-    if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
-      // Handle strides information from subscript
-      auto [remoteStride, extents] = genStrideAndExtents(assign.rhs, loc);
-      mlir::Value currentImageStride = (maybeRhsSeqType && !maybeLhsSeqType)
-        ? genStrideAndExtents(fir::factory::createBoxValue(*builder, loc, currentImageBuffer), loc).first 
-        : genStrideAndExtents(assign.lhs, loc).first;
+    if (lhsCoarrayRef.has_value()) { // PUT operation
+      // Retrieving NOTIFY variable from lhsCoarrayRef if he's passed as
+      // argument on the image selector.
+      mlir::Value notifyPtr, notifyOffset, notifyCoarrayHandle;
+      if (auto notifyExpr = lhsCoarrayRef.value().notify()) {
+        notifyPtr = fir::getBase(Fortran::lower::convertExprToAddress(
+            loc, *this, notifyExpr.value(), localSymbols, stmtCtx));
+        notifyCoarrayHandle =
+            fir::runtime::getCoarrayHandle(*builder, loc, notifyPtr);
+        if (notifyCoarrayHandle)
+          notifyOffset =
+              Fortran::lower::genByteOffset(*this, notifyExpr.value(), loc);
+      }
+      if (std::get_if<Fortran::evaluate::ArrayRef>(
+              &lhsCoarrayRef.value().base().u) &&
+          lhsExv.rank() > 0) {
+        // Handle strides information from subscript
+        auto [remoteStride, extents] = genStrideAndExtents(assign.lhs, loc);
+        mlir::Value currentImageStride =
+            (!maybeRhsSeqType && maybeLhsSeqType)
+                ? genStrideAndExtents(fir::factory::createBoxValue(
+                                          *builder, loc, currentImageBuffer),
+                                      loc)
+                      .first
+                : genStrideAndExtents(assign.rhs, loc).first;
 
-      size_t size =
-          fir::getTypeSizeAndAlignmentOrCrash(
-              loc, fir::getElementTypeOf(rhsExv), *dl, builder->getKindMap())
-              .first;
+        // Getting the element size of the lhs expression
+        size_t size =
+            fir::getTypeSizeAndAlignmentOrCrash(
+                loc, fir::getElementTypeOf(rhsExv), *dl, builder->getKindMap())
+                .first;
+        mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
+        auto es = builder->createIntegerConstant(loc, i64Ty, size);
+        builder->create<fir::StoreOp>(loc, es, elementSize);
 
-      // Getting the element size of the lhs expression
-      mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
-      auto es = builder->createIntegerConstant(loc, i64Ty, size);
-      builder->create<fir::StoreOp>(loc, es, elementSize);
+        fir::runtime::CoarrayPutStrided(
+            *builder, loc, imageNum, coarrayAddr, coarrayHandle, offset,
+            remoteStride, currentImageBuffer, currentImageStride, elementSize,
+            extents, notifyPtr, notifyCoarrayHandle, notifyOffset, stat,
+            errmsg);
+      } else {
+        size_t size = fir::getTypeSizeAndAlignmentOrCrash(loc, lhsBaseTy, *dl,
+                                                          builder->getKindMap())
+                          .first;
+        auto sib = builder->createIntegerConstant(loc, i64Ty, size);
+        mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
+        builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
+        fir::runtime::CoarrayPut(*builder, loc, imageNum, coarrayAddr,
+                                 coarrayHandle, offset, currentImageBuffer,
+                                 sizeInBytes, notifyPtr, notifyCoarrayHandle,
+                                 notifyOffset, stat, errmsg);
+      }
+    } else { // GET operation
+      if (std::get_if<Fortran::evaluate::ArrayRef>(
+              &rhsCoarrayRef.value().base().u) &&
+          rhsExv.rank() > 0) {
+        // Handle strides information from subscript
+        auto [remoteStride, extents] = genStrideAndExtents(assign.rhs, loc);
+        mlir::Value currentImageStride =
+            (maybeRhsSeqType && !maybeLhsSeqType)
+                ? genStrideAndExtents(fir::factory::createBoxValue(
+                                          *builder, loc, currentImageBuffer),
+                                      loc)
+                      .first
+                : genStrideAndExtents(assign.lhs, loc).first;
 
-      fir::runtime::CoarrayGetStrided(*builder, loc, imageNum, handle, offset,
-                                      remoteStride, currentImageBuffer,
-                                      currentImageStride, elementSize, extents);
-    } else {
-      // Getting the size in bytes of the rhs expression
-      mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
-      size_t size =
-          fir::getTypeSizeAndAlignmentOrCrash(loc, fir::getBaseTypeOf(rhsExv),
-                                              *dl, builder->getKindMap())
-              .first;
-      auto sib = builder->createIntegerConstant(loc, i64Ty, size);
-      builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
-      fir::runtime::CoarrayGet(*builder, loc, imageNum, handle, offset,
-                               currentImageBuffer, sizeInBytes);
+        // Getting the element size of the lhs expression
+        size_t size =
+            fir::getTypeSizeAndAlignmentOrCrash(
+                loc, fir::getElementTypeOf(rhsExv), *dl, builder->getKindMap())
+                .first;
+        mlir::Value elementSize = builder->createTemporary(loc, i64Ty);
+        auto es = builder->createIntegerConstant(loc, i64Ty, size);
+        builder->create<fir::StoreOp>(loc, es, elementSize);
+        fir::runtime::CoarrayGetStrided(*builder, loc, imageNum, coarrayAddr,
+                                        coarrayHandle, offset, remoteStride,
+                                        currentImageBuffer, currentImageStride,
+                                        elementSize, extents, stat, errmsg);
+      } else {
+        size_t size = fir::getTypeSizeAndAlignmentOrCrash(loc, rhsBaseTy, *dl,
+                                                          builder->getKindMap())
+                          .first;
+        auto sib = builder->createIntegerConstant(loc, i64Ty, size);
+        mlir::Value sizeInBytes = builder->createTemporary(loc, i64Ty);
+        builder->create<fir::StoreOp>(loc, sib, sizeInBytes);
+        fir::runtime::CoarrayGet(*builder, loc, imageNum, coarrayAddr,
+                                 coarrayHandle, offset, currentImageBuffer,
+                                 sizeInBytes, stat, errmsg);
+      }
     }
   }
 
@@ -5682,12 +5720,10 @@ private:
     mlir::Location loc = toLocation();
 
     // Assignment to coarray entities
-    if (auto coarrayRef = Fortran::evaluate::ExtractCoarrayRef(assign.lhs)) {
-      genPutCoarrayAssignment(assign, coarrayRef.value());
-      return;
-    } else if (auto coarrayRef =
-                   Fortran::evaluate::ExtractCoarrayRef(assign.rhs)) {
-      genGetCoarrayAssignment(assign, coarrayRef.value());
+    auto lhsCoref = Fortran::evaluate::ExtractCoarrayRef(assign.lhs);
+    auto rhsCoref = Fortran::evaluate::ExtractCoarrayRef(assign.rhs);
+    if (lhsCoref.has_value() || rhsCoref.has_value()) {
+      genCoarrayAssignment(loc, assign);
       return;
     }
 
