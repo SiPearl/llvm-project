@@ -410,10 +410,10 @@ Fortran::lower::genCoarrayCoBounds(Fortran::lower::AbstractConverter &converter,
     ucobounds = builder.createTemporary(loc, arrayType);
 
     for (size_t i = 0; i < corank; i++) {
-      long int lcobound = 1, ucobound = -1; // default cobound value
       auto index =
           builder.createIntegerConstant(loc, builder.getIndexType(), i);
       // Lower cobounds
+      long int lcobound = 1; // default cobound value
       Fortran::semantics::Bound lbound = coshape[i].lbound();
       if (lbound.GetExplicit().has_value()) {
         auto b = Fortran::evaluate::ToInt64(lbound.GetExplicit().value());
@@ -426,6 +426,7 @@ Fortran::lower::genCoarrayCoBounds(Fortran::lower::AbstractConverter &converter,
       builder.create<fir::StoreOp>(loc, lcovalue, lcoaddr);
 
       // Upper cobounds
+      long int ucobound = lcobound; // default cobound value
       Fortran::semantics::Bound ubound = coshape[i].ubound();
       if (ubound.GetExplicit().has_value()) {
         auto b = Fortran::evaluate::ToInt64(ubound.GetExplicit().value());
