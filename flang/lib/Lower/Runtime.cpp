@@ -12,6 +12,7 @@
 #include "flang/Lower/OpenMP.h"
 #include "flang/Lower/StatementContext.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
+#include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
@@ -132,9 +133,14 @@ void Fortran::lower::genFailImageStatement(
     Fortran::lower::AbstractConverter &converter) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Location loc = converter.getCurrentLocation();
-  mlir::func::FuncOp callee =
-      fir::runtime::getRuntimeFunc<mkRTKey(FailImageStatement)>(loc, builder);
-  fir::CallOp::create(builder, loc, callee, mlir::ValueRange{});
+  if (converter.getFoldingContext().languageFeatures().IsEnabled(
+          Fortran::common::LanguageFeature::Coarray))
+    fir::runtime::genFailImageStatement(builder, loc);
+  else {
+    mlir::func::FuncOp callee =
+        fir::runtime::getRuntimeFunc<mkRTKey(FailImageStatement)>(loc, builder);
+    fir::CallOp::create(builder, loc, callee, mlir::ValueRange{});
+  }
   genUnreachable(builder, loc);
 }
 

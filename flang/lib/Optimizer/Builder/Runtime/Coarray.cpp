@@ -84,3 +84,33 @@ mlir::Value fir::runtime::getThisImage(fir::FirOpBuilder &builder,
   builder.create<fir::CallOp>(loc, funcOp, args);
   return builder.create<fir::LoadOp>(loc, result);
 }
+
+/// Generate Call to runtime prif_fail_image
+void fir::runtime::genFailImageStatement(fir::FirOpBuilder &builder,
+                                         mlir::Location loc) {
+  mlir::FunctionType ftype =
+      mlir::FunctionType::get(builder.getContext(), {}, {});
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("fail_image"), ftype);
+  builder.create<fir::CallOp>(loc, funcOp);
+}
+
+/// Generate Call to runtime prif_image_status
+mlir::Value fir::runtime::getImageStatus(fir::FirOpBuilder &builder,
+                                         mlir::Location loc, mlir::Value image,
+                                         mlir::Value team) {
+  mlir::Type refTy = builder.getRefType(builder.getI32Type());
+  mlir::Type boxTy = fir::BoxType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(refTy, boxTy, refTy);
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, PRIFNAME_SUB("image_status"), ftype);
+
+  mlir::Value result = builder.createTemporary(loc, builder.getI32Type());
+  if (!team)
+    team = builder.create<fir::AbsentOp>(loc, boxTy);
+
+  llvm::SmallVector<mlir::Value> args =
+      fir::runtime::createArguments(builder, loc, ftype, image, team, result);
+  builder.create<fir::CallOp>(loc, funcOp, args);
+  return builder.create<fir::LoadOp>(loc, result);
+}

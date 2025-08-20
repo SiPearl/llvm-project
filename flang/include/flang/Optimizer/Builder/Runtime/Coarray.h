@@ -49,5 +49,12 @@ mlir::Value getNumImagesWithTeam(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value getThisImage(fir::FirOpBuilder &builder, mlir::Location loc,
                          mlir::Value team = {});
 
+/// Generate Call to runtime prif_fail_image
+void genFailImageStatement(fir::FirOpBuilder &builder, mlir::Location loc);
+
+/// Generate Call to runtime prif_image_status
+mlir::Value getImageStatus(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value image, mlir::Value team = {});
+
 } // namespace fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H

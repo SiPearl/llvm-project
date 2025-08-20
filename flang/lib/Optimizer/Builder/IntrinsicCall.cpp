@@ -642,6 +642,9 @@ static constexpr IntrinsicHandler handlers[]{
     {"ieee_unordered", &I::genIeeeUnordered},
     {"ieee_value", &I::genIeeeValue},
     {"ieor", &I::genIeor},
+    {"image_status",
+     &I::genImageStatus,
+     {{{"image", asAddr}, {"team", asBox, handleDynamicOptional}}}},
     {"index",
      &I::genIndex,
      {{{"string", asAddr},
@@ -6320,6 +6323,16 @@ mlir::Value IntrinsicLibrary::genIeor(mlir::Type resultType,
   assert(args.size() == 2);
   return builder.createUnsigned<mlir::arith::XOrIOp>(loc, resultType, args[0],
                                                      args[1]);
+}
+
+// IMAGE_STATUS
+fir::ExtendedValue
+IntrinsicLibrary::genImageStatus(mlir::Type resultType,
+                                 llvm::ArrayRef<fir::ExtendedValue> args) {
+  checkCoarrayEnabled();
+  assert(args.size() == 2);
+  return fir::runtime::getImageStatus(builder, loc, fir::getBase(args[0]),
+                                      fir::getBase(args[1]));
 }
 
 // INDEX
