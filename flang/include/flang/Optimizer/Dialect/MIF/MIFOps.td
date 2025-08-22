@@ -37,13 +37,21 @@ def mif_InitOp : mif_Op<"init", []> {
 }
 
 def mif_StopOp : mif_Op<"stop", [AttrSizedOperandSegments]> {
-  let summary = "Operation that synchronizes all execution images, clean up the"
-                "parallel runtime environment, and terminates the program.";
+  let summary = "Initiates normal or error termination of the prorgram";
   let description = [{
-    This operation synchronizes all executing images, cleans up the parallel 
-    runtime environment, and terminates the program. Calls to this operation do 
-    not return. This operation supports both normal termination at the end of a
-    program, as well as any STOP statements from the user source code.
+    When `is_error` is false: 
+      This operation initiates normal termination for the calling image.
+      It synchronizes all executing images, cleans up the parallel runtime environment, 
+      and then terminates the program. 
+      Calls to this operation do not return. 
+      This operation supports both normal termination at the end of a
+      program, as well as any STOP statements from the user source code.
+    When `is_error` is true:
+      This operation initiates error termination for all images.
+      This operation immediately terminates the program. 
+      Calls to this operation do not return. 
+      This operation supports error termination, such as from any
+      ERROR STOP statements in the user program.
   }];
 
   let arguments = (ins Optional<BoolLike>:$quiet,
