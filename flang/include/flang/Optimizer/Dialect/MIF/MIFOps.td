@@ -376,7 +376,7 @@ def mif_SyncMemoryOp : mif_Op<"sync_memory", []> {
 
 def mif_SyncTeamOp : mif_Op<"sync_team", []> {
   let summary =
-      "Performs a synchronization of the team, identified by `team_value`";
+      "Performs a synchronization of the team, identified by `team`";
 
   let arguments = (ins fir_BoxType:$team,
                    ins Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
