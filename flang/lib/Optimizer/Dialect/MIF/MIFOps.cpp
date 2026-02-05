@@ -46,14 +46,25 @@ llvm::LogicalResult mif::NumImagesOp::verify() {
 
 void mif::ThisImageOp::build(mlir::OpBuilder &builder,
                              mlir::OperationState &result, mlir::Value coarray,
+                             mlir::Value dim, mlir::Value team) {
+  mlir::Type resultTy = builder.getI32Type();
+  build(builder, result, resultTy, coarray, dim, team);
+}
+
+void mif::ThisImageOp::build(mlir::OpBuilder &builder,
+                             mlir::OperationState &result, mlir::Value coarray,
                              mlir::Value team) {
-  build(builder, result, coarray, /*dim*/ mlir::Value{}, team);
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Type resultTy = fir::BoxType::get(
+      fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
+  build(builder, result, resultTy, coarray, /*dim*/ mlir::Value{}, team);
 }
 
 void mif::ThisImageOp::build(mlir::OpBuilder &builder,
                              mlir::OperationState &result, mlir::Value team) {
-  build(builder, result, /*coarray*/ mlir::Value{}, /*dim*/ mlir::Value{},
-        team);
+  mlir::Type resultTy = builder.getI32Type();
+  build(builder, result, resultTy, /*coarray*/ mlir::Value{},
+        /*dim*/ mlir::Value{}, team);
 }
 
 llvm::LogicalResult mif::ThisImageOp::verify() {
@@ -203,6 +214,97 @@ static void printChangeTeamOpBody(mlir::OpAsmPrinter &p, mif::ChangeTeamOp op,
                                   mlir::Region &body) {
   p.printRegion(op.getRegion(), /*printEntryBlockArgs=*/true,
                 /*printBlockTerminators=*/true);
+}
+
+//===----------------------------------------------------------------------===//
+// AllocaCoarrayOp
+//===----------------------------------------------------------------------===//
+
+void mif::AllocaCoarrayOp::build(mlir::OpBuilder &builder,
+                                 mlir::OperationState &result, mlir::Value box,
+                                 llvm::StringRef symName,
+                                 mlir::DenseI64ArrayAttr lcbs,
+                                 mlir::DenseI64ArrayAttr ucbs, mlir::Value stat,
+                                 mlir::Value errmsg) {
+  mlir::StringAttr nameAttr = builder.getStringAttr(symName);
+  build(builder, result, nameAttr, box, lcbs, ucbs, stat, errmsg);
+}
+
+void mif::AllocaCoarrayOp::build(mlir::OpBuilder &builder,
+                                 mlir::OperationState &result, mlir::Value box,
+                                 llvm::StringRef symName,
+                                 mlir::DenseI64ArrayAttr lcbs,
+                                 mlir::DenseI64ArrayAttr ucbs) {
+  build(builder, result, symName, box, lcbs, ucbs, /*stat*/ mlir::Value{},
+        /*errmsg*/ mlir::Value{});
+}
+
+//===----------------------------------------------------------------------===//
+// LcoboundOp
+//===----------------------------------------------------------------------===//
+
+void mif::LcoboundOp::build(mlir::OpBuilder &builder,
+                            mlir::OperationState &result, mlir::Value coarray,
+                            mlir::Value dim) {
+  // By default the result type is an I64
+  mlir::Type resultTy = builder.getI64Type();
+  build(builder, result, resultTy, coarray, dim);
+}
+
+void mif::LcoboundOp::build(mlir::OpBuilder &builder,
+                            mlir::OperationState &result, mlir::Value coarray) {
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Type resultTy = fir::BoxType::get(
+      fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
+  build(builder, result, resultTy, coarray, /*dim*/ mlir::Value{});
+}
+
+//===----------------------------------------------------------------------===//
+// UcoboundOp
+//===----------------------------------------------------------------------===//
+
+void mif::UcoboundOp::build(mlir::OpBuilder &builder,
+                            mlir::OperationState &result, mlir::Value coarray,
+                            mlir::Value dim) {
+  // By default the result type is an I64
+  mlir::Type resultTy = builder.getI64Type();
+  build(builder, result, resultTy, coarray, dim);
+}
+
+void mif::UcoboundOp::build(mlir::OpBuilder &builder,
+                            mlir::OperationState &result, mlir::Value coarray) {
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Type resultTy = fir::BoxType::get(
+      fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
+  build(builder, result, resultTy, coarray, /*dim*/ mlir::Value{});
+}
+
+//===----------------------------------------------------------------------===//
+// CoshapeOp
+//===----------------------------------------------------------------------===//
+
+void mif::CoshapeOp::build(mlir::OpBuilder &builder,
+                           mlir::OperationState &result, mlir::Value coarray) {
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Type resultTy = fir::BoxType::get(
+      fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
+  build(builder, result, resultTy, coarray);
+}
+
+//===----------------------------------------------------------------------===//
+// ImageIndexOp
+//===----------------------------------------------------------------------===//
+
+void mif::ImageIndexOp::build(mlir::OpBuilder &builder,
+                              mlir::OperationState &result, mlir::Value coarray,
+                              mlir::Value sub, mlir::Value teamArg) {
+  bool isTeamNumber =
+      teamArg && fir::unwrapPassByRefType(teamArg.getType()).isInteger();
+  if (!isTeamNumber)
+    build(builder, result, coarray, sub, teamArg, /*team*/ mlir::Value{});
+  else
+    build(builder, result, coarray, sub, /*team_number*/ mlir::Value{},
+          teamArg);
 }
 
 #define GET_OP_CLASSES
