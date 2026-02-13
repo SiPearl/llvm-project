@@ -118,7 +118,7 @@ std::int64_t getCorankFromAlloca(fir::FirOpBuilder &builder, mlir::Location loc,
   std::string uniqName = mif::getFullUniqName(coarray);
   std::int64_t corank = 0;
   if (!uniqName.empty())
-    builder.getModule().walk([&](mif::AllocaCoarrayOp alloc) {
+    builder.getModule().walk([&](mif::AllocCoarrayOp alloc) {
       if (uniqName == alloc.getUniqName().str())
         corank = alloc.getLcobounds().size();
     });
@@ -148,7 +148,7 @@ static mlir::Value getNumImages(fir::FirOpBuilder &builder,
 
 static std::pair<mlir::Value, mlir::Value>
 genCoBounds(fir::FirOpBuilder &builder, mlir::Location loc,
-            mif::AllocaCoarrayOp op) {
+            mif::AllocCoarrayOp op) {
   mlir::Value ucobounds, lcobounds;
   mlir::DenseI64ArrayAttr lcbsAttr = op.getLcoboundsAttr();
   mlir::DenseI64ArrayAttr ucbsAttr = op.getUcoboundsAttr();
@@ -1106,16 +1106,16 @@ struct MIFTeamNumberOpConversion
 
 /// Convert mif.alloca_coarray operation to runtime call of
 /// 'prif_allocate_coarray'
-struct MIFAllocaCoarrayOpConversion
-    : public mlir::OpRewritePattern<mif::AllocaCoarrayOp> {
+struct MIFAllocCoarrayOpConversion
+    : public mlir::OpRewritePattern<mif::AllocCoarrayOp> {
   using OpRewritePattern::OpRewritePattern;
 
-  MIFAllocaCoarrayOpConversion(mlir::MLIRContext *context, mlir::DataLayout *dl,
-                               const fir::LLVMTypeConverter *typeConverter)
+  MIFAllocCoarrayOpConversion(mlir::MLIRContext *context, mlir::DataLayout *dl,
+                              const fir::LLVMTypeConverter *typeConverter)
       : OpRewritePattern(context), dl{dl}, typeConverter{typeConverter} {}
 
   mlir::LogicalResult
-  matchAndRewrite(mif::AllocaCoarrayOp op,
+  matchAndRewrite(mif::AllocCoarrayOp op,
                   mlir::PatternRewriter &rewriter) const override {
     auto mod = op->template getParentOfType<mlir::ModuleOp>();
     fir::FirOpBuilder builder(rewriter, mod);
@@ -1142,7 +1142,7 @@ struct MIFAllocaCoarrayOpConversion
         builder.createFunction(loc, getPRIFProcName("allocate_coarray"), ftype);
 
     // TODO: Handle final_func ?
-    mlir::Value finalFunc = fir::UndefOp::create(builder, loc, procTypePtr);
+    mlir::Value finalFunc = fir::ZeroOp::create(builder, loc, procTypePtr);
     // Allocate instance of prif_coarray_handle type based on the PRIF
     // specification.
     mlir::Type handleTy = getCoarrayHandleType(builder, loc);
@@ -1179,68 +1179,14 @@ private:
   const fir::LLVMTypeConverter *typeConverter;
 };
 
-/// Convert mif.alloca operation to runtime call of 'prif_allocate'
-struct MIFAllocaOpConversion : public mlir::OpRewritePattern<mif::AllocaOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  MIFAllocaOpConversion(mlir::MLIRContext *context, mlir::DataLayout *dl,
-                        const fir::LLVMTypeConverter *typeConverter)
-      : OpRewritePattern(context), dl{dl}, typeConverter{typeConverter} {}
-
-  mlir::LogicalResult
-  matchAndRewrite(mif::AllocaOp op,
-                  mlir::PatternRewriter &rewriter) const override {
-    auto mod = op->template getParentOfType<mlir::ModuleOp>();
-    fir::FirOpBuilder builder(rewriter, mod);
-    mlir::Location loc = op.getLoc();
-
-    mlir::Type i64Ty = builder.getI64Type();
-    mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
-
-    mlir::FunctionType ftype =
-        mlir::FunctionType::get(builder.getContext(),
-                                /*inputs*/
-                                {builder.getRefType(i64Ty), ptrTy,
-                                 getPRIFStatType(builder), errmsgTy, errmsgTy},
-                                /*results*/ {});
-    mlir::func::FuncOp funcOp =
-        builder.createFunction(loc, getPRIFProcName("allocate"), ftype);
-
-    mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
-    mlir::Value addrCvt =
-        fir::ConvertOp::create(builder, loc, ptrTy, op.getBox());
-    fir::StoreOp::create(builder, loc, addrCvt, allocMem);
-
-    mlir::Value sizeInBytes =
-        getSizeInBytes(builder, loc, mod, dl, typeConverter, op.getBox());
-    mlir::Value stat = op.getStat();
-    if (!stat)
-      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
-    auto [errmsgArg, errmsgAllocArg] =
-        genErrmsgPRIF(builder, loc, op.getErrmsg());
-
-    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
-        builder, loc, ftype, sizeInBytes, allocMem, stat, errmsgArg,
-        errmsgAllocArg);
-    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
-
-    rewriter.replaceOp(op, callOp);
-    return mlir::success();
-  }
-
-private:
-  mlir::DataLayout *dl;
-  const fir::LLVMTypeConverter *typeConverter;
-};
 /// Convert mif.dealloca_coarray operation to runtime call of
 /// 'prif_deallocate_coarray'
-struct MIFDeallocaCoarrayOpConversion
-    : public mlir::OpRewritePattern<mif::DeallocaCoarrayOp> {
+struct MIFDeallocCoarrayOpConversion
+    : public mlir::OpRewritePattern<mif::DeallocCoarrayOp> {
   using OpRewritePattern::OpRewritePattern;
 
   mlir::LogicalResult
-  matchAndRewrite(mif::DeallocaCoarrayOp op,
+  matchAndRewrite(mif::DeallocCoarrayOp op,
                   mlir::PatternRewriter &rewriter) const override {
     auto mod = op->template getParentOfType<mlir::ModuleOp>();
     fir::FirOpBuilder builder(rewriter, mod);
@@ -1264,41 +1210,6 @@ struct MIFDeallocaCoarrayOpConversion
         genErrmsgPRIF(builder, loc, op.getErrmsg());
     llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
         builder, loc, ftype, coarrayHandle, stat, errmsgArg, errmsgAllocArg);
-    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
-    rewriter.replaceOp(op, callOp);
-    return mlir::success();
-  }
-};
-
-/// Convert mif.dealloca operation to runtime call of 'prif_deallocate'
-struct MIFDeallocaOpConversion
-    : public mlir::OpRewritePattern<mif::DeallocaOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  mlir::LogicalResult
-  matchAndRewrite(mif::DeallocaOp op,
-                  mlir::PatternRewriter &rewriter) const override {
-    auto mod = op->template getParentOfType<mlir::ModuleOp>();
-    fir::FirOpBuilder builder(rewriter, mod);
-    mlir::Location loc = op.getLoc();
-
-    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
-    mlir::Type refTy = fir::PointerType::get(builder.getNoneType());
-    mlir::FunctionType ftype = mlir::FunctionType::get(
-        builder.getContext(),
-        /*inputs*/
-        {refTy, getPRIFStatType(builder), errmsgTy, errmsgTy},
-        /*results*/ {});
-    mlir::func::FuncOp funcOp =
-        builder.createFunction(loc, getPRIFProcName("deallocate"), ftype);
-
-    mlir::Value stat = op.getStat();
-    if (!stat)
-      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
-    auto [errmsgArg, errmsgAllocArg] =
-        genErrmsgPRIF(builder, loc, op.getErrmsg());
-    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
-        builder, loc, ftype, op.getAddr(), stat, errmsgArg, errmsgAllocArg);
     fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
     rewriter.replaceOp(op, callOp);
     return mlir::success();
@@ -1523,8 +1434,8 @@ public:
 void mif::populateMIFOpConversionPatterns(
     const fir::LLVMTypeConverter &converter, mlir::DataLayout &dl,
     mlir::RewritePatternSet &patterns) {
-  patterns.insert<MIFAllocaOpConversion, MIFAllocaCoarrayOpConversion>(
-      patterns.getContext(), &dl, &converter);
+  patterns.insert<MIFAllocCoarrayOpConversion>(patterns.getContext(), &dl,
+                                               &converter);
   patterns.insert<
       MIFInitOpConversion, MIFThisImageOpConversion, MIFNumImagesOpConversion,
       MIFSyncAllOpConversion, MIFSyncImagesOpConversion,
@@ -1532,7 +1443,7 @@ void mif::populateMIFOpConversionPatterns(
       MIFCoBroadcastOpConversion, MIFCoMaxOpConversion, MIFCoMinOpConversion,
       MIFCoSumOpConversion, MIFFormTeamOpConversion, MIFChangeTeamOpConversion,
       MIFEndTeamOpConversion, MIFGetTeamOpConversion, MIFTeamNumberOpConversion,
-      MIFDeallocaCoarrayOpConversion, MIFDeallocaOpConversion,
-      MIFCoshapeOpConversion, MIFLcoboundOpConversion, MIFUcoboundOpConversion,
+      MIFDeallocCoarrayOpConversion, MIFCoshapeOpConversion,
+      MIFLcoboundOpConversion, MIFUcoboundOpConversion,
       MIFImageIndexOpConversion>(patterns.getContext());
 }
