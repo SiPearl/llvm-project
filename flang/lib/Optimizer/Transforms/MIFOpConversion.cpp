@@ -130,7 +130,7 @@ std::int64_t getCorankFromAlloca(fir::FirOpBuilder &builder, mlir::Location loc,
 }
 
 // Function to generate the PRIF runtime function call to retrieve
-// the global image number (without team and coarray in argument);
+// the number of images in the current team
 static mlir::Value getNumImages(fir::FirOpBuilder &builder,
                                 mlir::Location loc) {
   mlir::Type i32Ty = builder.getI32Type();
