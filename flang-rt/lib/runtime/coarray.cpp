@@ -29,6 +29,8 @@ void RTDEF(ComputeLastUcobound)(
   else if (index < num_images)
     ucobounds_ptr[corank - 1] =
         (num_images / index) + (num_images % index != 0);
+  else
+    ucobounds_ptr[corank - 1] = lcobounds_ptr[corank - 1];
 }
 
 RT_EXT_API_GROUP_END
