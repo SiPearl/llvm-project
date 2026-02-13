@@ -622,7 +622,7 @@ def mif_DeallocaCoarrayOp
 def mif_DeallocaOp
     : mif_Op<"dealloca", [AttrSizedOperandSegments,
                           MemoryEffects<[MemFree<DefaultResource>]>]> {
-  let summary = "Perform the deallocation of a coarray";
+  let summary = "Perform the deallocation of memory allocated by `mif_AllocaOp`";
   let description = [{
     This call releases memory allocated by `mif_AllocaOp`.
   }];
