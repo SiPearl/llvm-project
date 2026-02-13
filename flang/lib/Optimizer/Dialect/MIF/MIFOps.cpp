@@ -217,24 +217,24 @@ static void printChangeTeamOpBody(mlir::OpAsmPrinter &p, mif::ChangeTeamOp op,
 }
 
 //===----------------------------------------------------------------------===//
-// AllocaCoarrayOp
+// AllocCoarrayOp
 //===----------------------------------------------------------------------===//
 
-void mif::AllocaCoarrayOp::build(mlir::OpBuilder &builder,
-                                 mlir::OperationState &result, mlir::Value box,
-                                 llvm::StringRef symName,
-                                 mlir::DenseI64ArrayAttr lcbs,
-                                 mlir::DenseI64ArrayAttr ucbs, mlir::Value stat,
-                                 mlir::Value errmsg) {
+void mif::AllocCoarrayOp::build(mlir::OpBuilder &builder,
+                                mlir::OperationState &result, mlir::Value box,
+                                llvm::StringRef symName,
+                                mlir::DenseI64ArrayAttr lcbs,
+                                mlir::DenseI64ArrayAttr ucbs, mlir::Value stat,
+                                mlir::Value errmsg) {
   mlir::StringAttr nameAttr = builder.getStringAttr(symName);
   build(builder, result, nameAttr, box, lcbs, ucbs, stat, errmsg);
 }
 
-void mif::AllocaCoarrayOp::build(mlir::OpBuilder &builder,
-                                 mlir::OperationState &result, mlir::Value box,
-                                 llvm::StringRef symName,
-                                 mlir::DenseI64ArrayAttr lcbs,
-                                 mlir::DenseI64ArrayAttr ucbs) {
+void mif::AllocCoarrayOp::build(mlir::OpBuilder &builder,
+                                mlir::OperationState &result, mlir::Value box,
+                                llvm::StringRef symName,
+                                mlir::DenseI64ArrayAttr lcbs,
+                                mlir::DenseI64ArrayAttr ucbs) {
   build(builder, result, symName, box, lcbs, ucbs, /*stat*/ mlir::Value{},
         /*errmsg*/ mlir::Value{});
 }

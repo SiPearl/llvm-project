@@ -37,14 +37,14 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %23 = fir.address_of(@_QFEa) : !fir.ref<i32>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %23 {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
+    mif.alloc_coarray %23 {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
     %24:2 = hlfir.declare %23 {uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
     %25 = fir.address_of(@_QFEa2) : !fir.ref<!fir.box<!fir.heap<i32>>>
     %26:2 = hlfir.declare %25 {fortran_attrs = #fir.var_attrs<allocatable>, uniq_name = "_QFEa2"} : (!fir.ref<!fir.box<!fir.heap<i32>>>) -> (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<!fir.box<!fir.heap<i32>>>)
     %27 = fir.address_of(@_QFEb) : !fir.ref<f32>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %27 {lcobounds = array<i64: 3, 1, 1>, ucobounds = array<i64: 4, 5, -1>, uniq_name = "_QFEb"} : (!fir.ref<f32>) -> ()
+    mif.alloc_coarray %27 {lcobounds = array<i64: 3, 1, 1>, ucobounds = array<i64: 4, 5, -1>, uniq_name = "_QFEb"} : (!fir.ref<f32>) -> ()
     %28:2 = hlfir.declare %27 {uniq_name = "_QFEb"} : (!fir.ref<f32>) -> (!fir.ref<f32>, !fir.ref<f32>)
     %29 = fir.address_of(@_QFEb2) : !fir.ref<!fir.box<!fir.heap<f32>>>
     %30:2 = hlfir.declare %29 {fortran_attrs = #fir.var_attrs<allocatable>, uniq_name = "_QFEb2"} : (!fir.ref<!fir.box<!fir.heap<f32>>>) -> (!fir.ref<!fir.box<!fir.heap<f32>>>, !fir.ref<!fir.box<!fir.heap<f32>>>)
@@ -52,7 +52,7 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %c10 = arith.constant 10 : index
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %31 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEc"} : (!fir.ref<!fir.char<1,10>>) -> ()
+    mif.alloc_coarray %31 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEc"} : (!fir.ref<!fir.char<1,10>>) -> ()
     %32:2 = hlfir.declare %31 typeparams %c10 {uniq_name = "_QFEc"} : (!fir.ref<!fir.char<1,10>>, index) -> (!fir.ref<!fir.char<1,10>>, !fir.ref<!fir.char<1,10>>)
     %33 = fir.address_of(@_QFEc2) : !fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>
     %34:2 = hlfir.declare %33 {fortran_attrs = #fir.var_attrs<allocatable>, uniq_name = "_QFEc2"} : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>) -> (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>)
@@ -61,7 +61,7 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %37 = fir.address_of(@_QFEd2) : !fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %37 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEd2"} : (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>) -> ()
+    mif.alloc_coarray %37 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEd2"} : (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>) -> ()
     %38:2 = hlfir.declare %37 {uniq_name = "_QFEd2"} : (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>) -> (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>, !fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>)
     %39 = fir.address_of(@_QFE.c.my_type2) : !fir.ref<!fir.array<1x!fir.type<_QM__fortran_type_infoTcomponent{name:!fir.box<!fir.ptr<!fir.char<1,?>>>,genre:i8,category:i8,kind:i8,rank:i8,memoryspace:i8,__padding0:!fir.array<3xi8>,offset:i64,characterlen:!fir.type<_QM__fortran_type_infoTvalue{genre:i8,__padding0:!fir.array<7xi8>,value:i64}>,derived:!fir.box<!fir.ptr<!fir.type<_QM__fortran_type_infoTderivedtype{binding:!fir.box<!fir.ptr<!fir.array<?x!fir.type<_QM__fortran_type_infoTbinding{proc:!fir.type<_QM__fortran_builtinsT__builtin_c_funptr{__address:i64}>,name:!fir.box<!fir.ptr<!fir.char<1,?>>>}>>>>,name:!fir.box<!fir.ptr<!fir.char<1,?>>>,sizeinbytes:i64,uninstantiated:!fir.box<!fir.ptr<!fir.type<_QM__fortran_type_infoTderivedtype>>>,kindparameter:!fir.box<!fir.ptr<!fir.array<?xi64>>>,lenparameterkind:!fir.box<!fir.ptr<!fir.array<?xi8>>>,component:!fir.box<!fir.ptr<!fir.array<?x!fir.type<_QM__fortran_type_infoTcomponent>>>>,procptr:!fir.box<!fir.ptr<!fir.array<?x!fir.type<_QM__fortran_type_infoTprocptrcomponent{name:!fir.box<!fir.ptr<!fir.char<1,?>>>,offset:i64,initialization:!fir.type<_QM__fortran_builtinsT__builtin_c_funptr{__address:i64}>}>>>>,special:!fir.box<!fir.ptr<!fir.array<?x!fir.type<_QM__fortran_type_infoTspecialbinding{which:i8,isargdescriptorset:i8,istypebound:i8,specialcaseflag:i8,__padding0:!fir.array<4xi8>,proc:!fir.type<_QM__fortran_builtinsT__builtin_c_funptr{__address:i64}>}>>>>,specialbitset:i32,hasparent:i8,noinitializationneeded:i8,nodestructionneeded:i8,nofinalizationneeded:i8,nodefinedassignment:i8,__padding0:!fir.array<3xi8>}>>>,lenvalue:!fir.box<!fir.ptr<!fir.array<?x!fir.type<_QM__fortran_type_infoTvalue{genre:i8,__padding0:!fir.array<7xi8>,value:i64}>>>>,bounds:!fir.box<!fir.ptr<!fir.array<?x?x!fir.type<_QM__fortran_type_infoTvalue{genre:i8,__padding0:!fir.array<7xi8>,value:i64}>>>>,initialization:!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>}>>>
     %c0 = arith.constant 0 : index
@@ -87,11 +87,11 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %54 = fir.absent !fir.box<none>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %26#0 errmsg %54 {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa2"} : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.box<none>) -> ()
+    mif.alloc_coarray %26#0 errmsg %54 {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa2"} : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.box<none>) -> ()
     %55 = fir.absent !fir.box<none>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %30#0 errmsg %55 {lcobounds = array<i64: 3, 1, 1>, ucobounds = array<i64: 4, 5, -1>, uniq_name = "_QFEb2"} : (!fir.ref<!fir.box<!fir.heap<f32>>>, !fir.box<none>) -> ()
+    mif.alloc_coarray %30#0 errmsg %55 {lcobounds = array<i64: 3, 1, 1>, ucobounds = array<i64: 4, 5, -1>, uniq_name = "_QFEb2"} : (!fir.ref<!fir.box<!fir.heap<f32>>>, !fir.box<none>) -> ()
     %c100_i32 = arith.constant 100 : i32
     %56 = fir.absent !fir.box<none>
     %c1_i32 = arith.constant 1 : i32
@@ -109,13 +109,13 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     fir.call @_FortranAAllocatableSetBounds(%59, %c0_i32_10, %60, %61) fastmath<contract> : (!fir.ref<!fir.box<none>>, i32, i64, i64) -> ()
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %34#0 errmsg %56 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEc2"} : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.box<none>) -> ()
+    mif.alloc_coarray %34#0 errmsg %56 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEc2"} : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.box<none>) -> ()
     %62 = fir.absent !fir.box<none>
     %63 = hlfir.designate %36#0{"z"}   : (!fir.ref<!fir.type<_QFTmy_type{x:i32,y:!fir.box<!fir.heap<!fir.array<?xi32>>>,z:!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>}>>) -> !fir.ref<!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>>
     %64 = hlfir.designate %63{"co"}   {fortran_attrs = #fir.var_attrs<allocatable>} : (!fir.ref<!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>>) -> !fir.ref<!fir.box<!fir.heap<i32>>>
 
 // CHECK: fir.call @_QMprifPprif_allocate_coarray({{.*}}) : (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>, !fir.ref<i64>, !fir.boxproc<(!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>) -> ()>, !fir.box<none>, !fir.ptr<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.alloca_coarray %64 errmsg %62 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEd.z.co"} : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.box<none>) -> ()
+    mif.alloc_coarray %64 errmsg %62 {lcobounds = array<i64: 1>, ucobounds = array<i64: -1>, uniq_name = "_QFEd.z.co"} : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.box<none>) -> ()
     %65 = fir.absent !fir.box<none>
     %66 = hlfir.designate %38#0{"w"}   {fortran_attrs = #fir.var_attrs<allocatable>} : (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>) -> !fir.ref<!fir.box<!fir.heap<!fir.array<?xi32>>>>
     %c1_11 = arith.constant 1 : index
@@ -126,29 +126,23 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %69 = fir.convert %c100_i32_12 : (i32) -> i64
     fir.call @_FortranAAllocatableSetBounds(%67, %c0_i32_13, %68, %69) fastmath<contract> : (!fir.ref<!fir.box<none>>, i32, i64, i64) -> ()
 
-// CHECK: fir.call @_QMprifPprif_allocate
-    mif.alloca %66 stat %5 errmsg %65 : (!fir.ref<!fir.box<!fir.heap<!fir.array<?xi32>>>>, !fir.ref<i32>, !fir.box<none>) -> ()
     %70 = fir.absent !fir.box<none>
+// CHECK: fir.call @_QMprifPprif_deallocate_coarray({{.*}}) : (!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
+    mif.dealloc_coarray %26#0 stat %4 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
 
 // CHECK: fir.call @_QMprifPprif_deallocate_coarray({{.*}}) : (!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.dealloca_coarray %26#0 stat %4 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
+    mif.dealloc_coarray %30#0 stat %3 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<f32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
 
 // CHECK: fir.call @_QMprifPprif_deallocate_coarray({{.*}}) : (!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.dealloca_coarray %30#0 stat %3 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<f32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
-
-// CHECK: fir.call @_QMprifPprif_deallocate_coarray({{.*}}) : (!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.dealloca_coarray %34#0 stat %2 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.ref<i32>, !fir.box<none>) -> ()
+    mif.dealloc_coarray %34#0 stat %2 errmsg %70 : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.ref<i32>, !fir.box<none>) -> ()
     %71 = fir.absent !fir.box<none>
     %72 = hlfir.designate %36#0{"z"}   : (!fir.ref<!fir.type<_QFTmy_type{x:i32,y:!fir.box<!fir.heap<!fir.array<?xi32>>>,z:!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>}>>) -> !fir.ref<!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>>
     %73 = hlfir.designate %72{"co"}   {fortran_attrs = #fir.var_attrs<allocatable>} : (!fir.ref<!fir.type<_QFTmy_type2{co:!fir.box<!fir.heap<i32>>}>>) -> !fir.ref<!fir.box<!fir.heap<i32>>>
 
 // CHECK: fir.call @_QMprifPprif_deallocate_coarray({{.*}}) : (!fir.box<none>, !fir.ref<i32>, !fir.box<!fir.char<1,?>>, !fir.box<!fir.char<1,?>>) -> ()
-    mif.dealloca_coarray %73 stat %1 errmsg %71 : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
+    mif.dealloc_coarray %73 stat %1 errmsg %71 : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<i32>, !fir.box<none>) -> ()
     %74 = fir.absent !fir.box<none>
     %75 = hlfir.designate %38#0{"w"}   {fortran_attrs = #fir.var_attrs<allocatable>} : (!fir.ref<!fir.type<_QFTmy_type3{w:!fir.box<!fir.heap<!fir.array<?xi32>>>}>>) -> !fir.ref<!fir.box<!fir.heap<!fir.array<?xi32>>>>
-
-// CHECK: fir.call @_QMprifPprif_deallocate
-    mif.dealloca %75 stat %0 errmsg %74 : (!fir.ref<!fir.box<!fir.heap<!fir.array<?xi32>>>>, !fir.ref<i32>, !fir.box<none>) -> ()
     return
   }
 }

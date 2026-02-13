@@ -486,12 +486,8 @@ private:
     std::optional<Fortran::evaluate::DataRef> dataRef =
         !expr ? std::nullopt : Fortran::evaluate::ExtractDataRef(expr);
     bool isCoarrayAllocate = alloc.hasCoarraySpec();
-    bool isCoarrayComponentAllocate =
-        dataRef.has_value() &&
-        !Fortran::evaluate::IsCoarray(alloc.getSymbol()) &&
-        Fortran::evaluate::IsCoarray(dataRef->GetFirstSymbol());
 
-    if (isCoarrayAllocate || isCoarrayComponentAllocate) {
+    if (isCoarrayAllocate) {
       errorManager.genStatCheck(builder, loc);
       genAllocateObjectInit(box, allocatorIdx);
       Fortran::lower::StatementContext stmtCtx;
@@ -499,15 +495,9 @@ private:
       genSetDeferredLengthParameters(alloc, box);
       genAllocateObjectBounds(alloc, box);
       mlir::Value stat;
-      if (isCoarrayAllocate)
-        stat = Fortran::lower::genAllocateCoarray(
-            converter, loc, alloc.getSymbol(), box.getAddr(),
-            alloc.getCoarraySpec(), errorManager.errMsgAddr);
-      else {
-        stat = builder.createTemporary(loc, builder.getI32Type());
-        mif::AllocaOp::create(builder, loc, box.getAddr(), stat,
-                              errorManager.errMsgAddr);
-      }
+      stat = Fortran::lower::genAllocateCoarray(
+          converter, loc, alloc.getSymbol(), box.getAddr(),
+          alloc.getCoarraySpec(), errorManager.errMsgAddr);
       fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
       postAllocationAction(alloc, box);
       errorManager.assignStat(builder, loc, stat);
@@ -930,19 +920,12 @@ genDeallocate(fir::FirOpBuilder &builder,
   std::optional<Fortran::evaluate::DataRef> dataRef =
       !allocExpr ? std::nullopt : Fortran::evaluate::ExtractDataRef(allocExpr);
   bool isCoarraySymbol = symbol && Fortran::evaluate::IsCoarray(*symbol);
-  bool isCoarrayComponentSymbol =
-      dataRef.has_value() && !isCoarraySymbol &&
-      Fortran::evaluate::IsCoarray(dataRef->GetFirstSymbol());
 
   // Deallocate coarray or coarray component
-  if (isCoarraySymbol || isCoarrayComponentSymbol) {
+  if (isCoarraySymbol) {
     mlir::Value ret = builder.createTemporary(loc, builder.getI32Type());
-    if (isCoarraySymbol)
-      mif::DeallocaCoarrayOp::create(builder, loc, box.getAddr(), ret,
-                                     errorManager.errMsgAddr);
-    else
-      mif::DeallocaOp::create(builder, loc, box.getAddr(), ret,
-                              errorManager.errMsgAddr);
+    mif::DeallocCoarrayOp::create(builder, loc, box.getAddr(), ret,
+                                  errorManager.errMsgAddr);
     ret = fir::LoadOp::create(builder, loc, ret);
     fir::factory::syncMutableBoxFromIRBox(builder, loc, box);
     if (symbol)

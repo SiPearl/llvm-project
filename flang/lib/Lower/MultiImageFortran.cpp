@@ -382,8 +382,8 @@ mlir::Value Fortran::lower::genAllocateCoarray(
   std::string uniqName = mif::getFullUniqName(addr);
   if (uniqName.empty())
     uniqName = converter.mangleName(sym);
-  mif::AllocaCoarrayOp::create(builder, loc, addr, uniqName, lcobounds,
-                               ucobounds, stat, errmsg);
+  mif::AllocCoarrayOp::create(builder, loc, addr, uniqName, lcobounds,
+                              ucobounds, stat, errmsg);
   return stat;
 }
 
