@@ -921,7 +921,7 @@ genDeallocate(fir::FirOpBuilder &builder,
       !allocExpr ? std::nullopt : Fortran::evaluate::ExtractDataRef(allocExpr);
   bool isCoarraySymbol = symbol && Fortran::evaluate::IsCoarray(*symbol);
 
-  // Deallocate coarray or coarray component
+  // Deallocate coarray
   if (isCoarraySymbol) {
     mlir::Value ret = builder.createTemporary(loc, builder.getI32Type());
     mif::DeallocCoarrayOp::create(builder, loc, box.getAddr(), ret,
