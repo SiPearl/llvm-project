@@ -152,6 +152,7 @@ def mif_ImageIndexOp : mif_Op<"image_index", [AttrSizedOperandSegments]> {
 
   let results = (outs I32);
 
+  let hasVerifier = 1;
   let assemblyFormat = [{
     `coarray` $coarray `sub` $sub 
     ( `team` $team^ )? 
@@ -181,6 +182,7 @@ def mif_LcoboundOp : mif_Op<"lcobound", [NoMemoryEffect]> {
   let builders = [OpBuilder<(ins "mlir::Value":$coarray, "mlir::Value":$dim)>,
                   OpBuilder<(ins "mlir::Value":$coarray)>];
 
+  let hasVerifier = 1;
   let assemblyFormat = [{
     `coarray` $coarray 
     ( `dim` $dim^ )? 
@@ -209,6 +211,7 @@ def mif_UcoboundOp : mif_Op<"ucobound", [NoMemoryEffect]> {
   let builders = [OpBuilder<(ins "mlir::Value":$coarray, "mlir::Value":$dim)>,
                   OpBuilder<(ins "mlir::Value":$coarray)>];
 
+  let hasVerifier = 1;
   let assemblyFormat = [{
     `coarray` $coarray 
     ( `dim` $dim^ )? 
@@ -228,6 +231,7 @@ def mif_CoshapeOp : mif_Op<"coshape", [NoMemoryEffect]> {
   let builders = [OpBuilder<(ins "mlir::Value":$coarray)>];
   let results = (outs AnyBoxedArray);
 
+  let hasVerifier = 1;
   let assemblyFormat = [{
     `coarray` $coarray 
     attr-dict `:` functional-type(operands, results)
@@ -571,6 +575,7 @@ def mif_AllocCoarrayOp
                       "mlir::DenseI64ArrayAttr":$lcobounds,
                       "mlir::DenseI64ArrayAttr":$ucobounds)>];
 
+  let hasVerifier = 1;
   let assemblyFormat = [{
     $box 
     (`stat` $stat^ )?

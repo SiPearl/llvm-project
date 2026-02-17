@@ -5,7 +5,7 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %0 = fir.dummy_scope : !fir.dscope
     %1 = fir.address_of(@_QFEa) : !fir.ref<i32>
     mif.alloc_coarray %1 {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
-    %2:2 = hlfir.declare %1 {uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
+    %2:2 = hlfir.declare %1 {fir.corank = 2 : i32, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
     %3 = fir.alloca i32 {bindc_name = "i", uniq_name = "_QFEi"}
     %4:2 = hlfir.declare %3 {uniq_name = "_QFEi"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
     %c2 = arith.constant 2 : index

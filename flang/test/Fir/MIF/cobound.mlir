@@ -4,57 +4,66 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
 // CHECK-LABEL: func.func @_QQmain
   func.func @_QQmain() attributes {fir.bindc_name = "TEST"} {
     %0 = fir.dummy_scope : !fir.dscope
-    %1 = fir.address_of(@_QFEa) : !fir.ref<i32>
-    mif.alloc_coarray %1 {lcobounds = array<i64: 1, 3, 1>, ucobounds = array<i64: 2, 5, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
-    %2:2 = hlfir.declare %1 {uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
+    %1 = fir.address_of(@_QFEa) : !fir.ref<!fir.box<!fir.heap<i32>>>
+    %2:2 = hlfir.declare %1 {fortran_attrs = #fir.var_attrs<allocatable>, uniq_name = "_QFEa"} : (!fir.ref<!fir.box<!fir.heap<i32>>>) -> (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.ref<!fir.box<!fir.heap<i32>>>)
     %c3 = arith.constant 3 : index
     %3 = fir.alloca !fir.array<3xi32> {bindc_name = "res1", uniq_name = "_QFEres1"}
     %4 = fir.shape %c3 : (index) -> !fir.shape<1>
     %5:2 = hlfir.declare %3(%4) {uniq_name = "_QFEres1"} : (!fir.ref<!fir.array<3xi32>>, !fir.shape<1>) -> (!fir.ref<!fir.array<3xi32>>, !fir.ref<!fir.array<3xi32>>)
     %6 = fir.alloca i32 {bindc_name = "res2", uniq_name = "_QFEres2"}
     %7:2 = hlfir.declare %6 {uniq_name = "_QFEres2"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
+    %8 = fir.absent !fir.box<none>
+    mif.alloc_coarray %2#0 errmsg %8 {lcobounds = array<i64: 1, 3, 1>, ucobounds = array<i64: 2, 5, -1>, uniq_name = "_QFEa"} : (!fir.ref<!fir.box<!fir.heap<i32>>>, !fir.box<none>) -> ()
+    %9 = fir.load %2#0 : !fir.ref<!fir.box<!fir.heap<i32>>>
+    %10 = fir.box_addr %9 {fir.corank = 3 : i32} : (!fir.box<!fir.heap<i32>>) -> !fir.heap<i32>
 // CHECK: fir.call @_QMprifPprif_lcobound_no_dim
-    %8 = mif.lcobound coarray %2#0 : (!fir.ref<i32>) -> !fir.box<!fir.array<?xi64>>
-    %9:2 = hlfir.declare %8 {uniq_name = ".tmp.intrinsic_result"} : (!fir.box<!fir.array<?xi64>>) -> (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>)
+    %11 = mif.lcobound coarray %10 : (!fir.heap<i32>) -> !fir.box<!fir.array<?xi64>>
+    %12:2 = hlfir.declare %11 {uniq_name = ".tmp.intrinsic_result"} : (!fir.box<!fir.array<?xi64>>) -> (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>)
     %false = arith.constant false
-    %10 = hlfir.as_expr %9#0 move %false : (!fir.box<!fir.array<?xi64>>, i1) -> !hlfir.expr<?xi64>
+    %13 = hlfir.as_expr %12#0 move %false : (!fir.box<!fir.array<?xi64>>, i1) -> !hlfir.expr<?xi64>
     %c0 = arith.constant 0 : index
-    %11:3 = fir.box_dims %9#0, %c0 : (!fir.box<!fir.array<?xi64>>, index) -> (index, index, index)
-    %12 = fir.shape %11#1 : (index) -> !fir.shape<1>
-    %13 = hlfir.elemental %12 unordered : (!fir.shape<1>) -> !hlfir.expr<?xi32> {
+    %14:3 = fir.box_dims %12#0, %c0 : (!fir.box<!fir.array<?xi64>>, index) -> (index, index, index)
+    %15 = fir.shape %14#1 : (index) -> !fir.shape<1>
+    %16 = hlfir.elemental %15 unordered : (!fir.shape<1>) -> !hlfir.expr<?xi32> {
     ^bb0(%arg0: index):
-      %22 = hlfir.apply %10, %arg0 : (!hlfir.expr<?xi64>, index) -> i64
-      %23 = fir.convert %22 : (i64) -> i32
-      hlfir.yield_element %23 : i32
+      %31 = hlfir.apply %13, %arg0 : (!hlfir.expr<?xi64>, index) -> i64
+      %32 = fir.convert %31 : (i64) -> i32
+      hlfir.yield_element %32 : i32
     }
-    hlfir.assign %13 to %5#0 : !hlfir.expr<?xi32>, !fir.ref<!fir.array<3xi32>>
-    hlfir.destroy %13 : !hlfir.expr<?xi32>
-    hlfir.destroy %10 : !hlfir.expr<?xi64>
+    hlfir.assign %16 to %5#0 : !hlfir.expr<?xi32>, !fir.ref<!fir.array<3xi32>>
+    hlfir.destroy %16 : !hlfir.expr<?xi32>
+    hlfir.destroy %13 : !hlfir.expr<?xi64>
     %c2_i32 = arith.constant 2 : i32
+    %17 = fir.load %2#0 : !fir.ref<!fir.box<!fir.heap<i32>>>
+    %18 = fir.box_addr %17 {fir.corank = 3 : i32} : (!fir.box<!fir.heap<i32>>) -> !fir.heap<i32>
 // CHECK: fir.call @_QMprifPprif_lcobound_with_dim
-    %14 = mif.lcobound coarray %2#0 dim %c2_i32 : (!fir.ref<i32>, i32) -> i32
-    hlfir.assign %14 to %7#0 : i32, !fir.ref<i32>
+    %19 = mif.lcobound coarray %18 dim %c2_i32 : (!fir.heap<i32>, i32) -> i32
+    hlfir.assign %19 to %7#0 : i32, !fir.ref<i32>
+    %20 = fir.load %2#0 : !fir.ref<!fir.box<!fir.heap<i32>>>
+    %21 = fir.box_addr %20 {fir.corank = 3 : i32} : (!fir.box<!fir.heap<i32>>) -> !fir.heap<i32>
 // CHECK: fir.call @_QMprifPprif_ucobound_no_dim
-    %15 = mif.ucobound coarray %2#0 : (!fir.ref<i32>) -> !fir.box<!fir.array<?xi64>>
-    %16:2 = hlfir.declare %15 {uniq_name = ".tmp.intrinsic_result"} : (!fir.box<!fir.array<?xi64>>) -> (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>)
+    %22 = mif.ucobound coarray %21 : (!fir.heap<i32>) -> !fir.box<!fir.array<?xi64>>
+    %23:2 = hlfir.declare %22 {uniq_name = ".tmp.intrinsic_result"} : (!fir.box<!fir.array<?xi64>>) -> (!fir.box<!fir.array<?xi64>>, !fir.box<!fir.array<?xi64>>)
     %false_0 = arith.constant false
-    %17 = hlfir.as_expr %16#0 move %false_0 : (!fir.box<!fir.array<?xi64>>, i1) -> !hlfir.expr<?xi64>
+    %24 = hlfir.as_expr %23#0 move %false_0 : (!fir.box<!fir.array<?xi64>>, i1) -> !hlfir.expr<?xi64>
     %c0_1 = arith.constant 0 : index
-    %18:3 = fir.box_dims %16#0, %c0_1 : (!fir.box<!fir.array<?xi64>>, index) -> (index, index, index)
-    %19 = fir.shape %18#1 : (index) -> !fir.shape<1>
-    %20 = hlfir.elemental %19 unordered : (!fir.shape<1>) -> !hlfir.expr<?xi32> {
+    %25:3 = fir.box_dims %23#0, %c0_1 : (!fir.box<!fir.array<?xi64>>, index) -> (index, index, index)
+    %26 = fir.shape %25#1 : (index) -> !fir.shape<1>
+    %27 = hlfir.elemental %26 unordered : (!fir.shape<1>) -> !hlfir.expr<?xi32> {
     ^bb0(%arg0: index):
-      %22 = hlfir.apply %17, %arg0 : (!hlfir.expr<?xi64>, index) -> i64
-      %23 = fir.convert %22 : (i64) -> i32
-      hlfir.yield_element %23 : i32
+      %31 = hlfir.apply %24, %arg0 : (!hlfir.expr<?xi64>, index) -> i64
+      %32 = fir.convert %31 : (i64) -> i32
+      hlfir.yield_element %32 : i32
     }
-    hlfir.assign %20 to %5#0 : !hlfir.expr<?xi32>, !fir.ref<!fir.array<3xi32>>
-    hlfir.destroy %20 : !hlfir.expr<?xi32>
-    hlfir.destroy %17 : !hlfir.expr<?xi64>
+    hlfir.assign %27 to %5#0 : !hlfir.expr<?xi32>, !fir.ref<!fir.array<3xi32>>
+    hlfir.destroy %27 : !hlfir.expr<?xi32>
+    hlfir.destroy %24 : !hlfir.expr<?xi64>
     %c2_i32_2 = arith.constant 2 : i32
+    %28 = fir.load %2#0 : !fir.ref<!fir.box<!fir.heap<i32>>>
+    %29 = fir.box_addr %28 {fir.corank = 3 : i32} : (!fir.box<!fir.heap<i32>>) -> !fir.heap<i32>
 // CHECK: fir.call @_QMprifPprif_ucobound_with_dim
-    %21 = mif.ucobound coarray %2#0 dim %c2_i32_2 : (!fir.ref<i32>, i32) -> i32
-    hlfir.assign %21 to %7#0 : i32, !fir.ref<i32>
+    %30 = mif.ucobound coarray %29 dim %c2_i32_2 : (!fir.heap<i32>, i32) -> i32
+    hlfir.assign %30 to %7#0 : i32, !fir.ref<i32>
     return
   }
 }
