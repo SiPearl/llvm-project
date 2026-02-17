@@ -6,7 +6,7 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<!llvm.ptr<270> = dense<32> : vec
     %0 = fir.dummy_scope : !fir.dscope
     %1 = fir.address_of(@_QFEa) : !fir.ref<i32>
     mif.alloc_coarray %1 {lcobounds = array<i64: 1, 3, 1>, ucobounds = array<i64: 2, 5, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
-    %2:2 = hlfir.declare %1 {uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
+    %2:2 = hlfir.declare %1 {fir.corank = 2 : i32, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
     %3 = fir.address_of(@_QM__fortran_builtinsEC__builtin_atomic_int_kind) : !fir.ref<i32>
     %4:2 = hlfir.declare %3 {fortran_attrs = #fir.var_attrs<parameter>, uniq_name = "_QM__fortran_builtinsEC__builtin_atomic_int_kind"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
     %5 = fir.address_of(@_QM__fortran_builtinsEC__builtin_atomic_logical_kind) : !fir.ref<i32>

@@ -11,10 +11,6 @@ program alloc_test
     type(my_type2) :: z
   end type
   
-  type :: my_type3
-    integer, allocatable :: w(:)
-  end type
-
   ! CHECK: %[[VAL_1:.*]] = fir.address_of(@_QFEa) : !fir.ref<i32>
   ! CHECK: mif.alloc_coarray %[[VAL_1]] {lcobounds = array<i64: 1, 1>, ucobounds = array<i64: 2, -1>, uniq_name = "_QFEa"} : (!fir.ref<i32>) -> ()
   
@@ -33,7 +29,6 @@ program alloc_test
   ! CHECK: %[[VAL_6:.*]]:2 = hlfir.declare %[[ADDR_3:.*]] {fortran_attrs = #fir.var_attrs<allocatable>, uniq_name = "_QFEc2"} : (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>) -> (!fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>, !fir.ref<!fir.box<!fir.heap<!fir.array<?x!fir.char<1,?>>>>>)
   character(len=10) :: c[*]
   type(my_type) :: d
-  type(my_type3) :: d2[*]
 
   real, allocatable :: b2[:,:,:]
   character(len=:), allocatable :: c2(:)[:]

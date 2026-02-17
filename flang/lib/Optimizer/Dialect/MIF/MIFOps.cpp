@@ -10,6 +10,7 @@
 #include "flang/Optimizer/Builder/Todo.h"
 #include "flang/Optimizer/Dialect/FIRAttr.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
+#include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Optimizer/Dialect/MIF/MIFDialect.h"
 #include "flang/Optimizer/HLFIR/HLFIROps.h"
@@ -17,6 +18,43 @@
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/SmallVector.h"
 #include <tuple>
+
+template <class T>
+static llvm::LogicalResult checkCorankAttr(T op) {
+  mlir::Value coarray = op.getCoarray();
+  if (!coarray.getDefiningOp()->hasAttr(fir::getCorankAttrName()))
+    return op.emitOpError("`coarray` must have a corank integer attribute.");
+  return mlir::success();
+}
+
+// Function used to check if a type has POINTER or ALLOCATABLE component.
+// Currently an allocation of coarray with this kind of component are not yet
+// supported.
+static bool hasAllocatableOrPointerComponent(mlir::Type type) {
+  type = fir::unwrapPassByRefType(type);
+  if (fir::isa_box_type(type))
+    return hasAllocatableOrPointerComponent(type);
+  if (auto recType = mlir::dyn_cast<fir::RecordType>(type)) {
+    for (auto field : recType.getTypeList()) {
+      mlir::Type fieldType = fir::unwrapPassByRefType(field.second);
+      if (mlir::isa<fir::PointerType>(fieldType))
+        return true;
+      if (mlir::isa<fir::HeapType>(fieldType))
+        return true;
+      if (auto fieldRecType = mlir::dyn_cast<fir::RecordType>(fieldType))
+        return hasAllocatableOrPointerComponent(fieldRecType);
+      if (auto seqTy = mlir::dyn_cast<fir::SequenceType>(fieldType)) {
+        if (seqTy.hasUnknownShape() || seqTy.hasDynamicExtents())
+          return true;
+        mlir::Type eleTy = seqTy.getEleTy();
+        if (mlir::isa<fir::PointerType>(eleTy) ||
+            mlir::isa<fir::HeapType>(eleTy))
+          return true;
+      }
+    }
+  }
+  return false;
+}
 
 //===----------------------------------------------------------------------===//
 // NumImagesOp
@@ -71,6 +109,8 @@ llvm::LogicalResult mif::ThisImageOp::verify() {
   if (getDim() && !getCoarray())
     return emitOpError(
         "`dim` must be provied at the same time as the `coarray` argument.");
+  if (getCoarray())
+    return checkCorankAttr(*this);
   return mlir::success();
 }
 
@@ -239,6 +279,14 @@ void mif::AllocCoarrayOp::build(mlir::OpBuilder &builder,
         /*errmsg*/ mlir::Value{});
 }
 
+llvm::LogicalResult mif::AllocCoarrayOp::verify() {
+  if (hasAllocatableOrPointerComponent(getBox().getType()))
+    TODO(getLoc(),
+         "Derived type coarray with at least one ALLOCATABLE or POINTER "
+         "component");
+  return mlir::success();
+}
+
 //===----------------------------------------------------------------------===//
 // LcoboundOp
 //===----------------------------------------------------------------------===//
@@ -257,6 +305,12 @@ void mif::LcoboundOp::build(mlir::OpBuilder &builder,
   mlir::Type resultTy = fir::BoxType::get(
       fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
   build(builder, result, resultTy, coarray, /*dim*/ mlir::Value{});
+}
+
+llvm::LogicalResult mif::LcoboundOp::verify() {
+  if (getCoarray())
+    return checkCorankAttr(*this);
+  return mlir::success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -279,6 +333,12 @@ void mif::UcoboundOp::build(mlir::OpBuilder &builder,
   build(builder, result, resultTy, coarray, /*dim*/ mlir::Value{});
 }
 
+llvm::LogicalResult mif::UcoboundOp::verify() {
+  if (getCoarray())
+    return checkCorankAttr(*this);
+  return mlir::success();
+}
+
 //===----------------------------------------------------------------------===//
 // CoshapeOp
 //===----------------------------------------------------------------------===//
@@ -289,6 +349,12 @@ void mif::CoshapeOp::build(mlir::OpBuilder &builder,
   mlir::Type resultTy = fir::BoxType::get(
       fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, i64Ty));
   build(builder, result, resultTy, coarray);
+}
+
+llvm::LogicalResult mif::CoshapeOp::verify() {
+  if (getCoarray())
+    return checkCorankAttr(*this);
+  return mlir::success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -305,6 +371,12 @@ void mif::ImageIndexOp::build(mlir::OpBuilder &builder,
   else
     build(builder, result, coarray, sub, /*team_number*/ mlir::Value{},
           teamArg);
+}
+
+llvm::LogicalResult mif::ImageIndexOp::verify() {
+  if (getCoarray())
+    return checkCorankAttr(*this);
+  return mlir::success();
 }
 
 #define GET_OP_CLASSES

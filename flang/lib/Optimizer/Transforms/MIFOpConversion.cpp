@@ -113,20 +113,13 @@ mlir::Value getCoarrayHandle(fir::FirOpBuilder &builder, mlir::Location loc,
                   "Unable to locate the coarray handle for this argument.");
 }
 
-std::int64_t getCorankFromAlloca(fir::FirOpBuilder &builder, mlir::Location loc,
-                                 mlir::Value coarray) {
-  std::string uniqName = mif::getFullUniqName(coarray);
+std::int64_t getCorankFromAttr(fir::FirOpBuilder &builder, mlir::Location loc,
+                               mlir::Value coarray) {
   std::int64_t corank = 0;
-  if (!uniqName.empty())
-    builder.getModule().walk([&](mif::AllocCoarrayOp alloc) {
-      if (uniqName == alloc.getUniqName().str())
-        corank = alloc.getLcobounds().size();
-    });
-  if (corank)
-    return corank;
-
-  mlir::emitError(coarray.getLoc(),
-                  "Unable to locate the coarray allocation op.");
+  if (auto intAttr = coarray.getDefiningOp()->getAttrOfType<mlir::IntegerAttr>(
+          fir::getCorankAttrName()))
+    corank = intAttr.getInt();
+  return corank;
 }
 
 // Function to generate the PRIF runtime function call to retrieve
@@ -542,8 +535,7 @@ struct MIFThisImageOpConversion
         if (result.getType() != op.getType())
           result = builder.createConvert(loc, op.getType(), result);
       } else {
-        std::int64_t corank =
-            getCorankFromAlloca(builder, loc, op.getCoarray());
+        std::int64_t corank = getCorankFromAttr(builder, loc, op.getCoarray());
         mlir::Type resTy = fir::SequenceType::get({corank}, i64Ty);
         // Need to embox the array
         result = builder.createBox(loc, builder.createTemporary(loc, resTy));
@@ -1126,7 +1118,7 @@ struct MIFAllocCoarrayOpConversion
     mlir::Type boxTy = fir::BoxType::get(builder.getNoneType());
     mlir::Type errmsgTy = getPRIFErrmsgType(builder);
     mlir::Type coboundsTy = genBoxedSequenceType(i64Ty);
-    // Type of the procedure pointed by final_func.
+    // Type of the procedure pointed by final_func will be the following :
     mlir::Type procTypePtr = fir::BoxProcType::get(
         builder.getContext(),
         mlir::FunctionType::get(builder.getContext(),
@@ -1135,14 +1127,18 @@ struct MIFAllocCoarrayOpConversion
     mlir::FunctionType ftype = mlir::FunctionType::get(
         builder.getContext(),
         /*inputs*/
-        {coboundsTy, coboundsTy, builder.getRefType(i64Ty), procTypePtr, boxTy,
-         ptrTy, getPRIFStatType(builder), errmsgTy, errmsgTy},
+        {coboundsTy, coboundsTy, builder.getRefType(i64Ty),
+         builder.getRefType(builder.getNoneType()), boxTy, ptrTy,
+         getPRIFStatType(builder), errmsgTy, errmsgTy},
         /*results*/ {});
     mlir::func::FuncOp funcOp =
         builder.createFunction(loc, getPRIFProcName("allocate_coarray"), ftype);
 
-    // TODO: Handle final_func ?
-    mlir::Value finalFunc = fir::ZeroOp::create(builder, loc, procTypePtr);
+    // TODO: Handle final_func if needed
+    mlir::Value finalFunc = builder.createTemporary(loc, procTypePtr);
+    mlir::Value nullBoxProc =
+        fir::factory::createNullBoxProc(builder, loc, procTypePtr);
+    fir::StoreOp::create(builder, loc, nullBoxProc, finalFunc);
     // Allocate instance of prif_coarray_handle type based on the PRIF
     // specification.
     mlir::Type handleTy = getCoarrayHandleType(builder, loc);
@@ -1237,7 +1233,7 @@ struct MIFCoshapeOpConversion : public mlir::OpRewritePattern<mif::CoshapeOp> {
         builder.createFunction(loc, getPRIFProcName("coshape"), ftype);
 
     mlir::Value coarrayHandle = getCoarrayHandle(builder, loc, op.getCoarray());
-    std::int64_t corank = getCorankFromAlloca(builder, loc, op.getCoarray());
+    std::int64_t corank = getCorankFromAttr(builder, loc, op.getCoarray());
     mlir::Type resultType = fir::SequenceType::get(
         static_cast<fir::SequenceType::Extent>(corank), i64Ty);
     mlir::Value result =
@@ -1294,7 +1290,7 @@ mlir::LogicalResult CoboundOpConversion(T op, mlir::PatternRewriter &rewriter,
     mlir::func::FuncOp funcOp =
         builder.createFunction(loc, getPRIFProcName(prefix + "_no_dim"), ftype);
 
-    std::int64_t corank = getCorankFromAlloca(builder, loc, op.getCoarray());
+    std::int64_t corank = getCorankFromAttr(builder, loc, op.getCoarray());
     mlir::Type resultType = fir::SequenceType::get(
         static_cast<fir::SequenceType::Extent>(corank), i64Ty);
     mlir::Value result =
