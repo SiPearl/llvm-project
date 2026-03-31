@@ -508,6 +508,14 @@ struct VPlanTransforms {
   /// are only valid for a subset of VFs in Range, Range.End is updated.
   static void createPartialReductions(VPlan &Plan, VPCostContext &CostCtx,
                                       VFRange &Range);
+
+  /// Try to set the effective vector step to \p Step (which must be
+  /// lower than VF * IC at runtime) and mask of any inactive lanes.
+  /// This will cause wasted lanes and is only usefull for hardware
+  /// exploration etc.!
+  /// TODO: Do not mix with epilogue vect.! It will break!
+  static bool tryToLowerEffectiveVectorUse(VPlan &Plan, VPValue *TmpHeaderMask,
+                                           unsigned StepDivisor);
 };
 
 } // namespace llvm

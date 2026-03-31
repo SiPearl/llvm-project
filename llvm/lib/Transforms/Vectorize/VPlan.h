@@ -4600,6 +4600,10 @@ class VPlan {
   /// Represents the loop-invariant VF * UF of the vector loop region.
   VPSymbolicValue VFxUF;
 
+  /// Represents the loop-invariant step by which the loop IV is allowed
+  /// to advance if the aliasing checks have been folded into the step.
+  VPValue *VectorIVStep = nullptr;
+
   /// Contains all the external definitions created for this VPlan, as a mapping
   /// from IR Values to VPIRValues.
   SmallMapVector<Value *, VPIRValue *, 16> LiveIns;
@@ -4744,6 +4748,24 @@ public:
 
   LLVMContext &getContext() const {
     return getScalarHeader()->getIRBasicBlock()->getContext();
+  }
+
+  /// Returns the step by which the IV should incr. in every iteration
+  /// of the loop.
+  VPValue *getVectorIVStep() {
+    // TODO: Maybe just always use the CIV increments non-CIV operand?
+    // This avoids having to keep track of it seperately.
+    assert(!VectorIVStep || VectorIVStep->getDefiningRecipe());
+    return VectorIVStep ? VectorIVStep : &getVFxUF();
+  }
+
+  /// Set's the step that the vector IV is allowed to increment by.
+  void setVectorIVStep(VPValue *Step) { VectorIVStep = Step; }
+
+  // TODO: Use backedge value of CIV as check.
+  bool hasConstantStep() const {
+    VPlan *Plan = const_cast<VPlan *>(this);
+    return Plan->getVectorIVStep() == &Plan->getVFxUF();
   }
 
   void addVF(ElementCount VF) { VFs.insert(VF); }

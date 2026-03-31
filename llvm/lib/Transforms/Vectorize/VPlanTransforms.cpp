@@ -32,13 +32,19 @@
 #include "llvm/Analysis/InstSimplifyFolder.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryLocation.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolutionPatternMatch.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/VectorUtils.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
@@ -6287,4 +6293,112 @@ void VPlanTransforms::createPartialReductions(VPlan &Plan,
   for (auto &[Phi, Chains] : ChainsByPhi)
     for (const VPPartialReductionChain &Chain : Chains)
       transformToPartialReduction(Chain, CostCtx.Types, Plan, Phi);
+}
+
+static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
+                                 VPActiveLaneMaskPHIRecipe *&ALM) {
+  // Look for recipes that block step-changing transformations, either by
+  // relying on a step of VFxUF or by relying on the fact that a normal
+  // active-lane mask can only be non-fully-one in the last iteration.
+  auto Iter = vp_depth_first_deep(Plan.getEntry());
+  for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(Iter))
+    for (VPRecipeBase &R : *VPBB) {
+      // A similar opt. is possible for EVL based vectorization, and the
+      // legality checks are basically the same, but the transformation
+      // itself would need to be completely different.
+      if (!RecurrencesAllowed && isa<VPFirstOrderRecurrencePHIRecipe>(&R)) {
+        LLVM_DEBUG({
+          dbgs() << "LV: Cannot change step because of recipe: ";
+          R.dump();
+        });
+        return false;
+      }
+
+      // Sometimes, out-of-loop reductions rely on the fact that they
+      // were able to assume that all-but-the-last iteration always
+      // has a all-one active lane mask. This assumption does not hold
+      // anymore.
+      if (auto *RedPhi = dyn_cast<VPReductionPHIRecipe>(&R);
+          RedPhi && !RedPhi->isInLoop()) {
+        auto *Sel = dyn_cast<VPInstruction>(&RedPhi->getBackedgeRecipe());
+        if (!Sel || Sel->getOpcode() != Instruction::Select ||
+            !isa_and_nonnull<VPActiveLaneMaskPHIRecipe>(
+                Sel->getOperand(0)->getDefiningRecipe()) ||
+            Sel->getOperand(2) != RedPhi->getVPSingleValue()) {
+          LLVM_DEBUG(dbgs() << "LV: Cannot change step because of out-of-loop "
+                               "reduction: ";
+                     RedPhi->getVPSingleValue()->dump());
+          return false;
+        }
+      }
+
+      if (isa<VPActiveLaneMaskPHIRecipe>(&R))
+        ALM = cast<VPActiveLaneMaskPHIRecipe>(&R);
+    }
+
+  return true;
+}
+
+bool VPlanTransforms::tryToLowerEffectiveVectorUse(VPlan &Plan,
+                                                   VPValue *TmpHeaderMask,
+                                                   unsigned StepDivisor) {
+  VPRegionBlock *VectorLoop = Plan.getVectorLoopRegion();
+  Type *CIVTy = VectorLoop->getCanonicalIVType();
+  VPTypeAnalysis TypeInfo(Plan);
+  assert(Plan.hasConstantStep());
+  assert(isPowerOf2_32(StepDivisor) &&
+         "Divisions by a non-power of 2 would require recalculation of the "
+         "VectorTripCount!");
+  VPActiveLaneMaskPHIRecipe *ALM = nullptr;
+  if (!canChangeStepInVPlan(Plan, false, ALM))
+    return false;
+
+  if (ALM) {
+    LLVM_DEBUG(dbgs() << "LV: Tail-folding and effective-vector-use lowering "
+                         "at the same time not yet implemented.\n");
+    return false;
+  }
+
+  // Caculate the new step by which the vector loop CIV will increment.
+  VPBasicBlock *Preheader = VectorLoop->getPreheaderVPBB();
+  VPBuilder Builder(Preheader, Preheader->end());
+  VPValue *NewStep = Builder.createNaryOp(
+      Instruction::UDiv,
+      {&Plan.getVFxUF(),
+       Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, StepDivisor, false))},
+      VPIRFlags::getDefaultFlags(Instruction::UDiv), DebugLoc(),
+      "half.vf.step");
+
+  // Ensure the step is always non-zero.
+  VPValue *Zero = Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, 0)),
+          *One = Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, 1));
+  NewStep = Builder.createSelect(
+      Builder.createICmp(CmpInst::ICMP_EQ, NewStep, Zero), One, NewStep);
+
+  // Update the increment.
+  auto *IVInc = dyn_cast<VPInstruction>(
+      &VectorLoop->getCanonicalIV()->getBackedgeRecipe());
+  assert(IVInc && IVInc->getOpcode() == Instruction::Add &&
+         IVInc->getOperand(0) == VectorLoop->getCanonicalIV() &&
+         IVInc->getOperand(1) == &Plan.getVFxUF());
+  IVInc->setOperand(1, NewStep);
+
+  // Update the masking.
+  VPValue *ALMMultiplier =
+      Plan.getConstantInt(VectorLoop->getCanonicalIVType(), 1);
+  VPValue *NewHeaderMask = Builder.createNaryOp(
+      VPInstruction::ActiveLaneMask,
+      {Builder.createOverflowingOp(
+           VPInstruction::CanonicalIVIncrementForPart,
+           {VectorLoop->getCanonicalIV()->getStartValue(), NewStep},
+           {false, false}, {}, "half.vf.start"),
+       Plan.getTripCount(), ALMMultiplier},
+      DebugLoc(), "half.vf.mask");
+  TmpHeaderMask->replaceAllUsesWith(NewHeaderMask);
+
+  // Housekeeping for later execution steps.
+  TmpHeaderMask->getDefiningRecipe()->eraseFromParent();
+  Plan.setVectorIVStep(NewStep);
+  assert(!Plan.hasConstantStep());
+  return true;
 }

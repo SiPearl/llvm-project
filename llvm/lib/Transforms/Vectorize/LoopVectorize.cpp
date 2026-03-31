@@ -134,6 +134,8 @@
 #include "llvm/Support/InstructionCost.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/NativeFormatting.h"
+#include "llvm/Support/TypeSize.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/InjectTLIMappings.h"
@@ -421,6 +423,12 @@ static cl::opt<bool> EnableEarlyExitVectorization(
 static cl::opt<bool> ConsiderRegPressure(
     "vectorizer-consider-reg-pressure", cl::init(false), cl::Hidden,
     cl::desc("Discard VFs if their register pressure is too high."));
+
+static cl::opt<unsigned> AddArtificialVFDivisor(
+    "vectorizer-div-vf-by", cl::init(0), cl::Hidden,
+    cl::desc("Purposefully degrade performance by dividing the VF by this "
+             "constant (vectors will still have a size of VF, but half (for a "
+             "divisor of 2) will be masked out)."));
 
 // Likelyhood of bypassing the vectorized loop because there are zero trips left
 // after prolog. See `emitIterationCountCheck`.
@@ -1343,7 +1351,7 @@ public:
   void setTailFoldingStyle(bool IsScalableVF, unsigned UserIC) {
     assert(ChosenTailFoldingStyle == TailFoldingStyle::None &&
            "Tail folding must not be selected yet.");
-    if (!Legal->canFoldTailByMasking()) {
+    if (!Legal->canFoldTailByMasking() || AddArtificialVFDivisor) {
       ChosenTailFoldingStyle = TailFoldingStyle::None;
       return;
     }
@@ -1404,7 +1412,8 @@ public:
   /// for any reason, e.g. because tail folding now requires a predicate
   /// or because the block in the original loop was predicated.
   bool blockNeedsPredicationForAnyReason(BasicBlock *BB) const {
-    return foldTailByMasking() || Legal->blockNeedsPredication(BB);
+    return foldTailByMasking() || Legal->blockNeedsPredication(BB) ||
+           AddArtificialVFDivisor;
   }
 
   /// Returns true if VP intrinsics with explicit vector length support should
@@ -6820,7 +6829,7 @@ void LoopVectorizationPlanner::plan(ElementCount UserVF, unsigned UserIC) {
       CM.invalidateCostModelingDecisions();
   }
 
-  if (CM.foldTailByMasking())
+  if (CM.foldTailByMasking() || AddArtificialVFDivisor)
     Legal->prepareToFoldTailByMasking();
 
   ElementCount MaxUserVF =
@@ -7324,14 +7333,15 @@ VectorizationFactor LoopVectorizationPlanner::computeBestVF() {
                         !cast<VPWidenMemoryRecipe>(&R)->isConsecutive();
                });
              });
-  assert(
-      (BestFactor.Width == LegacyVF.Width || BestPlan.hasEarlyExit() ||
-       !Legal->getLAI()->getSymbolicStrides().empty() || UsesEVLGatherScatter ||
-       planContainsAdditionalSimplifications(
-           getPlanFor(BestFactor.Width), CostCtx, OrigLoop, BestFactor.Width) ||
-       planContainsAdditionalSimplifications(
-           getPlanFor(LegacyVF.Width), CostCtx, OrigLoop, LegacyVF.Width)) &&
-      " VPlan cost model and legacy cost model disagreed");
+  assert((BestFactor.Width == LegacyVF.Width || BestPlan.hasEarlyExit() ||
+          !Legal->getLAI()->getSymbolicStrides().empty() ||
+          UsesEVLGatherScatter || AddArtificialVFDivisor ||
+          planContainsAdditionalSimplifications(getPlanFor(BestFactor.Width),
+                                                CostCtx, OrigLoop,
+                                                BestFactor.Width) ||
+          planContainsAdditionalSimplifications(
+              getPlanFor(LegacyVF.Width), CostCtx, OrigLoop, LegacyVF.Width)) &&
+         " VPlan cost model and legacy cost model disagreed");
   assert((BestFactor.Width.isScalar() || BestFactor.ScalarCost > 0) &&
          "when vectorizing, the scalar cost must be computed.");
 #endif
@@ -7416,6 +7426,13 @@ DenseMap<const SCEV *, Value *> LoopVectorizationPlanner::executePlan(
          "Trying to execute plan with unsupported UF");
   if (BestVPlan.hasEarlyExit())
     ++LoopsEarlyExitVectorized;
+
+  if (AddArtificialVFDivisor &&
+      BestVF.getKnownMinValue() / AddArtificialVFDivisor < 1)
+    WithColor::warning() << "`-mllvm -vectorizer-div-vf-by=N` will not apply: "
+                            "step would be zero:"
+                         << OrigLoop->getStartLoc();
+
   // TODO: Move to VPlan transform stage once the transition to the VPlan-based
   // cost model is complete for better cost estimates.
   RUN_VPLAN_PASS(VPlanTransforms::unrollByUF, BestVPlan, BestUF);
@@ -8155,6 +8172,13 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
       if (auto P = VPlanTransforms::narrowInterleaveGroups(*Plan, TTI))
         VPlans.push_back(std::move(P));
 
+      if (AddArtificialVFDivisor && AddArtificialVFDivisor != 1) {
+        VPValue *TmpHeaderMask = vputils::findHeaderMask(*Plan);
+        if (TmpHeaderMask)
+          VPlanTransforms::tryToLowerEffectiveVectorUse(*Plan, TmpHeaderMask,
+                                                        AddArtificialVFDivisor);
+      }
+
       assert(verifyVPlanIsValid(*Plan) && "VPlan is invalid");
       VPlans.push_back(std::move(Plan));
     }
@@ -8184,7 +8208,7 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
                                   CM.foldTailByMasking());
 
   RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::createLoopRegions, *Plan);
-  if (CM.foldTailByMasking())
+  if (CM.foldTailByMasking() || AddArtificialVFDivisor)
     RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::foldTailByMasking, *Plan);
 
   // Don't use getDecisionAndClampRange here, because we don't know the UF
