@@ -563,8 +563,17 @@ private:
                             !alloc.type.IsPolymorphic() &&
                             !alloc.hasCoarraySpec() && !useAllocateRuntime &&
                             !box.isPointer() && !implicitManagedBacking;
+    const Fortran::lower::SomeExpr *expr =
+        Fortran::semantics::GetExpr(alloc.getAllocObj());
+    std::optional<Fortran::evaluate::DataRef> dataRef =
+        !expr ? std::nullopt : Fortran::evaluate::ExtractDataRef(expr);
+    bool isCoarrayAllocate = alloc.hasCoarraySpec();
+    bool isCoarrayComponentAllocate =
+        dataRef.has_value() &&
+        !Fortran::evaluate::IsCoarray(alloc.getSymbol()) &&
+        Fortran::evaluate::IsCoarray(dataRef->GetFirstSymbol());
 
-    if (inlineAllocation && !alloc.hasCoarraySpec() &&
+    if (inlineAllocation && !isCoarrayAllocate && !isCoarrayComponentAllocate &&
         ((isCudaAllocate && isCudaDeviceContext) || !isCudaAllocate)) {
       // Pointers must use PointerAllocate so that their deallocations
       // can be validated.
@@ -592,10 +601,14 @@ private:
     genSetDeferredLengthParameters(alloc, box);
     genAllocateObjectBounds(alloc, box);
     mlir::Value stat;
-    if (alloc.hasCoarraySpec()) {
+    if (isCoarrayAllocate) {
       stat = Fortran::lower::genAllocateCoarray(
           converter, loc, alloc.getSymbol(), box.getAddr(),
           alloc.getCoarraySpec(), errorManager.errMsgAddr,
+          errorManager.hasStatSpec());
+    } else if (isCoarrayComponentAllocate) {
+      stat = Fortran::lower::genAllocateCoarrayComponent(
+          converter, loc, box.getAddr(), errorManager.errMsgAddr,
           errorManager.hasStatSpec());
     } else if (!isCudaAllocate) {
       stat = genRuntimeAllocate(builder, loc, box, errorManager);
@@ -989,7 +1002,8 @@ genDeallocate(fir::FirOpBuilder &builder,
               const fir::MutableBoxValue &box, ErrorManager &errorManager,
               mlir::Value declaredTypeDesc = {},
               const Fortran::semantics::Symbol *symbol = nullptr,
-              const Fortran::semantics::Symbol *cudaSymbol = nullptr) {
+              const Fortran::semantics::Symbol *cudaSymbol = nullptr,
+              const Fortran::lower::SomeExpr *allocExpr = nullptr) {
   // A component inherits its parent's memory space at ALLOCATE, so the
   // deallocation must use the parent's attribute too.
   if (!cudaSymbol)
@@ -1010,10 +1024,16 @@ genDeallocate(fir::FirOpBuilder &builder,
       !box.isDerived() && !box.isPolymorphic() && !box.hasAssumedRank() &&
       !box.isUnlimitedPolymorphic() && !errorManager.hasStatSpec() &&
       !useAllocateRuntime && !box.isPointer() && !implicitManagedBacking;
+
+  std::optional<Fortran::evaluate::DataRef> dataRef =
+      !allocExpr ? std::nullopt : Fortran::evaluate::ExtractDataRef(allocExpr);
   bool isCoarraySymbol = symbol && Fortran::evaluate::IsCoarray(*symbol);
+  bool isCoarrayComponentSymbol =
+      dataRef.has_value() && !isCoarraySymbol &&
+      Fortran::evaluate::IsCoarray(dataRef->GetFirstSymbol());
 
   // Deallocate intrinsic types inline.
-  if (inlineDeallocation && !isCoarraySymbol &&
+  if (inlineDeallocation && !isCoarraySymbol && !isCoarrayComponentSymbol &&
       ((isCudaSymbol && isCudaDeviceContext) || !isCudaSymbol)) {
     // Pointers must use PointerDeallocate so that their deallocations
     // can be validated.
@@ -1026,13 +1046,18 @@ genDeallocate(fir::FirOpBuilder &builder,
   // with its descriptor before and after calls if needed.
   errorManager.genStatCheck(builder, loc);
   mlir::Value stat;
-  if (isCoarraySymbol) {
+  if (isCoarraySymbol || isCoarrayComponentSymbol) {
     stat = errorManager.hasStatSpec()
                ? builder.createTemporary(loc, builder.getI32Type())
                : fir::AbsentOp::create(
                      builder, loc, builder.getRefType(builder.getI32Type()));
-    mif::DeallocCoarrayOp::create(builder, loc, box.getAddr(), stat,
-                                  errorManager.errMsgAddr);
+    if (isCoarraySymbol)
+      mif::DeallocCoarrayOp::create(builder, loc, box.getAddr(), stat,
+                                    errorManager.errMsgAddr);
+    else
+      mif::DeallocOp::create(builder, loc, box.getAddr(), stat,
+                             errorManager.errMsgAddr);
+
     if (errorManager.hasStatSpec())
       stat = fir::LoadOp::create(builder, loc, stat);
   } else if (!isCudaSymbol)
@@ -1105,6 +1130,8 @@ void Fortran::lower::genDeallocateStmt(
   for (const Fortran::parser::AllocateObject &allocateObject :
        std::get<std::list<Fortran::parser::AllocateObject>>(stmt.t)) {
     const Fortran::semantics::Symbol &symbol = unwrapSymbol(allocateObject);
+    const Fortran::lower::SomeExpr *allocExpr =
+        Fortran::semantics::GetExpr(allocateObject);
     fir::MutableBoxValue box =
         genMutableBoxValue(converter, loc, allocateObject);
     mlir::Value declaredTypeDesc = {};
@@ -1131,7 +1158,7 @@ void Fortran::lower::genDeallocateStmt(
       cudaSymbol = getCUDAAttrParentSymbol(allocateObject);
     mlir::Value beginOpValue =
         genDeallocate(builder, converter, loc, box, errorManager,
-                      declaredTypeDesc, &symbol, cudaSymbol);
+                      declaredTypeDesc, &symbol, cudaSymbol, allocExpr);
     preDeallocationAction(converter, builder, beginOpValue, symbol);
   }
   builder.restoreInsertionPoint(insertPt);

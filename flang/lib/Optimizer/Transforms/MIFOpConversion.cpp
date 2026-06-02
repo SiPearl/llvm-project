@@ -1391,6 +1391,102 @@ private:
   mlir::DataLayout *dl;
   const fir::LLVMTypeConverter *typeConverter;
 };
+/// Convert mif.alloc operation to runtime call of 'prif_allocate'
+struct MIFAllocOpConversion : public mlir::OpRewritePattern<mif::AllocOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  MIFAllocOpConversion(mlir::MLIRContext *context, mlir::DataLayout *dl,
+                       const fir::LLVMTypeConverter *typeConverter)
+      : OpRewritePattern(context), dl{dl}, typeConverter{typeConverter} {}
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AllocOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto mod = op->template getParentOfType<mlir::ModuleOp>();
+    fir::FirOpBuilder builder(rewriter, mod);
+    mlir::Location loc = op.getLoc();
+
+    mlir::Type i64Ty = builder.getI64Type();
+    mlir::Type ptrTy = getBuiltinCptrType(builder, loc);
+    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
+
+    mlir::FunctionType ftype = mlir::FunctionType::get(
+        builder.getContext(),
+        /*inputs*/
+        {builder.getRefType(i64Ty), builder.getRefType(ptrTy),
+         getPRIFStatType(builder), errmsgTy, errmsgTy},
+        /*results*/ {});
+    mlir::func::FuncOp funcOp =
+        builder.createFunction(loc, getPRIFProcName("allocate"), ftype);
+
+    mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
+
+    mlir::Value sizeInBytes =
+        getSizeInBytes(builder, loc, mod, dl, typeConverter, op.getBox());
+    mlir::Value stat = genStatPRIF(builder, loc, op.getStat());
+    auto [errmsgArg, errmsgAllocArg] =
+        genErrmsgPRIF(builder, loc, op.getErrmsg());
+
+    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+        builder, loc, ftype, sizeInBytes, allocMem, stat, errmsgArg,
+        errmsgAllocArg);
+    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
+
+    // If STAT is present, then a check is added after the call to
+    // prif_allocate. If STAT has a value other than 0, then we must not
+    // set the new address.
+    mlir::Block *contBlock = nullptr;
+    if (op.getStat()) {
+      mlir::Value zero =
+          builder.createIntegerConstant(loc, builder.getI32Type(), 0);
+      mlir::Value statVal = fir::LoadOp::create(builder, loc, stat);
+      mlir::Value allocSuccess = mlir::arith::CmpIOp::create(
+          builder, loc, mlir::arith::CmpIPredicate::eq, statVal, zero);
+
+      mlir::Block *currentBlock = builder.getBlock();
+      mlir::Block *thenBlock =
+          rewriter.splitBlock(currentBlock, builder.getInsertionPoint());
+      contBlock = rewriter.splitBlock(thenBlock, thenBlock->begin());
+
+      builder.setInsertionPointToEnd(currentBlock);
+      mlir::cf::CondBranchOp::create(builder, loc, allocSuccess, thenBlock,
+                                     contBlock);
+      builder.setInsertionPointToStart(thenBlock);
+    }
+
+    // Set new base_addr for the descriptor
+    mlir::Value addrRef =
+        fir::factory::genCPtrOrCFunptrAddr(builder, loc, allocMem, ptrTy);
+    allocMem = fir::LoadOp::create(builder, loc, addrRef);
+    mlir::func::FuncOp sbaFunc =
+        fir::runtime::getRuntimeFunc<mkRTKey(AllocatableSetBaseAddr)>(loc,
+                                                                      builder);
+    llvm::SmallVector<mlir::Value> args2{fir::runtime::createArguments(
+        builder, loc, sbaFunc.getFunctionType(), op.getBox(), allocMem)};
+    fir::CallOp::create(builder, loc, sbaFunc, args2);
+    mlir::Type boxTy = op.getBox().getType();
+    if (mlir::isa<fir::RecordType>(fir::getFortranElementType(boxTy)) ||
+        fir::isPolymorphicType(boxTy)) {
+      fir::runtime::genDerivedTypeInitialize(builder, loc, op.getBox());
+      // Same as prif_allocate_coarray we additionally need to synchronize after
+      // initialization to prevent images from racing to observe uninitialized
+      // coarray data on other images.
+      genPrifSyncAllCall(builder, loc, op.getStat(), op.getErrmsg());
+    }
+
+    if (op.getStat()) {
+      mlir::cf::BranchOp::create(builder, loc, contBlock);
+      builder.setInsertionPointToStart(contBlock);
+    }
+
+    rewriter.replaceOp(op, callOp);
+    return mlir::success();
+  }
+
+private:
+  mlir::DataLayout *dl;
+  const fir::LLVMTypeConverter *typeConverter;
+};
 
 /// Convert mif.dealloca_coarray operation to runtime call of
 /// 'prif_deallocate_coarray'
@@ -1416,9 +1512,7 @@ struct MIFDeallocCoarrayOpConversion
         loc, getPRIFProcName("deallocate_coarray"), ftype);
 
     mlir::Value coarrayHandle = getCoarrayHandle(builder, loc, op.getCoarray());
-    mlir::Value stat = op.getStat();
-    if (!stat)
-      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
+    mlir::Value stat = genStatPRIF(builder, loc, op.getStat());
     auto [errmsgArg, errmsgAllocArg] =
         genErrmsgPRIF(builder, loc, op.getErrmsg());
     llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
@@ -1434,6 +1528,39 @@ struct MIFDeallocCoarrayOpConversion
                                               absent);
     }
 
+    rewriter.replaceOp(op, callOp);
+    return mlir::success();
+  }
+};
+
+/// Convert mif.dealloc operation to runtime call of 'prif_deallocate'
+struct MIFDeallocOpConversion : public mlir::OpRewritePattern<mif::DeallocOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::DeallocOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto mod = op->template getParentOfType<mlir::ModuleOp>();
+    fir::FirOpBuilder builder(rewriter, mod);
+    mlir::Location loc = op.getLoc();
+    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
+    mlir::Type refTy = fir::PointerType::get(builder.getNoneType());
+    mlir::FunctionType ftype = mlir::FunctionType::get(
+        builder.getContext(),
+        /*inputs*/
+        {refTy, getPRIFStatType(builder), errmsgTy, errmsgTy},
+        /*results*/ {});
+    mlir::func::FuncOp funcOp =
+        builder.createFunction(loc, getPRIFProcName("deallocate"), ftype);
+
+    mlir::Value stat = op.getStat();
+    if (!stat)
+      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
+    auto [errmsgArg, errmsgAllocArg] =
+        genErrmsgPRIF(builder, loc, op.getErrmsg());
+    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+        builder, loc, ftype, op.getAddr(), stat, errmsgArg, errmsgAllocArg);
+    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
     rewriter.replaceOp(op, callOp);
     return mlir::success();
   }
@@ -1823,18 +1950,19 @@ public:
 void mif::populateMIFOpConversionPatterns(
     const fir::LLVMTypeConverter &converter, mlir::DataLayout &dl,
     mlir::RewritePatternSet &patterns) {
-  patterns.insert<MIFAllocCoarrayOpConversion>(patterns.getContext(), &dl,
-                                               &converter);
-  patterns.insert<
-      MIFInitOpConversion, MIFThisImageOpConversion, MIFNumImagesOpConversion,
-      MIFSyncAllOpConversion, MIFSyncImagesOpConversion,
-      MIFSyncMemoryOpConversion, MIFSyncTeamOpConversion,
-      MIFCoBroadcastOpConversion, MIFCoMaxOpConversion, MIFCoMinOpConversion,
-      MIFCoSumOpConversion, MIFFormTeamOpConversion, MIFChangeTeamOpConversion,
-      MIFGetTeamOpConversion, MIFTeamNumberOpConversion,
-      MIFDeallocCoarrayOpConversion, MIFCoshapeOpConversion,
-      MIFLcoboundOpConversion, MIFUcoboundOpConversion,
-      MIFImageIndexOpConversion, MIFEventPostOpConversion,
-      MIFEventWaitOpConversion, MIFEventQueryOpConversion>(
+  patterns.insert<MIFAllocCoarrayOpConversion, MIFAllocOpConversion>(
+      patterns.getContext(), &dl, &converter);
+  patterns.insert<MIFInitOpConversion, MIFThisImageOpConversion,
+                  MIFNumImagesOpConversion, MIFSyncAllOpConversion,
+                  MIFSyncImagesOpConversion, MIFSyncMemoryOpConversion,
+                  MIFSyncTeamOpConversion, MIFCoBroadcastOpConversion,
+                  MIFCoMaxOpConversion, MIFCoMinOpConversion,
+                  MIFCoSumOpConversion, MIFFormTeamOpConversion,
+                  MIFChangeTeamOpConversion, MIFGetTeamOpConversion,
+                  MIFTeamNumberOpConversion, MIFDeallocCoarrayOpConversion,
+                  MIFCoshapeOpConversion, MIFLcoboundOpConversion,
+                  MIFUcoboundOpConversion, MIFImageIndexOpConversion,
+                  MIFEventPostOpConversion, MIFEventWaitOpConversion,
+                  MIFEventQueryOpConversion, MIFDeallocOpConversion>(
       patterns.getContext());
 }

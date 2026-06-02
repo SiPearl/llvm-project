@@ -508,6 +508,21 @@ void Fortran::lower::genAllocateNonAllocatableSaveCoarray(
                                      localAddrOp->getResult(0));
 }
 
+mlir::Value Fortran::lower::genAllocateCoarrayComponent(
+    Fortran::lower::AbstractConverter &converter, mlir::Location loc,
+    mlir::Value addr, mlir::Value errmsg, bool hasStat) {
+  converter.checkCoarrayEnabled();
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Value stat;
+  if (hasStat)
+    stat = builder.createTemporary(loc, builder.getI32Type());
+
+  mif::AllocOp::create(builder, loc, addr, stat, errmsg);
+  if (hasStat)
+    return fir::LoadOp::create(builder, loc, stat);
+  return stat;
+}
+
 //===----------------------------------------------------------------------===//
 // COARRAY expressions
 //===----------------------------------------------------------------------===//

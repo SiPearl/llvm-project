@@ -765,12 +765,8 @@ static void instantiateGlobal(Fortran::lower::AbstractConverter &converter,
   fir::GlobalOp global;
 
   if (Fortran::evaluate::IsCoarray(sym)) {
-    if (hasFinalization(sym) || hasAllocatableDirectComponent(sym) ||
-        hasPointerDirectComponent(sym))
-      TODO(
-          loc,
-          "coarray: coarray with a pointer/allocatable direct component and/or "
-          "requiring finalization.");
+    if (hasFinalization(sym))
+      TODO(loc, "coarray: coarray requiring finalization.");
     const auto *details =
         sym.detailsIf<Fortran::semantics::ObjectEntityDetails>();
     if (details && details->init())
