@@ -1142,6 +1142,60 @@ private:
   mlir::DataLayout *dl;
   const fir::LLVMTypeConverter *typeConverter;
 };
+/// Convert mif.alloc operation to runtime call of 'prif_allocate'
+struct MIFAllocOpConversion : public mlir::OpRewritePattern<mif::AllocOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  MIFAllocOpConversion(mlir::MLIRContext *context, mlir::DataLayout *dl,
+                       const fir::LLVMTypeConverter *typeConverter)
+      : OpRewritePattern(context), dl{dl}, typeConverter{typeConverter} {}
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AllocOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto mod = op->template getParentOfType<mlir::ModuleOp>();
+    fir::FirOpBuilder builder(rewriter, mod);
+    mlir::Location loc = op.getLoc();
+
+    mlir::Type i64Ty = builder.getI64Type();
+    mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
+
+    mlir::FunctionType ftype =
+        mlir::FunctionType::get(builder.getContext(),
+                                /*inputs*/
+                                {builder.getRefType(i64Ty), ptrTy,
+                                 getPRIFStatType(builder), errmsgTy, errmsgTy},
+                                /*results*/ {});
+    mlir::func::FuncOp funcOp =
+        builder.createFunction(loc, getPRIFProcName("allocate"), ftype);
+
+    mlir::Value allocMem = builder.createTemporary(loc, ptrTy);
+    mlir::Value addrCvt =
+        fir::ConvertOp::create(builder, loc, ptrTy, op.getBox());
+    fir::StoreOp::create(builder, loc, addrCvt, allocMem);
+
+    mlir::Value sizeInBytes =
+        getSizeInBytes(builder, loc, mod, dl, typeConverter, op.getBox());
+    mlir::Value stat = op.getStat();
+    if (!stat)
+      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
+    auto [errmsgArg, errmsgAllocArg] =
+        genErrmsgPRIF(builder, loc, op.getErrmsg());
+
+    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+        builder, loc, ftype, sizeInBytes, allocMem, stat, errmsgArg,
+        errmsgAllocArg);
+    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
+
+    rewriter.replaceOp(op, callOp);
+    return mlir::success();
+  }
+
+private:
+  mlir::DataLayout *dl;
+  const fir::LLVMTypeConverter *typeConverter;
+};
 
 /// Convert mif.dealloca_coarray operation to runtime call of
 /// 'prif_deallocate_coarray'
@@ -1228,6 +1282,40 @@ struct MIFCoshapeOpConversion : public mlir::OpRewritePattern<mif::CoshapeOp> {
     result = convertI64SeqToEleTy(builder, loc, result, i64Ty, eleTy, corank,
                                   op.getResult().getType());
     rewriter.replaceOp(op, result);
+    return mlir::success();
+  }
+};
+
+/// Convert mif.dealloc operation to runtime call of 'prif_deallocate'
+struct MIFDeallocOpConversion : public mlir::OpRewritePattern<mif::DeallocOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::DeallocOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto mod = op->template getParentOfType<mlir::ModuleOp>();
+    fir::FirOpBuilder builder(rewriter, mod);
+    mlir::Location loc = op.getLoc();
+
+    mlir::Type errmsgTy = getPRIFErrmsgType(builder);
+    mlir::Type refTy = fir::PointerType::get(builder.getNoneType());
+    mlir::FunctionType ftype = mlir::FunctionType::get(
+        builder.getContext(),
+        /*inputs*/
+        {refTy, getPRIFStatType(builder), errmsgTy, errmsgTy},
+        /*results*/ {});
+    mlir::func::FuncOp funcOp =
+        builder.createFunction(loc, getPRIFProcName("deallocate"), ftype);
+
+    mlir::Value stat = op.getStat();
+    if (!stat)
+      stat = fir::AbsentOp::create(builder, loc, getPRIFStatType(builder));
+    auto [errmsgArg, errmsgAllocArg] =
+        genErrmsgPRIF(builder, loc, op.getErrmsg());
+    llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+        builder, loc, ftype, op.getAddr(), stat, errmsgArg, errmsgAllocArg);
+    fir::CallOp callOp = fir::CallOp::create(builder, loc, funcOp, args);
+    rewriter.replaceOp(op, callOp);
     return mlir::success();
   }
 };
@@ -1421,8 +1509,8 @@ public:
 void mif::populateMIFOpConversionPatterns(
     const fir::LLVMTypeConverter &converter, mlir::DataLayout &dl,
     mlir::RewritePatternSet &patterns) {
-  patterns.insert<MIFAllocCoarrayOpConversion>(patterns.getContext(), &dl,
-                                               &converter);
+  patterns.insert<MIFAllocCoarrayOpConversion, MIFAllocOpConversion>(
+      patterns.getContext(), &dl, &converter);
   patterns.insert<MIFInitOpConversion, MIFThisImageOpConversion,
                   MIFNumImagesOpConversion, MIFSyncAllOpConversion,
                   MIFSyncImagesOpConversion, MIFSyncMemoryOpConversion,

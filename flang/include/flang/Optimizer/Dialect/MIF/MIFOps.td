@@ -575,6 +575,29 @@ def mif_AllocCoarrayOp
   }];
 }
 
+def mif_AllocOp
+    : mif_Op<"alloc", [AttrSizedOperandSegments,
+                       MemoryEffects<[MemAlloc<DefaultResource>]>]> {
+  let summary =
+      "Perform a non-collective allocation of remotely accessible storage";
+
+  let description = [{
+    A non-collective allocation of remotely accessible storage (must be done 
+    for an allocatable or pointer component of a coarray).
+  }];
+
+  let arguments = (ins Arg<fir_ReferenceType, "", [MemRead, MemWrite]>:$box,
+      Arg<Optional<AnyReferenceLike>, "", [MemWrite]>:$stat,
+      Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
+
+  let assemblyFormat = [{
+    $box 
+    (`stat` $stat^ )?
+    (`errmsg` $errmsg^ )? 
+    attr-dict `:` functional-type(operands, results)
+  }];
+}
+
 def mif_DeallocCoarrayOp
     : mif_Op<"dealloc_coarray", [AttrSizedOperandSegments,
                                  MemoryEffects<[MemFree<DefaultResource>]>]> {
@@ -588,6 +611,23 @@ def mif_DeallocCoarrayOp
 
   let assemblyFormat = [{
     $coarray (`stat` $stat^ )?  (`errmsg` $errmsg^ )?
+    attr-dict `:` functional-type(operands, results)
+  }];
+}
+
+def mif_DeallocOp
+    : mif_Op<"dealloc", [AttrSizedOperandSegments,
+                          MemoryEffects<[MemFree<DefaultResource>]>]> {
+  let summary = "Perform the deallocation of a memory allocated by `mif_AllocOp`";
+  let description = [{
+    This call releases memory allocated by `mif_AllocOp`.
+  }];
+  let arguments = (ins Arg<fir_ReferenceType, "", [MemFree]>:$addr,
+      Arg<Optional<AnyReferenceLike>, "", [MemWrite]>:$stat,
+      Arg<Optional<AnyRefOrBoxType>, "", [MemWrite]>:$errmsg);
+
+  let assemblyFormat = [{
+    $addr (`stat` $stat^ )?  (`errmsg` $errmsg^ )?
     attr-dict `:` functional-type(operands, results)
   }];
 }
