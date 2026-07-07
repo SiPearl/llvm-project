@@ -1390,6 +1390,10 @@ public:
     return getTailFoldingStyle() != TailFoldingStyle::None;
   }
 
+  bool usesArtificialVFDivisor() const {
+    return AddArtificialVFDivisor && !Legal->hasFindIVOrLastRecurrence();
+  }
+
   /// Returns true if the use of wide lane masks is requested and the loop is
   /// using tail-folding with a lane mask for control flow.
   bool useWideActiveLaneMask() const {
@@ -1413,7 +1417,7 @@ public:
   /// or because the block in the original loop was predicated.
   bool blockNeedsPredicationForAnyReason(BasicBlock *BB) const {
     return foldTailByMasking() || Legal->blockNeedsPredication(BB) ||
-           AddArtificialVFDivisor;
+           usesArtificialVFDivisor();
   }
 
   /// Returns true if VP intrinsics with explicit vector length support should
@@ -8175,7 +8179,7 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
       if (auto P = VPlanTransforms::narrowInterleaveGroups(*Plan, TTI))
         VPlans.push_back(std::move(P));
 
-      if (AddArtificialVFDivisor) {
+      if (CM.usesArtificialVFDivisor()) {
         VPValue *TmpHeaderMask = vputils::findHeaderMask(*Plan);
         if (TmpHeaderMask) {
           if (std::optional<StringRef> FailureReason =
@@ -8224,7 +8228,7 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
                                   CM.foldTailByMasking());
 
   RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::createLoopRegions, *Plan);
-  if (CM.foldTailByMasking() || AddArtificialVFDivisor)
+  if (CM.foldTailByMasking() || CM.usesArtificialVFDivisor())
     RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::foldTailByMasking, *Plan);
 
   // Don't use getDecisionAndClampRange here, because we don't know the UF

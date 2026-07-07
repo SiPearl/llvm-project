@@ -300,6 +300,13 @@ public:
   /// masking.
   bool canFoldTailByMasking() const;
 
+  /// Returns true if the loop has a find-first/find-last-index-style
+  /// reduction (RecurKind::FindIV or RecurKind::FindLast). These reductions
+  /// are not currently supported by artificial VF-division masking
+  /// (-mllvm -vectorizer-div-vf-by), since their backedge select is not
+  /// wrapped with the header mask by the generic masking machinery.
+  bool hasFindIVOrLastRecurrence() const;
+
   /// Mark all respective loads/stores for masking. Must only be called when
   /// tail-folding is possible.
   void prepareToFoldTailByMasking();

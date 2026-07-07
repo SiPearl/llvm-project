@@ -2107,6 +2107,15 @@ bool LoopVectorizationLegality::canFoldTailByMasking() const {
   return true;
 }
 
+bool LoopVectorizationLegality::hasFindIVOrLastRecurrence() const {
+  for (const auto &Reduction : getReductionVars()) {
+    RecurKind Kind = Reduction.second.getRecurrenceKind();
+    if (RecurrenceDescriptor::isFindRecurrenceKind(Kind))
+      return true;
+  }
+  return false;
+}
+
 void LoopVectorizationLegality::prepareToFoldTailByMasking() {
   // The list of pointers that we can safely read and write to remains empty.
   SmallPtrSet<Value *, 8> SafePointers;

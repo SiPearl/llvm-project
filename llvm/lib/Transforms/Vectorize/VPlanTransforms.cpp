@@ -6442,7 +6442,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
           new VPInstruction(VPInstruction::ExtractLastActive,
                             {FOR->getStartValue(), BackedgeVal, NewHeaderMask},
                             {}, {}, {}, "last.active");
-      ExtractLastActive->insertAfter(&FOR->getBackedgeRecipe());
+      ExtractLastActive->insertAfter(BackedgeVal->getDefiningRecipe());
       FOR->setBackedgeValue(ExtractLastActive);
 
       for (VPUser *U : BackedgeVal->users())

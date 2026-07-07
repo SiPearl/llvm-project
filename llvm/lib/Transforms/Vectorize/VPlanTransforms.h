@@ -482,6 +482,8 @@ struct VPlanTransforms {
   /// last active lane of the header mask.
   static void foldTailByMasking(VPlan &Plan);
 
+  static bool usesArtificialVFDivisor();
+
   /// Predicate and linearize the control-flow in the only loop region of
   /// \p Plan.
   static void introduceMasksAndLinearize(VPlan &Plan);
