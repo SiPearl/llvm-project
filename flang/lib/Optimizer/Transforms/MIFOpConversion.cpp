@@ -1407,6 +1407,103 @@ struct MIFImageIndexOpConversion
   }
 };
 
+template <class T>
+mlir::LogicalResult AtomicOpConversion(T op, mlir::PatternRewriter &rewriter,
+                                       const std::string &prefix) {
+  auto mod = op->template getParentOfType<mlir::ModuleOp>();
+  fir::FirOpBuilder builder(rewriter, mod);
+  mlir::Location loc = op.getLoc();
+  mlir::Type i64Ty = builder.getI64Type();
+  mlir::Type i32Ty = builder.getI32Type();
+  mlir::Type refTy = builder.getRefType(builder.getNoneType());
+  mlir::Type refI64Ty = builder.getRefType(i64Ty);
+
+  mlir::Value atom = op.getAtom();
+  bool atomIsCoarray = false;
+  if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(atom.getType()))
+    atomIsCoarray = boxTy.isCoarray();
+
+  if (!atomIsCoarray)
+    TODO(loc, "coarray: atomic operation on allocatable/pointer component.");
+
+  mlir::Value atomHandle = getCoarrayHandle(builder, loc, op.getAtom());
+  mlir::FunctionType ftype =
+      mlir::FunctionType::get(builder.getContext(),
+                              /*inputs*/
+                              {builder.getRefType(i32Ty), refTy, refI64Ty,
+                               refI64Ty, getPRIFStatType(builder)},
+                              /*results*/ {});
+  mlir::func::FuncOp funcOp =
+      builder.createFunction(loc, getPRIFProcName(prefix), ftype);
+
+  // TODO: Handle Offset
+  mlir::Value offset = builder.createTemporary(loc, i64Ty);
+  fir::StoreOp::create(
+      builder, loc, fir::factory::createZeroValue(builder, loc, i64Ty), offset);
+  mlir::Value value = builder.createTemporary(loc, i64Ty);
+  mlir::Value cstValue = builder.createConvert(loc, i64Ty, op.getValue());
+  fir::StoreOp::create(builder, loc, cstValue, value);
+  mlir::Value imageNum =
+      getInitialTeamIndex(builder, loc, atomHandle, op.getCosubscripts());
+  mlir::Value stat = genStatPRIF(builder, loc, op.getStat());
+  llvm::SmallVector<mlir::Value> args = fir::runtime::createArguments(
+      builder, loc, ftype, imageNum, atomHandle, offset, value, stat);
+  rewriter.replaceOpWithNewOp<fir::CallOp>(op, funcOp, args);
+  return mlir::success();
+}
+
+/// Convert mif.atomic(_fetch)_add operation to runtime call of
+/// 'prif_atomic(_fetch)_add'
+struct MIFAtomicAddOpConversion
+    : public mlir::OpRewritePattern<mif::AtomicAddOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AtomicAddOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    return AtomicOpConversion(op, rewriter, "atomic_add");
+  }
+};
+
+/// Convert mif.atomic(_fetch)_and operation to runtime call of
+/// 'prif_atomic(_fetch)_and'
+struct MIFAtomicAndOpConversion
+    : public mlir::OpRewritePattern<mif::AtomicAndOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AtomicAndOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    return AtomicOpConversion(op, rewriter, "atomic_and");
+  }
+};
+
+/// Convert mif.atomic(_fetch)_or operation to runtime call of
+/// 'prif_atomic(_fetch)_or'
+struct MIFAtomicOrOpConversion
+    : public mlir::OpRewritePattern<mif::AtomicOrOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AtomicOrOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    return AtomicOpConversion(op, rewriter, "atomic_or");
+  }
+};
+
+/// Convert mif.atomic(_fetch)_xor operation to runtime call of
+/// 'prif_atomic(_fetch)_xor'
+struct MIFAtomicXorOpConversion
+    : public mlir::OpRewritePattern<mif::AtomicXorOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(mif::AtomicXorOp op,
+                  mlir::PatternRewriter &rewriter) const override {
+    return AtomicOpConversion(op, rewriter, "atomic_xor");
+  }
+};
+
 static void genCoarrayHandle(fir::FirOpBuilder &builder, mlir::ModuleOp mod,
                              fir::DeclareOp op) {
   builder.setInsertionPointAfter(op);
@@ -1491,6 +1588,8 @@ void mif::populateMIFOpConversionPatterns(
                   MIFChangeTeamOpConversion, MIFGetTeamOpConversion,
                   MIFTeamNumberOpConversion, MIFDeallocCoarrayOpConversion,
                   MIFCoshapeOpConversion, MIFLcoboundOpConversion,
-                  MIFUcoboundOpConversion, MIFImageIndexOpConversion>(
+                  MIFUcoboundOpConversion, MIFImageIndexOpConversion,
+                  MIFAtomicAddOpConversion, MIFAtomicAndOpConversion,
+                  MIFAtomicOrOpConversion, MIFAtomicXorOpConversion>(
       patterns.getContext());
 }
