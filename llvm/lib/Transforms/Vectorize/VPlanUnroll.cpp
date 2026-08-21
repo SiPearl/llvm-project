@@ -79,8 +79,16 @@ public:
   void unrollBlock(VPBlockBase *VPB);
 
   VPValue *getValueForPart(VPValue *V, unsigned Part) {
-    if (Part == 0 ||
-        isa<VPIRValue, VPSymbolicValue, VPFirstOrderRecurrencePHIRecipe>(V))
+    if (Part == 0) {
+      if (auto *VPI = dyn_cast<VPInstruction>(V);
+          VPI &&
+          VPI->getOpcode() == VPInstruction::CanonicalIVIncrementForPart) {
+        // Part 0 means no increment at all: just the base IV.
+        return VPI->getOperand(0);
+      }
+      return V;
+    }
+    if (isa<VPIRValue, VPSymbolicValue, VPFirstOrderRecurrencePHIRecipe>(V))
       return V;
     assert((VPV2Parts.contains(V) && VPV2Parts[V].size() >= Part) &&
            "accessed value does not exist");

@@ -5107,6 +5107,14 @@ void VPlanTransforms::materializeVectorTripCount(VPlan &Plan,
         DebugLoc::getCompilerGenerated(), "n.rnd.up");
   }
 
+  if (!Plan.hasConstantStep()) {
+    VPValue *Margin =
+        Builder.createSub(&Plan.getVFxUF(), Step,
+                          DebugLoc::getCompilerGenerated(), "vf.div.margin");
+    TC = Builder.createSub(TC, Margin, DebugLoc::getCompilerGenerated(),
+                           "vf.div.safe.tc");
+  }
+
   // Now we need to generate the expression for the part of the loop that the
   // vectorized body will execute. This is equal to N - (N % Step) if scalar
   // iterations are not required for correctness, or N - Step, otherwise. Step
@@ -6378,7 +6386,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
 
   // Caculate the new step by which the vector loop CIV will increment.
   VPBasicBlock *Preheader = VectorLoop->getPreheaderVPBB();
-  VPBuilder Builder(Preheader, Preheader->end());
+  VPBuilder Builder(Preheader, Preheader->begin());
   VPValue *NewStep = Builder.createNaryOp(
       Instruction::UDiv,
       {&Plan.getVFxUF(),
