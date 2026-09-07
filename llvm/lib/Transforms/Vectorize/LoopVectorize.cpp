@@ -1391,7 +1391,8 @@ public:
   }
 
   bool usesArtificialVFDivisor() const {
-    return AddArtificialVFDivisor && !Legal->hasFindIVOrLastRecurrence();
+    return AddArtificialVFDivisor && !Legal->hasFindIVOrLastRecurrence() &&
+           !Legal->hasUncountableEarlyExit() && Legal->canFoldTailByMasking();
   }
 
   /// Returns true if the use of wide lane masks is requested and the loop is
@@ -4447,8 +4448,15 @@ bool LoopVectorizationCostModel::isEpilogueVectorizationProfitable(
 VectorizationFactor LoopVectorizationPlanner::selectEpilogueVectorizationFactor(
     const ElementCount MainLoopVF, unsigned IC) {
   VectorizationFactor Result = VectorizationFactor::Disabled();
+
   if (!EnableEpilogueVectorization) {
     LLVM_DEBUG(dbgs() << "LEV: Epilogue vectorization is disabled.\n");
+    return Result;
+  }
+
+  if (AddArtificialVFDivisor) {
+    LLVM_DEBUG(dbgs() << "LEV: Epilogue vectorization is disabled because "
+                         "-vectorizer-div-vf-by is set.\n");
     return Result;
   }
 
@@ -6833,7 +6841,7 @@ void LoopVectorizationPlanner::plan(ElementCount UserVF, unsigned UserIC) {
       CM.invalidateCostModelingDecisions();
   }
 
-  if (CM.foldTailByMasking() || AddArtificialVFDivisor)
+  if (CM.foldTailByMasking() || CM.usesArtificialVFDivisor())
     Legal->prepareToFoldTailByMasking();
 
   ElementCount MaxUserVF =
@@ -8182,7 +8190,7 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
 
       if (CM.usesArtificialVFDivisor()) {
         VPValue *TmpHeaderMask = vputils::findHeaderMask(*Plan);
-        if (TmpHeaderMask) {
+        if (TmpHeaderMask && Plan->getExitBlocks().size() == 1) {
           if (std::optional<StringRef> FailureReason =
                   VPlanTransforms::tryToLowerEffectiveVectorUse(
                       *Plan, TmpHeaderMask, AddArtificialVFDivisor, *Legal)) {
@@ -8229,7 +8237,8 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
                                   CM.foldTailByMasking());
 
   RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::createLoopRegions, *Plan);
-  if (CM.foldTailByMasking() || CM.usesArtificialVFDivisor())
+  if ((CM.foldTailByMasking() || CM.usesArtificialVFDivisor()) &&
+      Plan->getExitBlocks().size() == 1)
     RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::foldTailByMasking, *Plan);
 
   // Don't use getDecisionAndClampRange here, because we don't know the UF

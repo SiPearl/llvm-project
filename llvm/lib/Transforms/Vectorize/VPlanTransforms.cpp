@@ -6328,6 +6328,15 @@ static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
       if (isa<VPWidenPointerInductionRecipe>(&R) && !PointerInductionsAllowed)
         return false;
 
+      if (auto *WidenIV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&R)) {
+        if (WidenIV->getSplatVFValue()) {
+          LLVM_DEBUG(dbgs() << "LV: Cannot change step because of unrolled "
+                               "widened induction: ";
+                     WidenIV->dump());
+          return false;
+        }
+      }
+
       // Sometimes, out-of-loop reductions rely on the fact that they
       // were able to assume that all-but-the-last iteration always
       // has a all-one active lane mask. This assumption does not hold
@@ -6408,16 +6417,33 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
          IVInc->getOperand(1) == &Plan.getVFxUF());
   IVInc->setOperand(1, NewStep);
 
+  // Any OTHER widened induction recipe in the header -- created because the
+  // loop body needs the induction's *value*, not just an address derived
+  // from the canonical IV -- carries its own VF operand, independent of the
+  // canonical IV's increment patched above. canChangeStepInVPlan already
+  // verified (before any mutation started) that no such recipe is in the
+  // "unrolled" form, so it is safe to patch every one found here.
+  for (VPRecipeBase &R : VectorLoop->getEntryBasicBlock()->phis()) {
+    if (&R == VectorLoop->getCanonicalIV())
+      continue;
+    if (auto *WidenIV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&R)) {
+      assert(!WidenIV->getSplatVFValue() &&
+             "canChangeStepInVPlan should already have rejected this plan");
+      WidenIV->setOperand(2, NewStep);
+    }
+  }
+
   // Update the masking.
   VPValue *ALMMultiplier =
       Plan.getConstantInt(VectorLoop->getCanonicalIVType(), 1);
+  VPValue *ZeroIV = Plan.getConstantInt(VectorLoop->getCanonicalIVType(), 0);
   VPValue *NewHeaderMask = Builder.createNaryOp(
       VPInstruction::ActiveLaneMask,
       {Builder.createOverflowingOp(
            VPInstruction::CanonicalIVIncrementForPart,
-           {VectorLoop->getCanonicalIV()->getStartValue(), NewStep},
+           {VectorLoop->getCanonicalIV()->getStartValue(), ZeroIV},
            {false, false}, {}, "half.vf.start"),
-       Plan.getTripCount(), ALMMultiplier},
+       NewStep, ALMMultiplier},
       DebugLoc(), "half.vf.mask");
   TmpHeaderMask->replaceAllUsesWith(NewHeaderMask);
 
@@ -6434,8 +6460,14 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
 
       auto *Sum = FinalRed->getOperand(1);
       assert(Sum->getDefiningRecipe()->getParent()->getParent() == VectorLoop);
-      auto *Sel =
-          new VPInstruction(Instruction::Select, {NewHeaderMask, Sum, RedPhi});
+
+      Type *ElTy = TypeInfo.inferScalarType(Sum);
+      Value *IdentityC = getRecurrenceIdentity(
+          RedPhi->getRecurrenceKind(), ElTy, RedPhi->getFastMathFlags());
+      VPValue *Identity = Plan.getOrAddLiveIn(IdentityC);
+
+      auto *Sel = new VPInstruction(Instruction::Select,
+                                    {NewHeaderMask, Sum, Identity});
       Sel->insertAfter(Sum->getDefiningRecipe());
       Sum->replaceAllUsesWith(Sel);
       Sel->setOperand(1, Sum);
