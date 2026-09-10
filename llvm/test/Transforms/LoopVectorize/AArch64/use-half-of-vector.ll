@@ -69,7 +69,7 @@ define void @foo(i64 %n, ptr noalias %a, ptr %b, ptr %c) #0 {
 ; IC2-NEXT:    [[VF_DIV_SAFE_TC:%.*]] = sub i64 [[N]], [[VF_DIV_MARGIN]]
 ; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[VF_DIV_SAFE_TC]], [[HALF_VF_STEP]]
 ; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[VF_DIV_SAFE_TC]], [[N_MOD_VF]]
-; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 0, i64 [[HALF_VF_STEP]])
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 0, i64 [[TMP0]])
 ; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC2:       [[VECTOR_BODY]]:
 ; IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
@@ -149,21 +149,22 @@ define float @reduction(i64 %n, ptr %a) #0 {
 ; IC1-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC1:       [[VECTOR_BODY]]:
 ; IC1-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
-; IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP6:%.*]], %[[VECTOR_BODY]] ]
+; IC1-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP7:%.*]], %[[VECTOR_BODY]] ]
 ; IC1-NEXT:    [[TMP4:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
 ; IC1-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP4]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
 ; IC1-NEXT:    [[TMP5:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD]], [[WIDE_MASKED_LOAD]]
-; IC1-NEXT:    [[TMP6]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP5]]
+; IC1-NEXT:    [[TMP6:%.*]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP5]]
+; IC1-NEXT:    [[TMP7]] = select <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> [[TMP6]], <vscale x 4 x float> zeroinitializer
 ; IC1-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP3]]
 ; IC1-NEXT:    [[TMP8:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; IC1-NEXT:    br i1 [[TMP8]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP4:![0-9]+]]
 ; IC1:       [[MIDDLE_BLOCK]]:
-; IC1-NEXT:    [[TMP7:%.*]] = call fast float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> [[TMP6]])
+; IC1-NEXT:    [[TMP9:%.*]] = call fast float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> [[TMP7]])
 ; IC1-NEXT:    [[CMP_N:%.*]] = icmp eq i64 [[N]], [[N_VEC]]
 ; IC1-NEXT:    br i1 [[CMP_N]], label %[[EXIT:.*]], label %[[SCALAR_PH]]
 ; IC1:       [[SCALAR_PH]]:
 ; IC1-NEXT:    [[BC_RESUME_VAL:%.*]] = phi i64 [ [[N_VEC]], %[[MIDDLE_BLOCK]] ], [ 0, %[[ENTRY]] ]
-; IC1-NEXT:    [[BC_MERGE_RDX:%.*]] = phi float [ [[TMP7]], %[[MIDDLE_BLOCK]] ], [ 0.000000e+00, %[[ENTRY]] ]
+; IC1-NEXT:    [[BC_MERGE_RDX:%.*]] = phi float [ [[TMP9]], %[[MIDDLE_BLOCK]] ], [ 0.000000e+00, %[[ENTRY]] ]
 ; IC1-NEXT:    br label %[[LOOP:.*]]
 ; IC1:       [[LOOP]]:
 ; IC1-NEXT:    [[I:%.*]] = phi i64 [ [[I_NEXT:%.*]], %[[LOOP]] ], [ [[BC_RESUME_VAL]], %[[SCALAR_PH]] ]
@@ -176,7 +177,7 @@ define float @reduction(i64 %n, ptr %a) #0 {
 ; IC1-NEXT:    [[EXITCOND:%.*]] = icmp eq i64 [[I_NEXT]], [[N]]
 ; IC1-NEXT:    br i1 [[EXITCOND]], label %[[EXIT]], label %[[LOOP]], !llvm.loop [[LOOP5:![0-9]+]]
 ; IC1:       [[EXIT]]:
-; IC1-NEXT:    [[ADD_LCSSA:%.*]] = phi float [ [[ADD]], %[[LOOP]] ], [ [[TMP7]], %[[MIDDLE_BLOCK]] ]
+; IC1-NEXT:    [[ADD_LCSSA:%.*]] = phi float [ [[ADD]], %[[LOOP]] ], [ [[TMP9]], %[[MIDDLE_BLOCK]] ]
 ; IC1-NEXT:    ret float [[ADD_LCSSA]]
 ;
 ; IC2-LABEL: define float @reduction(
@@ -194,25 +195,27 @@ define float @reduction(i64 %n, ptr %a) #0 {
 ; IC2-NEXT:    [[VF_DIV_SAFE_TC:%.*]] = sub i64 [[N]], [[VF_DIV_MARGIN]]
 ; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[VF_DIV_SAFE_TC]], [[TMP3]]
 ; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[VF_DIV_SAFE_TC]], [[N_MOD_VF]]
-; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 0, i64 [[TMP3]])
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 4 x i1> @llvm.get.active.lane.mask.nxv4i1.i64(i64 0, i64 [[TMP0]])
 ; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC2:       [[VECTOR_BODY]]:
 ; IC2-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, %[[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], %[[VECTOR_BODY]] ]
-; IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP9:%.*]], %[[VECTOR_BODY]] ]
-; IC2-NEXT:    [[VEC_PHI2:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP10:%.*]], %[[VECTOR_BODY]] ]
+; IC2-NEXT:    [[VEC_PHI:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP15:%.*]], %[[VECTOR_BODY]] ]
+; IC2-NEXT:    [[VEC_PHI2:%.*]] = phi <vscale x 4 x float> [ zeroinitializer, %[[VECTOR_PH]] ], [ [[TMP12:%.*]], %[[VECTOR_BODY]] ]
 ; IC2-NEXT:    [[TMP5:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[INDEX]]
 ; IC2-NEXT:    [[TMP6:%.*]] = getelementptr inbounds float, ptr [[TMP5]], i64 [[TMP4]]
 ; IC2-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP5]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
 ; IC2-NEXT:    [[WIDE_MASKED_LOAD3:%.*]] = call <vscale x 4 x float> @llvm.masked.load.nxv4f32.p0(ptr align 4 [[TMP6]], <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> poison)
 ; IC2-NEXT:    [[TMP7:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD]], [[WIDE_MASKED_LOAD]]
 ; IC2-NEXT:    [[TMP8:%.*]] = fmul <vscale x 4 x float> [[WIDE_MASKED_LOAD3]], [[WIDE_MASKED_LOAD3]]
-; IC2-NEXT:    [[TMP9]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP7]]
-; IC2-NEXT:    [[TMP10]] = fadd fast <vscale x 4 x float> [[VEC_PHI2]], [[TMP8]]
+; IC2-NEXT:    [[TMP9:%.*]] = fadd fast <vscale x 4 x float> [[VEC_PHI]], [[TMP7]]
+; IC2-NEXT:    [[TMP10:%.*]] = fadd fast <vscale x 4 x float> [[VEC_PHI2]], [[TMP8]]
+; IC2-NEXT:    [[TMP15]] = select <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> [[TMP9]], <vscale x 4 x float> zeroinitializer
+; IC2-NEXT:    [[TMP12]] = select <vscale x 4 x i1> [[HALF_VF_MASK]], <vscale x 4 x float> [[TMP10]], <vscale x 4 x float> zeroinitializer
 ; IC2-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], [[TMP3]]
 ; IC2-NEXT:    [[TMP13:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; IC2-NEXT:    br i1 [[TMP13]], label %[[MIDDLE_BLOCK:.*]], label %[[VECTOR_BODY]], !llvm.loop [[LOOP4:![0-9]+]]
 ; IC2:       [[MIDDLE_BLOCK]]:
-; IC2-NEXT:    [[BIN_RDX:%.*]] = fadd fast <vscale x 4 x float> [[TMP10]], [[TMP9]]
+; IC2-NEXT:    [[BIN_RDX:%.*]] = fadd fast <vscale x 4 x float> [[TMP12]], [[TMP15]]
 ; IC2-NEXT:    [[TMP14:%.*]] = call fast float @llvm.vector.reduce.fadd.nxv4f32(float 0.000000e+00, <vscale x 4 x float> [[BIN_RDX]])
 ; IC2-NEXT:    [[CMP_N:%.*]] = icmp eq i64 [[N]], [[N_VEC]]
 ; IC2-NEXT:    br i1 [[CMP_N]], label %[[EXIT:.*]], label %[[SCALAR_PH]]
@@ -327,7 +330,10 @@ define void @recurrence(i64 %n, ptr noalias %a, ptr %b, ptr %c) #0 {
 ; IC2-NEXT:    [[VF_DIV_SAFE_TC:%.*]] = sub i64 [[N]], [[VF_DIV_MARGIN]]
 ; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[VF_DIV_SAFE_TC]], [[TMP3]]
 ; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[VF_DIV_SAFE_TC]], [[N_MOD_VF]]
-; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 0, i64 [[TMP3]])
+; IC2-NEXT:    [[TMP8:%.*]] = lshr i64 [[TMP4]], 2
+; IC2-NEXT:    [[TMP18:%.*]] = icmp eq i64 [[TMP8]], 0
+; IC2-NEXT:    [[TMP20:%.*]] = select i1 [[TMP18]], i64 1, i64 [[TMP8]]
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 0, i64 [[TMP20]])
 ; IC2-NEXT:    [[VECTOR_RECUR_INIT_SPLATINSERT:%.*]] = insertelement <vscale x 2 x i64> poison, i64 [[C_FIRST]], i64 0
 ; IC2-NEXT:    [[VECTOR_RECUR_INIT_SPLAT:%.*]] = shufflevector <vscale x 2 x i64> [[VECTOR_RECUR_INIT_SPLATINSERT]], <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer
 ; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
@@ -466,7 +472,10 @@ define void @induction(i64 %n, ptr noalias %a) #0 {
 ; IC2-NEXT:    [[VF_DIV_SAFE_TC:%.*]] = sub i64 [[N]], [[VF_DIV_MARGIN]]
 ; IC2-NEXT:    [[N_MOD_VF:%.*]] = urem i64 [[VF_DIV_SAFE_TC]], [[TMP5]]
 ; IC2-NEXT:    [[N_VEC:%.*]] = sub i64 [[VF_DIV_SAFE_TC]], [[N_MOD_VF]]
-; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 0, i64 [[TMP5]])
+; IC2-NEXT:    [[TMP10:%.*]] = lshr i64 [[TMP2]], 2
+; IC2-NEXT:    [[TMP11:%.*]] = icmp eq i64 [[TMP10]], 0
+; IC2-NEXT:    [[TMP12:%.*]] = select i1 [[TMP11]], i64 1, i64 [[TMP10]]
+; IC2-NEXT:    [[HALF_VF_MASK:%.*]] = call <vscale x 2 x i1> @llvm.get.active.lane.mask.nxv2i1.i64(i64 0, i64 [[TMP12]])
 ; IC2-NEXT:    [[TMP6:%.*]] = call <vscale x 2 x i64> @llvm.stepvector.nxv2i64()
 ; IC2-NEXT:    br label %[[VECTOR_BODY:.*]]
 ; IC2:       [[VECTOR_BODY]]:

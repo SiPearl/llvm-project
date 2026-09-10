@@ -6409,6 +6409,23 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
   NewStep = Builder.createSelect(
       Builder.createICmp(CmpInst::ICMP_EQ, NewStep, Zero), One, NewStep);
 
+  // The mask must select, out of EVERY VF-wide vector part, only its first
+  // VF/StepDivisor lanes -- independent of UF. NewStep above is the TOTAL
+  // per-outer-iteration advance (VF*UF/StepDivisor), used to drive the
+  // canonical IV; it must NOT be reused as the mask's limit, or the mask
+  // silently becomes a no-op whenever UF > 1 (since VF*UF/StepDivisor ==
+  // VF/StepDivisor only when UF == 1, which is why this went unnoticed
+  // until the cost-model picked an interleaved plan).
+  VPValue *PerPartStep = Builder.createNaryOp(
+      Instruction::UDiv,
+      {&Plan.getVF(),
+       Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, StepDivisor, false))},
+      VPIRFlags::getDefaultFlags(Instruction::UDiv), DebugLoc(),
+      "half.vf.step.per.part");
+  PerPartStep = Builder.createSelect(
+      Builder.createICmp(CmpInst::ICMP_EQ, PerPartStep, Zero), One,
+      PerPartStep);
+
   // Update the increment.
   auto *IVInc = dyn_cast<VPInstruction>(
       &VectorLoop->getCanonicalIV()->getBackedgeRecipe());
@@ -6443,7 +6460,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
            VPInstruction::CanonicalIVIncrementForPart,
            {VectorLoop->getCanonicalIV()->getStartValue(), ZeroIV},
            {false, false}, {}, "half.vf.start"),
-       NewStep, ALMMultiplier},
+       PerPartStep, ALMMultiplier},
       DebugLoc(), "half.vf.mask");
   TmpHeaderMask->replaceAllUsesWith(NewHeaderMask);
 
@@ -6454,23 +6471,37 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
     if (auto *FinalRed = dyn_cast<VPInstruction>(&R);
         FinalRed &&
         FinalRed->getOpcode() == VPInstruction::ComputeReductionResult) {
-      auto *RedPhi = dyn_cast<VPReductionPHIRecipe>(FinalRed->getOperand(0));
-      if (!RedPhi || RedPhi->isInLoop())
-        continue;
+      // ComputeReductionResult's operands are the reduced VALUES (one per
+      // unrolled part), NOT the VPReductionPHIRecipe itself. Find the
+      // matching reduction phi by looking for the one whose backedge value
+      // is this operand.
+      for (VPValue *Sum : FinalRed->operands()) {
+        auto *SumRecipe = Sum->getDefiningRecipe();
+        if (!SumRecipe || SumRecipe->getParent()->getParent() != VectorLoop)
+          continue;
 
-      auto *Sum = FinalRed->getOperand(1);
-      assert(Sum->getDefiningRecipe()->getParent()->getParent() == VectorLoop);
+        VPReductionPHIRecipe *RedPhi = nullptr;
+        for (VPRecipeBase &HdrR : VectorLoop->getEntryBasicBlock()->phis()) {
+          auto *Candidate = dyn_cast<VPReductionPHIRecipe>(&HdrR);
+          if (Candidate && Candidate->getBackedgeValue() == Sum) {
+            RedPhi = Candidate;
+            break;
+          }
+        }
+        if (!RedPhi || RedPhi->isInLoop())
+          continue;
 
-      Type *ElTy = TypeInfo.inferScalarType(Sum);
-      Value *IdentityC = getRecurrenceIdentity(
-          RedPhi->getRecurrenceKind(), ElTy, RedPhi->getFastMathFlags());
-      VPValue *Identity = Plan.getOrAddLiveIn(IdentityC);
+        Type *ElTy = TypeInfo.inferScalarType(Sum);
+        Value *IdentityC = getRecurrenceIdentity(
+            RedPhi->getRecurrenceKind(), ElTy, RedPhi->getFastMathFlags());
+        VPValue *Identity = Plan.getOrAddLiveIn(IdentityC);
 
-      auto *Sel = new VPInstruction(Instruction::Select,
-                                    {NewHeaderMask, Sum, Identity});
-      Sel->insertAfter(Sum->getDefiningRecipe());
-      Sum->replaceAllUsesWith(Sel);
-      Sel->setOperand(1, Sum);
+        auto *Sel = new VPInstruction(Instruction::Select,
+                                      {NewHeaderMask, Sum, Identity});
+        Sel->insertAfter(Sum->getDefiningRecipe());
+        Sum->replaceAllUsesWith(Sel);
+        Sel->setOperand(1, Sum);
+      }
     }
   }
 
@@ -6496,6 +6527,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
   // Housekeeping for later execution steps.
   TmpHeaderMask->getDefiningRecipe()->eraseFromParent();
   Plan.setVectorIVStep(NewStep);
+  Plan.setMaskPerPartStep(PerPartStep);
   assert(!Plan.hasConstantStep());
   return std::nullopt;
 }

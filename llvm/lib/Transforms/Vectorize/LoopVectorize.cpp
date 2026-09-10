@@ -4664,6 +4664,9 @@ void LoopVectorizationCostModel::collectElementTypesForWidening() {
 unsigned
 LoopVectorizationPlanner::selectInterleaveCount(VPlan &Plan, ElementCount VF,
                                                 InstructionCost LoopCost) {
+  if (AddArtificialVFDivisor)
+    return 1;
+
   // -- The interleave heuristics --
   // We interleave the loop in order to expose ILP and reduce the loop overhead.
   // There are many micro-architectural considerations that we can't predict

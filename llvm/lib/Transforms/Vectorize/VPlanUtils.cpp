@@ -69,7 +69,7 @@ bool vputils::isHeaderMask(const VPValue *V, const VPlan &Plan) {
   if (match(V, m_ActiveLaneMask(m_VPValue(A), m_VPValue(B), m_One())))
     return (B == Plan.getTripCount() ||
             (!Plan.hasConstantStep() &&
-             B == const_cast<VPlan &>(Plan).getVectorIVStep())) &&
+             B == const_cast<VPlan &>(Plan).getMaskPerPartStep())) &&
            (match(A, m_CanonicalScalarIVSteps) || IsWideCanonicalIV(A) ||
             match(A,
                   m_VPInstruction<VPInstruction::CanonicalIVIncrementForPart>(

@@ -4600,6 +4600,13 @@ class VPlan {
   /// Represents the loop-invariant VF * UF of the vector loop region.
   VPSymbolicValue VFxUF;
 
+  /// Represents the limit used by the VF-divisor's header mask to select
+  /// only the first (VF / StepDivisor) lanes of each VF-wide vector part.
+  /// Distinct from VectorIVStep, which drives the canonical IV and covers
+  /// VF*UF/StepDivisor (the TOTAL per-outer-iteration advance, not the
+  /// per-part one) -- the two coincide only when UF == 1.
+  VPValue *MaskPerPartStep = nullptr;
+
   /// Represents the loop-invariant step by which the loop IV is allowed
   /// to advance if the aliasing checks have been folded into the step.
   VPValue *VectorIVStep = nullptr;
@@ -4761,6 +4768,14 @@ public:
 
   /// Set's the step that the vector IV is allowed to increment by.
   void setVectorIVStep(VPValue *Step) { VectorIVStep = Step; }
+
+  /// Returns the per-part mask limit set by the VF-divisor transform, or
+  /// null if it was never set (i.e. the VF-divisor never applied to this
+  /// plan, or applied without needing a distinct per-part value).
+  VPValue *getMaskPerPartStep() { return MaskPerPartStep; }
+
+  /// Set the per-part mask limit. See MaskPerPartStep for details.
+  void setMaskPerPartStep(VPValue *Step) { MaskPerPartStep = Step; }
 
   // TODO: Use backedge value of CIV as check.
   bool hasConstantStep() const {
