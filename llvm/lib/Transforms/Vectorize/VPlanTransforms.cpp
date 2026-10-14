@@ -3802,7 +3802,8 @@ expandVPWidenIntOrFpInduction(VPWidenIntOrFpInductionRecipe *WidenIVR,
     Inc = SplatVF;
     Prev = WidenIVR->getLastUnrolledPartOperand();
   } else {
-    if (VPRecipeBase *R = VF->getDefiningRecipe())
+    if (VPRecipeBase *R = VF->getDefiningRecipe();
+        R && R->getParent() != Plan->getVectorPreheader())
       Builder.setInsertPoint(R->getParent(), std::next(R->getIterator()));
     // Multiply the vectorization factor by the step using integer or
     // floating-point arithmetic as appropriate.
@@ -6304,65 +6305,26 @@ void VPlanTransforms::createPartialReductions(VPlan &Plan,
       transformToPartialReduction(Chain, CostCtx.Types, Plan, Phi);
 }
 
-static bool canChangeStepInVPlan(VPlan &Plan, bool RecurrencesAllowed,
-                                 bool AllReductionsAllowed,
-                                 bool PointerInductionsAllowed,
-                                 VPActiveLaneMaskPHIRecipe *&ALM) {
-  // Look for recipes that block step-changing transformations, either by
-  // relying on a step of VFxUF or by relying on the fact that a normal
-  // active-lane mask can only be non-fully-one in the last iteration.
+/// Returns std::nullopt if the step of \p Plan can be changed, otherwise the
+/// reason why it cannot.
+static std::optional<StringRef> getStepChangeBlocker(VPlan &Plan) {
   auto Iter = vp_depth_first_deep(Plan.getEntry());
   for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(Iter))
     for (VPRecipeBase &R : *VPBB) {
-      // A similar opt. is possible for EVL based vectorization, and the
-      // legality checks are basically the same, but the transformation
-      // itself would need to be completely different.
-      if (!RecurrencesAllowed && isa<VPFirstOrderRecurrencePHIRecipe>(&R)) {
-        LLVM_DEBUG({
-          dbgs() << "LV: Cannot change step because of recipe: ";
-          R.dump();
-        });
-        return false;
-      }
-
-      if (isa<VPWidenPointerInductionRecipe>(&R) && !PointerInductionsAllowed)
-        return false;
-
-      if (auto *WidenIV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&R)) {
-        if (WidenIV->getSplatVFValue()) {
-          LLVM_DEBUG(dbgs() << "LV: Cannot change step because of unrolled "
-                               "widened induction: ";
-                     WidenIV->dump());
-          return false;
-        }
-      }
-
-      // Sometimes, out-of-loop reductions rely on the fact that they
-      // were able to assume that all-but-the-last iteration always
-      // has a all-one active lane mask. This assumption does not hold
-      // anymore.
+      if (auto *WidenIV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&R);
+          WidenIV && WidenIV->getSplatVFValue())
+        return "unsupported unrolled widened induction";
+      // Partial reductions accumulate into a VF/N-wide vector, the VF-wide
+      // header mask cannot be applied to the accumulator.
       if (auto *RedPhi = dyn_cast<VPReductionPHIRecipe>(&R);
-          RedPhi && !RedPhi->isInLoop()) {
-        if (AllReductionsAllowed)
-          continue;
-
-        auto *Sel = dyn_cast<VPInstruction>(&RedPhi->getBackedgeRecipe());
-        if (!Sel || Sel->getOpcode() != Instruction::Select ||
-            !isa_and_nonnull<VPActiveLaneMaskPHIRecipe>(
-                Sel->getOperand(0)->getDefiningRecipe()) ||
-            Sel->getOperand(2) != RedPhi->getVPSingleValue()) {
-          LLVM_DEBUG(dbgs() << "LV: Cannot change step because of out-of-loop "
-                               "reduction: ";
-                     RedPhi->getVPSingleValue()->dump());
-          return false;
-        }
-      }
-
+          RedPhi && RedPhi->getVFScaleFactor() != 1)
+        return "unsupported partial reduction";
+      // A regular active-lane-mask is assumed to be all-ones except in the
+      // last iteration, which no longer holds.
       if (isa<VPActiveLaneMaskPHIRecipe>(&R))
-        ALM = cast<VPActiveLaneMaskPHIRecipe>(&R);
+        return "unsupported active lane mask";
     }
-
-  return true;
+  return std::nullopt;
 }
 
 std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
@@ -6381,9 +6343,8 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
     return "Early exits";
   if (!Legal.canFoldTailByMasking())
     return "Tail cannot be folded";
-  VPActiveLaneMaskPHIRecipe *ALM = nullptr;
-  if (!canChangeStepInVPlan(Plan, true, true, true, ALM) || ALM)
-    return "Unsurpported recurrence kind";
+  if (std::optional<StringRef> Blocker = getStepChangeBlocker(Plan))
+    return *Blocker;
   if (Plan.hasScalarVFOnly())
     return std::nullopt; // "Scalar VPlan";
 
@@ -6393,38 +6354,37 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
                              m_Specific(&Plan.getVectorTripCount()))))
     return "Unexpected exit condition (early exits?)";
 
-  // Caculate the new step by which the vector loop CIV will increment.
   VPBasicBlock *Preheader = VectorLoop->getPreheaderVPBB();
   VPBuilder Builder(Preheader, Preheader->begin());
-  VPValue *NewStep = Builder.createNaryOp(
-      Instruction::UDiv,
-      {&Plan.getVFxUF(),
-       Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, StepDivisor, false))},
-      VPIRFlags::getDefaultFlags(Instruction::UDiv), DebugLoc(),
-      "half.vf.step");
-
-  // Ensure the step is always non-zero.
   VPValue *Zero = Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, 0)),
           *One = Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, 1));
-  NewStep = Builder.createSelect(
-      Builder.createICmp(CmpInst::ICMP_EQ, NewStep, Zero), One, NewStep);
 
-  // The mask must select, out of EVERY VF-wide vector part, only its first
-  // VF/StepDivisor lanes -- independent of UF. NewStep above is the TOTAL
-  // per-outer-iteration advance (VF*UF/StepDivisor), used to drive the
-  // canonical IV; it must NOT be reused as the mask's limit, or the mask
-  // silently becomes a no-op whenever UF > 1 (since VF*UF/StepDivisor ==
-  // VF/StepDivisor only when UF == 1, which is why this went unnoticed
-  // until the cost-model picked an interleaved plan).
+  // PerPartStep is the number of useful lanes in each VF-wide vector part,
+  // i.e. VF / StepDivisor, clamped to at least 1 so that the step can never
+  // be zero. It serves both as the limit of the header mask and as the
+  // distance between consecutive unrolled parts, so it must not depend on UF.
+  // The total advance of one vector-loop iteration (NewStep, below) is
+  // derived from it as UF * PerPartStep, which guarantees that the UF parts
+  // tile the iteration space with neither gaps nor overlaps.
   VPValue *PerPartStep = Builder.createNaryOp(
       Instruction::UDiv,
       {&Plan.getVF(),
        Plan.getOrAddLiveIn(ConstantInt::get(CIVTy, StepDivisor, false))},
       VPIRFlags::getDefaultFlags(Instruction::UDiv), DebugLoc(),
-      "half.vf.step.per.part");
+      "vf.div.part.step.raw");
   PerPartStep = Builder.createSelect(
-      Builder.createICmp(CmpInst::ICMP_EQ, PerPartStep, Zero), One,
-      PerPartStep);
+      Builder.createICmp(CmpInst::ICMP_EQ, PerPartStep, Zero), One, PerPartStep,
+      DebugLoc(), "vf.div.part.step");
+
+  // Calculate the new step by which the vector loop CIV will increment.
+  // Total advance of one outer iteration = UF * PerPartStep, so that the UF
+  // parts tile the iteration space with no gap and no overlap. UF is not
+  // known yet: VFxUF / VF == UF.
+  VPValue *UFVal = Builder.createNaryOp(
+      Instruction::UDiv, {&Plan.getVFxUF(), &Plan.getVF()},
+      VPIRFlags::getDefaultFlags(Instruction::UDiv), DebugLoc(), "vf.div.uf");
+  VPValue *NewStep = Builder.createOverflowingOp(
+      Instruction::Mul, {PerPartStep, UFVal}, {true, false}, {}, "vf.div.step");
 
   // Update the increment.
   auto *IVInc = dyn_cast<VPInstruction>(
@@ -6437,7 +6397,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
   // Any OTHER widened induction recipe in the header -- created because the
   // loop body needs the induction's *value*, not just an address derived
   // from the canonical IV -- carries its own VF operand, independent of the
-  // canonical IV's increment patched above. canChangeStepInVPlan already
+  // canonical IV's increment patched above. getStepChangeBlocker already
   // verified (before any mutation started) that no such recipe is in the
   // "unrolled" form, so it is safe to patch every one found here.
   for (VPRecipeBase &R : VectorLoop->getEntryBasicBlock()->phis()) {
@@ -6445,9 +6405,10 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
       continue;
     if (auto *WidenIV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&R)) {
       assert(!WidenIV->getSplatVFValue() &&
-             "canChangeStepInVPlan should already have rejected this plan");
+             "getStepChangeBlocker should already have rejected this plan");
       WidenIV->setOperand(2, NewStep);
-    }
+    } else if (auto *PtrIV = dyn_cast<VPWidenPointerInductionRecipe>(&R))
+      PtrIV->setOperand(2, NewStep);
   }
 
   // Update the masking.
@@ -6459,9 +6420,9 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
       {Builder.createOverflowingOp(
            VPInstruction::CanonicalIVIncrementForPart,
            {VectorLoop->getCanonicalIV()->getStartValue(), ZeroIV},
-           {false, false}, {}, "half.vf.start"),
+           {false, false}, {}, "vf.div.start"),
        PerPartStep, ALMMultiplier},
-      DebugLoc(), "half.vf.mask");
+      DebugLoc(), "vf.div.mask");
   TmpHeaderMask->replaceAllUsesWith(NewHeaderMask);
 
   // Fix out-of loop reductions: They need to use a select to keep
@@ -6470,7 +6431,8 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
        *VectorLoop->getSingleSuccessor()->getEntryBasicBlock()) {
     if (auto *FinalRed = dyn_cast<VPInstruction>(&R);
         FinalRed &&
-        FinalRed->getOpcode() == VPInstruction::ComputeReductionResult) {
+        (FinalRed->getOpcode() == VPInstruction::ComputeReductionResult ||
+        FinalRed->getOpcode() == VPInstruction::ComputeAnyOfResult)) {
       // ComputeReductionResult's operands are the reduced VALUES (one per
       // unrolled part), NOT the VPReductionPHIRecipe itself. Find the
       // matching reduction phi by looking for the one whose backedge value
@@ -6492,12 +6454,16 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
           continue;
 
         Type *ElTy = TypeInfo.inferScalarType(Sum);
-        Value *IdentityC = getRecurrenceIdentity(
-            RedPhi->getRecurrenceKind(), ElTy, RedPhi->getFastMathFlags());
+        Value *IdentityC =
+            RecurrenceDescriptor::isAnyOfRecurrenceKind(RedPhi->getRecurrenceKind())
+                ? ConstantInt::getFalse(ElTy)
+                : getRecurrenceIdentity(RedPhi->getRecurrenceKind(), ElTy,
+                                        RedPhi->getFastMathFlags());
         VPValue *Identity = Plan.getOrAddLiveIn(IdentityC);
 
         auto *Sel = new VPInstruction(Instruction::Select,
-                                      {NewHeaderMask, Sum, Identity});
+                                      {NewHeaderMask, Sum, Identity}, {}, {},
+                                      {}, "vf.div.red.identity");
         Sel->insertAfter(Sum->getDefiningRecipe());
         Sum->replaceAllUsesWith(Sel);
         Sel->setOperand(1, Sum);
@@ -6512,7 +6478,7 @@ std::optional<StringRef> VPlanTransforms::tryToLowerEffectiveVectorUse(
       auto *ExtractLastActive =
           new VPInstruction(VPInstruction::ExtractLastActive,
                             {FOR->getStartValue(), BackedgeVal, NewHeaderMask},
-                            {}, {}, {}, "last.active");
+                            {}, {}, {}, "vf.div.last.active");
       ExtractLastActive->insertAfter(BackedgeVal->getDefiningRecipe());
       FOR->setBackedgeValue(ExtractLastActive);
 

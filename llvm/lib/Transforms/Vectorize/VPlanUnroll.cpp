@@ -79,16 +79,7 @@ public:
   void unrollBlock(VPBlockBase *VPB);
 
   VPValue *getValueForPart(VPValue *V, unsigned Part) {
-    if (Part == 0) {
-      if (auto *VPI = dyn_cast<VPInstruction>(V);
-          VPI &&
-          VPI->getOpcode() == VPInstruction::CanonicalIVIncrementForPart) {
-        // Part 0 means no increment at all: just the base IV.
-        return VPI->getOperand(0);
-      }
-      return V;
-    }
-    if (isa<VPIRValue, VPSymbolicValue, VPFirstOrderRecurrencePHIRecipe>(V))
+    if (Part == 0 || isa<VPIRValue, VPSymbolicValue>(V))
       return V;
     assert((VPV2Parts.contains(V) && VPV2Parts[V].size() >= Part) &&
            "accessed value does not exist");
@@ -196,9 +187,12 @@ void UnrollState::unrollWidenInductionByUF(
   VPBuilder Builder(PH);
   Type *VectorStepTy =
       IVTy->isPointerTy() ? TypeInfo.inferScalarType(ScalarStep) : IVTy;
-  VPInstruction *VectorStep = Builder.createNaryOp(
-      VPInstruction::WideIVStep, {&Plan.getVF(), ScalarStep}, VectorStepTy,
-      Flags, IV->getDebugLoc());
+  VPValue *StepVF = &Plan.getVF();
+  if (!Plan.hasConstantStep())
+    StepVF = Plan.getMaskPerPartStep();
+  VPInstruction *VectorStep =
+      Builder.createNaryOp(VPInstruction::WideIVStep, {StepVF, ScalarStep},
+                           VectorStepTy, Flags, IV->getDebugLoc());
 
   ToSkip.insert(VectorStep);
 
@@ -352,6 +346,12 @@ void UnrollState::unrollRecipeByUF(VPRecipeBase &R) {
       Type *VFTy = TypeInfo.inferScalarType(&Plan.getVF());
       VPValue *VF = Builder.createScalarZExtOrTrunc(
           &Plan.getVF(), IndexTy, VFTy, DebugLoc::getUnknown());
+      if (!Plan.hasConstantStep()) {
+        VPValue *PerPart = Plan.getMaskPerPartStep();
+        VF = Builder.createScalarZExtOrTrunc(PerPart, IndexTy,
+                                             TypeInfo.inferScalarType(PerPart),
+                                             DebugLoc::getUnknown());
+      }
       // VFxUF does not wrap, so VF * Part also cannot wrap.
       VPValue *VFxPart = Builder.createOverflowingOp(
           Instruction::Mul, {VF, Plan.getConstantInt(IndexTy, Part)},

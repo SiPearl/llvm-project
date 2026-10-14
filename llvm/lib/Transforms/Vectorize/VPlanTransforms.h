@@ -19,9 +19,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
 
 namespace llvm {
 
@@ -38,6 +36,7 @@ class TargetTransformInfo;
 class VPBuilder;
 class VPRecipeBuilder;
 struct VFRange;
+class LoopVectorizationLegality;
 
 LLVM_ABI_FOR_TEST extern cl::opt<bool> VerifyEachVPlan;
 LLVM_ABI_FOR_TEST extern cl::opt<bool> EnableWideActiveLaneMask;
@@ -482,8 +481,6 @@ struct VPlanTransforms {
   /// last active lane of the header mask.
   static void foldTailByMasking(VPlan &Plan);
 
-  static bool usesArtificialVFDivisor();
-
   /// Predicate and linearize the control-flow in the only loop region of
   /// \p Plan.
   static void introduceMasksAndLinearize(VPlan &Plan);
@@ -513,11 +510,11 @@ struct VPlanTransforms {
   static void createPartialReductions(VPlan &Plan, VPCostContext &CostCtx,
                                       VFRange &Range);
 
-  /// Try to set the effective vector step to \p Step (which must be
-  /// lower than VF * IC at runtime) and mask of any inactive lanes.
-  /// This will cause wasted lanes and is only usefull for hardware
-  /// exploration etc.!
-  /// TODO: Do not mix with epilogue vect.! It will break!
+  /// Reduce the effective vector step: only VF / \p StepDivisor lanes (at
+  /// least one) of each VF-wide part stay active, the others are masked out.
+  /// \p StepDivisor must be a power of 2. Wastes lanes by design: only meant
+  /// for hardware exploration. Returns the reason if the plan is unsupported,
+  /// in which case it is left unchanged.
   static std::optional<StringRef>
   tryToLowerEffectiveVectorUse(VPlan &Plan, VPValue *TmpHeaderMask,
                                unsigned StepDivisor,

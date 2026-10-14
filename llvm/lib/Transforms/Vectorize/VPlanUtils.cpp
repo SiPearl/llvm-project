@@ -66,14 +66,14 @@ bool vputils::isHeaderMask(const VPValue *V, const VPlan &Plan) {
       m_ScalarIVSteps(m_Specific(Plan.getVectorLoopRegion()->getCanonicalIV()),
                       m_One(), m_Specific(&Plan.getVF()));
 
-  if (match(V, m_ActiveLaneMask(m_VPValue(A), m_VPValue(B), m_One())))
-    return (B == Plan.getTripCount() ||
-            (!Plan.hasConstantStep() &&
-             B == const_cast<VPlan &>(Plan).getMaskPerPartStep())) &&
-           (match(A, m_CanonicalScalarIVSteps) || IsWideCanonicalIV(A) ||
-            match(A,
-                  m_VPInstruction<VPInstruction::CanonicalIVIncrementForPart>(
-                      m_VPValue(), m_VPValue())));
+  if (match(V, m_ActiveLaneMask(m_VPValue(A), m_VPValue(B), m_One()))) {
+    if (B == Plan.getTripCount())
+      return match(A, m_CanonicalScalarIVSteps) || IsWideCanonicalIV(A);
+    // vf-divisor: the mask limit is the per-part step, not the trip count.
+    return !Plan.hasConstantStep() && B == Plan.getMaskPerPartStep() &&
+           match(A, m_VPInstruction<VPInstruction::CanonicalIVIncrementForPart>(
+                        m_VPValue(), m_VPValue()));
+  }
 
   // For scalar plans, the header mask uses the scalar steps.
   if (match(V, m_ICmp(m_CanonicalScalarIVSteps,

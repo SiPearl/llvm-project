@@ -2717,11 +2717,18 @@ void VPVectorEndPointerRecipe::materializeOffset(unsigned Part) {
       Builder.createOverflowingOp(Instruction::Mul, {VFMinusOne, Stride});
 
   // Offset for PartN = Offset0 + Part * Stride * VF.
+  VPValue *PartVF = VF;
+  if (Part && !Plan.hasConstantStep()) {
+    VPValue *PerPart = Plan.getMaskPerPartStep();
+    PartVF = Builder.createScalarZExtOrTrunc(PerPart, IndexTy,
+                                             TypeInfo.inferScalarType(PerPart),
+                                             DebugLoc::getUnknown());
+  }
   VPValue *PartxStride =
       Plan.getConstantInt(IndexTy, Part * getStride(), /*IsSigned=*/true);
   VPValue *Offset = Builder.createAdd(
       Offset0,
-      Builder.createOverflowingOp(Instruction::Mul, {PartxStride, VF}));
+      Builder.createOverflowingOp(Instruction::Mul, {PartxStride, PartVF}));
   addOperand(Offset);
 }
 
@@ -4565,7 +4572,7 @@ void VPFirstOrderRecurrencePHIRecipe::execute(VPTransformState &State) {
     auto *IdxTy = Builder.getInt32Ty();
     IRBuilder<>::InsertPointGuard Guard(Builder);
     Builder.SetInsertPoint(VectorPH->getTerminator());
-    if (State.Plan->getVectorIVStep() == &State.Plan->getVFxUF()) {
+    if (State.Plan->hasConstantStep()) {
       auto *One = ConstantInt::get(IdxTy, 1);
       auto *RuntimeVF = getRuntimeVF(Builder, IdxTy, State.VF);
       auto *LastIdx = Builder.CreateSub(RuntimeVF, One);

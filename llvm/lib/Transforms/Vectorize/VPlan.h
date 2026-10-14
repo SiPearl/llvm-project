@@ -4603,13 +4603,19 @@ class VPlan {
   /// Represents the limit used by the VF-divisor's header mask to select
   /// only the first (VF / StepDivisor) lanes of each VF-wide vector part.
   /// Distinct from VectorIVStep, which drives the canonical IV and covers
-  /// VF*UF/StepDivisor (the TOTAL per-outer-iteration advance, not the
+  /// UF/StepDivisor (the TOTAL per-outer-iteration advance, not the
   /// per-part one) -- the two coincide only when UF == 1.
   VPValue *MaskPerPartStep = nullptr;
 
-  /// Represents the loop-invariant step by which the loop IV is allowed
-  /// to advance if the aliasing checks have been folded into the step.
+  /// Step by which the canonical IV advances in each iteration of the vector
+  /// loop. Defaults to VFxUF; replaced by the VF-divisor transform.
   VPValue *VectorIVStep = nullptr;
+
+  /// True once a transform changed the vector loop step (vf-divisor).
+  bool StepChanged = false;
+
+  /// Store optional VFDivisor failure message
+  std::optional<std::string> VFDivisorFailure;
 
   /// Contains all the external definitions created for this VPlan, as a mapping
   /// from IR Values to VPIRValues.
@@ -4757,31 +4763,38 @@ public:
     return getScalarHeader()->getIRBasicBlock()->getContext();
   }
 
-  /// Returns the step by which the IV should incr. in every iteration
-  /// of the loop.
+  /// Returns the step by which the IV should increment in every
+  /// iteration of the loop.
   VPValue *getVectorIVStep() {
-    // TODO: Maybe just always use the CIV increments non-CIV operand?
-    // This avoids having to keep track of it seperately.
-    assert(!VectorIVStep || VectorIVStep->getDefiningRecipe());
     return VectorIVStep ? VectorIVStep : &getVFxUF();
   }
 
-  /// Set's the step that the vector IV is allowed to increment by.
-  void setVectorIVStep(VPValue *Step) { VectorIVStep = Step; }
+  /// Sets the step by which the vector loop IV advances.
+  void setVectorIVStep(VPValue *Step) {
+    VectorIVStep = Step;
+    StepChanged = Step != nullptr;
+  }
 
-  /// Returns the per-part mask limit set by the VF-divisor transform, or
-  /// null if it was never set (i.e. the VF-divisor never applied to this
-  /// plan, or applied without needing a distinct per-part value).
-  VPValue *getMaskPerPartStep() { return MaskPerPartStep; }
+  /// The step value may be folded away later; forget the pointer but keep
+  /// the fact that the step was changed.
+  void forgetVectorIVStepValue() { VectorIVStep = nullptr; }
+
+  /// Returns the number of active lanes per VF-wide part, set by the
+  /// VF-divisor transform, or null if the transform was not applied.
+  VPValue *getMaskPerPartStep() const { return MaskPerPartStep; }
 
   /// Set the per-part mask limit. See MaskPerPartStep for details.
   void setMaskPerPartStep(VPValue *Step) { MaskPerPartStep = Step; }
 
-  // TODO: Use backedge value of CIV as check.
-  bool hasConstantStep() const {
-    VPlan *Plan = const_cast<VPlan *>(this);
-    return Plan->getVectorIVStep() == &Plan->getVFxUF();
+  bool hasConstantStep() const { return !StepChanged; }
+
+  /// Return the optional VFDivisor failure message
+  std::optional<std::string> getVFDivisorFailure() const {
+    return VFDivisorFailure;
   }
+
+  /// Set the VFDivisor failure message
+  void setVFDivisorFailure(StringRef F) { VFDivisorFailure = F.str(); }
 
   void addVF(ElementCount VF) { VFs.insert(VF); }
 

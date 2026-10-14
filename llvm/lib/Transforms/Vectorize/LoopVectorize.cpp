@@ -135,7 +135,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/NativeFormatting.h"
 #include "llvm/Support/TypeSize.h"
-#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/InjectTLIMappings.h"
@@ -426,9 +425,16 @@ static cl::opt<bool> ConsiderRegPressure(
 
 static cl::opt<unsigned> AddArtificialVFDivisor(
     "vectorizer-div-vf-by", cl::init(0), cl::Hidden,
-    cl::desc("Purposefully degrade performance by dividing the VF by this "
-             "constant (vectors will still have a size of VF, but half (for a "
-             "divisor of 2) will be masked out)."));
+    cl::desc("Purposefully degrade performance by dividing the effective VF "
+             "by this constant: vectors keep a size of VF, but only "
+             "VF / divisor lanes (at least one) of each part are active. "
+             "Must be a power of 2; 0 disables the feature."),
+    cl::callback([](const unsigned &Divisor) {
+      if (Divisor != 0 && !isPowerOf2_32(Divisor))
+        reportFatalUsageError(
+            "-vectorizer-div-vf-by must be 0 or a power of 2, got " +
+            Twine(Divisor));
+    }));
 
 // Likelyhood of bypassing the vectorized loop because there are zero trips left
 // after prolog. See `emitIterationCountCheck`.
@@ -812,6 +818,17 @@ Value *createStepForVF(IRBuilderBase &B, Type *Ty, ElementCount VF,
 /// Return the runtime value for VF.
 Value *getRuntimeVF(IRBuilderBase &B, Type *Ty, ElementCount VF) {
   return B.CreateElementCount(Ty, VF);
+}
+
+/// Emits a user-visible warning (with the loop location) about
+/// -vectorizer-div-vf-by.
+static void reportVFDivisorWarning(OptimizationRemarkEmitter *ORE, Loop *L,
+                                   StringRef Msg) {
+  ORE->emit([&]() {
+    return DiagnosticInfoOptimizationFailure(DEBUG_TYPE, "VFDivisorWarning",
+                                             L->getStartLoc(), L->getHeader())
+           << "-vectorizer-div-vf-by" << Msg;
+  });
 }
 
 void reportVectorizationFailure(const StringRef DebugMsg,
@@ -1351,7 +1368,7 @@ public:
   void setTailFoldingStyle(bool IsScalableVF, unsigned UserIC) {
     assert(ChosenTailFoldingStyle == TailFoldingStyle::None &&
            "Tail folding must not be selected yet.");
-    if (!Legal->canFoldTailByMasking() || AddArtificialVFDivisor) {
+    if (!Legal->canFoldTailByMasking() || usesArtificialVFDivisor()) {
       ChosenTailFoldingStyle = TailFoldingStyle::None;
       return;
     }
@@ -1390,9 +1407,22 @@ public:
     return getTailFoldingStyle() != TailFoldingStyle::None;
   }
 
+  /// Returns the reason why the artificial VF divisor cannot be applied to
+  /// this loop, or std::nullopt if it can (or if the option is not set).
+  std::optional<StringRef> artificialVFDivisorBlocker() const {
+    if (!AddArtificialVFDivisor)
+      return std::nullopt;
+    if (Legal->hasFindIVOrLastRecurrence())
+      return "find-first/last-index reductions are not supported";
+    if (Legal->hasUncountableEarlyExit())
+      return "early exits are not supported";
+    if (!Legal->canFoldTailByMasking())
+      return "the loop tail cannot be folded by masking";
+    return std::nullopt;
+  }
+
   bool usesArtificialVFDivisor() const {
-    return AddArtificialVFDivisor && !Legal->hasFindIVOrLastRecurrence() &&
-           !Legal->hasUncountableEarlyExit() && Legal->canFoldTailByMasking();
+    return AddArtificialVFDivisor && !artificialVFDivisorBlocker();
   }
 
   /// Returns true if the use of wide lane masks is requested and the loop is
@@ -4448,13 +4478,12 @@ bool LoopVectorizationCostModel::isEpilogueVectorizationProfitable(
 VectorizationFactor LoopVectorizationPlanner::selectEpilogueVectorizationFactor(
     const ElementCount MainLoopVF, unsigned IC) {
   VectorizationFactor Result = VectorizationFactor::Disabled();
-
   if (!EnableEpilogueVectorization) {
     LLVM_DEBUG(dbgs() << "LEV: Epilogue vectorization is disabled.\n");
     return Result;
   }
 
-  if (AddArtificialVFDivisor) {
+  if (CM.usesArtificialVFDivisor()) {
     LLVM_DEBUG(dbgs() << "LEV: Epilogue vectorization is disabled because "
                          "-vectorizer-div-vf-by is set.\n");
     return Result;
@@ -4664,7 +4693,7 @@ void LoopVectorizationCostModel::collectElementTypesForWidening() {
 unsigned
 LoopVectorizationPlanner::selectInterleaveCount(VPlan &Plan, ElementCount VF,
                                                 InstructionCost LoopCost) {
-  if (AddArtificialVFDivisor)
+  if (CM.usesArtificialVFDivisor())
     return 1;
 
   // -- The interleave heuristics --
@@ -7350,7 +7379,7 @@ VectorizationFactor LoopVectorizationPlanner::computeBestVF() {
              });
   assert((BestFactor.Width == LegacyVF.Width || BestPlan.hasEarlyExit() ||
           !Legal->getLAI()->getSymbolicStrides().empty() ||
-          UsesEVLGatherScatter || AddArtificialVFDivisor ||
+          UsesEVLGatherScatter || CM.usesArtificialVFDivisor() ||
           planContainsAdditionalSimplifications(getPlanFor(BestFactor.Width),
                                                 CostCtx, OrigLoop,
                                                 BestFactor.Width) ||
@@ -7442,13 +7471,14 @@ DenseMap<const SCEV *, Value *> LoopVectorizationPlanner::executePlan(
   if (BestVPlan.hasEarlyExit())
     ++LoopsEarlyExitVectorized;
 
-  if (AddArtificialVFDivisor && !BestVPlan.hasConstantStep() &&
-      BestVF.getKnownMinValue() / AddArtificialVFDivisor < 1) {
-    WithColor::warning() << "`-mllvm -vectorizer-div-vf-by=N` will not apply: "
-                            "step would be zero. ";
-    if (OrigLoop->getStartLoc())
-      OrigLoop->getStartLoc()->print(errs());
-    errs() << "\n";
+  if (AddArtificialVFDivisor && BestVF.isVector() &&
+      BestVPlan.hasConstantStep()) {
+    std::string Reason = "unknown reason";
+    if (std::optional<std::string> Failure = BestVPlan.getVFDivisorFailure())
+      Reason = *Failure;
+    else if (std::optional<StringRef> Blocker = CM.artificialVFDivisorBlocker())
+      Reason = Blocker->str();
+    reportVFDivisorWarning(ORE, OrigLoop, " was not applied: " + Reason);
   }
 
   // TODO: Move to VPlan transform stage once the transition to the VPlan-based
@@ -7506,6 +7536,7 @@ DenseMap<const SCEV *, Value *> LoopVectorizationPlanner::executePlan(
       BestVPlan, VectorPH, CM.foldTailByMasking(),
       CM.requiresScalarEpilogue(BestVF.isVector()),
       BestVPlan.getVectorIVStep());
+  BestVPlan.forgetVectorIVStepValue();
   VPlanTransforms::materializeFactors(BestVPlan, VectorPH, BestVF);
   VPlanTransforms::cse(BestVPlan);
   VPlanTransforms::simplifyRecipes(BestVPlan);
@@ -8197,18 +8228,10 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
           if (std::optional<StringRef> FailureReason =
                   VPlanTransforms::tryToLowerEffectiveVectorUse(
                       *Plan, TmpHeaderMask, AddArtificialVFDivisor, *Legal)) {
-            WithColor::warning()
-                << "`-mllvm -vectorizer-div-vf-by=N` will not apply: "
-                   "VPlan/loop not supported: "
-                << FailureReason.value();
-            if (OrigLoop->getStartLoc()) {
-              errs() << " (";
-              OrigLoop->getStartLoc()->print(errs());
-              errs() << ")";
-            }
-            errs() << "\n";
+            Plan->setVFDivisorFailure(*FailureReason);
           }
-        }
+        } else
+          Plan->setVFDivisorFailure("no header mask or multiple exits");
       }
 
       assert(verifyVPlanIsValid(*Plan) && "VPlan is invalid");
@@ -8240,8 +8263,8 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
                                   CM.foldTailByMasking());
 
   RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::createLoopRegions, *Plan);
-  if ((CM.foldTailByMasking() || CM.usesArtificialVFDivisor()) &&
-      Plan->getExitBlocks().size() == 1)
+  if (CM.foldTailByMasking() ||
+      (CM.usesArtificialVFDivisor() && Plan->getExitBlocks().size() == 1))
     RUN_VPLAN_PASS_NO_VERIFY(VPlanTransforms::foldTailByMasking, *Plan);
 
   // Don't use getDecisionAndClampRange here, because we don't know the UF
@@ -8294,7 +8317,7 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
 
     // Masked reversed IGs are not supported. AddArtificialVFDivisor
     // will create a mask.
-    if (IG->isReverse() && AddArtificialVFDivisor)
+    if (IG->isReverse() && CM.usesArtificialVFDivisor())
       continue;
 
     InterleaveGroups.insert(IG);
@@ -9841,6 +9864,17 @@ bool LoopVectorizePass::processLoop(Loop *L) {
 
   // Override IC if user provided an interleave count.
   IC = UserIC > 0 ? UserIC : IC;
+
+  // The VF-divisor transform cannot interleave first-order recurrences:
+  // the splice would need the last active lane of the previous part.
+  if (IC > 1 && VF.Width.isVector() && CM.usesArtificialVFDivisor() &&
+      !LVL.getFixedOrderRecurrences().empty()) {
+    reportVFDivisorWarning(ORE, L,
+                           ": interleave count forced to 1, first-order "
+                           "recurrences are not supported with "
+                           "interleaving");
+    IC = 1;
+  }
 
   // Emit diagnostic messages, if any.
   const char *VAPassName = Hints.vectorizeAnalysisPassName();
